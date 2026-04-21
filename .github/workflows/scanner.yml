@@ -4,7 +4,10 @@ name: SMC Scanner — 24/7 Background Scanner
 on:
   # Run automatically every 15 minutes around the clock
   schedule:
-    - cron: '*/15 * * * *'
+    # Running at odd minutes (e.g., 2, 17, 32, 47) avoids the "thundering herd"
+    # problem on GitHub Actions where millions of jobs try to start at exactly :00 or :15,
+    # which causes GitHub to ignore or heavily delay the triggers.
+    - cron: '2,17,32,47 * * * *'
 
   # Allow manual trigger from GitHub Actions tab
   workflow_dispatch:
