@@ -1,4 +1,5 @@
 name: SMC Scanner — 24/7 Background Scanner
+# Last updated: 2026-04-21 18:55 IST — Nudging scheduler
 
 on:
   # Run automatically every 15 minutes around the clock
