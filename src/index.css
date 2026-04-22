@@ -132,6 +132,10 @@ body::before {
   background: var(--bg-primary);
 }
 
+.main-content {
+  display: contents;
+}
+
 /* ── Header TopNav ─────────────────────────────────────────────── */
 .header {
   grid-area: header;
@@ -306,7 +310,7 @@ body::before {
 }
 
 /* ── Chart ──────────────────────────────────────────────── */
-.chart-container {
+.chart-panel {
   grid-area: chart;
   position: relative;
   background: var(--bg-primary);
@@ -314,13 +318,15 @@ body::before {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  padding: 16px;
 }
 
-.chart-wrapper {
+.chart-container {
   flex: 1;
   position: relative;
   width: 100%;
   height: 100%;
+  margin-top: 16px;
 }
 
 .chart-watermark {
@@ -359,25 +365,7 @@ body::before {
   color: var(--text-accent);
 }
 
-.chart-container {
-  flex: 1;
-  min-height: 450px;
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  background: rgba(0, 0, 0, 0.3);
-  border: 1px solid var(--border-subtle);
-}
-
-/* ── Analysis Panel ─────────────────────────────────────── */
-.analysis-panel {
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  overflow-y: auto;
-  max-height: calc(100vh - 200px);
-}
-
+/* removed duplicate legacy layout rules */
 .analysis-panel-title {
   font-size: 0.9rem;
   font-weight: 600;

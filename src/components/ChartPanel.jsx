@@ -228,7 +228,7 @@ export default function ChartPanel({ candles, marketUpdate, timeframe, onTimefra
   }, [candles, emas, smcData, tradeSetup]);
 
   return (
-    <div className="chart-panel glass-card">
+    <div className="chart-panel">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div className="chart-tabs">
           {timeframes.map(tf => (
