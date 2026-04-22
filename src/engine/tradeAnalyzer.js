@@ -240,10 +240,18 @@ export function runAnalysis(data, btcData, config) {
     });
   }
 
-  // PILLAR 5: RRR ≥ 1:3
-  const pillar5 = tradeSetup?.valid && tradeSetup.rrr >= 3;
-  confluenceFactors.pillar5 = { name: 'RRR ≥ 1:3 from structure', met: pillar5, core: true };
+  // PILLAR 5: RRR check
+  const rrr = tradeSetup?.rrr || 0;
+  const pillar5 = tradeSetup?.valid && rrr >= 3;
+  const rrrCaution = tradeSetup?.valid && rrr >= 1.5 && rrr < 3; // CAUTION zone
+  confluenceFactors.pillar5 = {
+    name: rrrCaution ? `RRR 1:${rrr.toFixed(1)} (Caution — below 1:3)` : 'RRR ≥ 1:3 from structure',
+    met: pillar5,
+    caution: rrrCaution,
+    core: true
+  };
   if (pillar5) confluenceScore++;
+  if (rrrCaution) confluenceScore += 0.5; // partial credit
 
   steps.step15 = tradeSetup;
 
@@ -370,7 +378,9 @@ export function runAnalysis(data, btcData, config) {
   // STEP 14 — TRADE DECISION
   // ═══════════════════════════════════════════════
   let decision;
-  if (rejections.length > 0) {
+  const coresMet4 = [pillar1, pillar2, pillar3, pillar4].filter(Boolean).length;
+
+  if (rejections.length > 0 && !rrrCaution) {
     decision = {
       action: 'NO_TRADE',
       reason: rejections[0],
@@ -384,11 +394,19 @@ export function runAnalysis(data, btcData, config) {
       trigger: 'Watch for structural break on 15m after liquidity event',
       icon: '⏳',
     };
-  } else if (tradeSetup?.valid) {
+  } else if (tradeSetup?.valid && pillar5) {
     decision = {
       action: 'TAKE_TRADE',
       reason: 'All pillars met, confluence sufficient',
       icon: '✅',
+    };
+  } else if (rrrCaution && coresMet4 >= 4) {
+    // All pillars except full RRR — show as CAUTION
+    decision = {
+      action: 'CAUTION',
+      reason: `RRR is 1:${tradeSetup.rrr.toFixed(1)} — valid but below ideal 1:3. Trade with reduced size.`,
+      allReasons: rejections,
+      icon: '⚠️',
     };
   } else {
     decision = {
@@ -434,37 +452,104 @@ export function runAnalysis(data, btcData, config) {
 }
 
 /**
- * Summarize technical outlook based on analysis results
+ * Generate a rich, detailed market narrative — like an AI analyst would describe it.
  */
 function generateOutlook(steps, direction) {
-  const bias4H = steps.step2?.bias;
+  const bias4H    = steps.step2?.bias;
   const biasDaily = steps.step1?.bias;
-  const session = steps.step8;
-  const liquidityEvent = steps.step3?.hasLiquidityEvent;
-  const entryConfirmed = steps.step7?.confirmed;
+  const session   = steps.step8;
+  const hasLiq    = steps.step3?.hasLiquidityEvent;
+  const hasBOS    = steps.step7?.hasBOS;
+  const hasCHOCH  = steps.step7?.hasCHOCH;
+  const activeOBs = steps.step3?.activeOBs || [];
+  const fvgs      = steps.step3?.unfilledFVGs || [];
+  const sweeps    = steps.step3?.validatedSweeps || [];
+  const rsiBias   = steps.step5?.rsiContext;
+  const divergence = steps.step5?.divergence;
+  const upProb    = steps.step13?.upProb;
+  const downProb  = steps.step13?.downProb;
+  const tradeSetup = steps.step15;
+  const structure = steps.step5?.description || '';
 
-  let outlook = "";
+  let parts = [];
 
+  // ── 1. Higher Timeframe Bias ─────────────────────────────
   if (bias4H === 'neutral') {
-    outlook = "Market is currently in an accumulation phase with no clear 4H bias. Expect ranging behavior until a structural break occurs.";
+    parts.push('The 4H market structure is currently ranging with no clear directional bias. Price is consolidating between key levels, and the EMAs are flat — this is a low-probability environment for directional trades.');
   } else {
-    const mainDir = bias4H === 'bullish' ? "Bullish" : "Bearish";
-    const recovery = biasDaily === bias4H ? "aligned with" : "counter to";
-    
-    outlook = `Higher Timeframe bias is ${mainDir}, ${recovery} the daily trend. `;
+    const dir4H = bias4H === 'bullish' ? 'bullish' : 'bearish';
+    const align = biasDaily === bias4H ? 'in alignment with' : 'counter to';
+    parts.push(`The 4H timeframe is firmly ${dir4H}, ${align} the daily trend. ${bias4H === 'bullish' ? 'Price is trading above the EMA stack (20 > 50 > 200), indicating continuation pressure to the upside.' : 'Price is below the EMA stack (20 < 50 < 200), reflecting sustained selling pressure.'}`);
+  }
 
-    if (!liquidityEvent) {
-      outlook += `Waiting for a liquidity grab (sweep or FVG fill) into a ${bias4H === 'bullish' ? 'Demand' : 'Supply'} zone. `;
-    } else if (!entryConfirmed) {
-      outlook += `Liquidity event detected. Currently looking for a ${bias4H === 'bullish' ? 'BOS/CHOCH higher' : 'BOS/CHOCH lower'} on the 15m timeframe to confirm expansion. `;
-    } else {
-      outlook += `Internal structure has shifted. Expecting a follow-through expansion towards the ${bias4H === 'bullish' ? 'next liquidity pool' : 'downside liquidity'}. `;
+  // ── 2. Daily Context ─────────────────────────────────────
+  if (biasDaily === 'bullish') {
+    parts.push('On the daily chart, the macro trend is bullish — higher highs and higher lows are intact. Bulls are in control of the larger timeframe narrative.');
+  } else if (biasDaily === 'bearish') {
+    parts.push('The daily trend remains bearish. The macro structure favors downside continuation, with price rejected from key distribution zones.');
+  } else {
+    parts.push('The daily chart is showing mixed signals — price is consolidating inside a range. A breakout in either direction could define the next major move.');
+  }
+
+  // ── 3. Smart Money / Liquidity ───────────────────────────
+  if (sweeps.length > 0) {
+    parts.push(`Smart money has conducted ${sweeps.length} confirmed liquidity sweep(s), suggesting institutional activity. This is a key signal that a reversal or continuation move may be loading.`);
+  } else if (hasLiq) {
+    parts.push('A liquidity event is in progress — either a Fair Value Gap is being tested or price is approaching a key sweep level. This gives smart money a mechanism to position.');
+  } else {
+    parts.push(`No liquidity event has been detected yet. Price is likely still in a delivery phase. Wait for a sweep of ${bias4H === 'bullish' ? 'sell-side liquidity (recent lows)' : 'buy-side liquidity (recent highs)'} before looking for entries.`);
+  }
+
+  // ── 4. Order Block Context ───────────────────────────────
+  if (activeOBs.length > 0) {
+    const nearest = activeOBs[activeOBs.length - 1];
+    parts.push(`There ${activeOBs.length === 1 ? 'is' : 'are'} ${activeOBs.length} active Order Block(s) on the chart. The nearest is a ${nearest.type?.toUpperCase()} zone around $${nearest.entryBoundary?.toFixed(2)}. ${nearest.type === 'demand' ? 'This is a potential buy zone if structure confirms.' : 'This is a potential short entry if price retraces into it with confirmation.'}`);
+  }
+  if (fvgs.length > 0) {
+    parts.push(`${fvgs.length} unfilled Fair Value Gap(s) remain open, acting as price magnets. Expect price to gravitate towards these imbalances before committing to a directional move.`);
+  }
+
+  // ── 5. 15m Structure ─────────────────────────────────────
+  if (hasBOS) {
+    parts.push('The 15-minute chart has confirmed a Break of Structure (BOS), signalling that the internal trend is shifting and expansion in the direction of the higher timeframe bias is likely.');
+  } else if (hasCHOCH) {
+    parts.push('A 15-minute Change of Character (CHOCH) has been detected — this is an early signal that the short-term trend is reversing. Watch for a follow-through BOS to confirm the new direction.');
+  } else {
+    parts.push('No 15-minute BOS or CHOCH has formed yet. This is the missing piece for a trade entry. Monitor for a structural break after the liquidity event to signal the expansion phase.');
+  }
+
+  // ── 6. RSI & Divergence ──────────────────────────────────
+  if (divergence) {
+    parts.push(`⚡ RSI divergence detected: ${divergence.description}. This adds extra confluence for a ${divergence.type?.includes('bullish') ? 'long' : 'short'} trade.`);
+  } else if (rsiBias === 'bullish') {
+    parts.push('RSI is trending bullishly on the 1H, reinforcing upside momentum.');
+  } else if (rsiBias === 'bearish') {
+    parts.push('RSI is trending bearishly on the 1H, adding pressure to the downside.');
+  }
+
+  // ── 7. Session ───────────────────────────────────────────
+  if (session?.valid) {
+    parts.push(`We are currently in the ${session.name} session — this is a high-volatility, high-liquidity window where institutional players are most active. Trade setups that form now carry the highest weight.`);
+  } else {
+    parts.push(`The market is currently in the ${session?.name || 'off-hours'} session. Liquidity is lower and spreads may be wider. Setups that form now should be treated with caution until a major session opens.`);
+  }
+
+  // ── 8. Trade Levels (if set up) ─────────────────────────
+  if (tradeSetup?.valid) {
+    const dir = direction === 'long' ? 'LONG' : 'SHORT';
+    const rrr = tradeSetup.rrr?.toFixed(1);
+    const sl  = tradeSetup.stopLoss?.final?.toFixed(2);
+    const tp1 = tradeSetup.takeProfits?.[0]?.level?.toFixed(2);
+    if (sl && tp1) {
+      parts.push(`A ${dir} setup is available: Entry ~$${tradeSetup.entry?.toFixed(2)}, Stop Loss at $${sl}, first target at $${tp1}. This gives a Risk-to-Reward of 1:${rrr}.`);
     }
   }
 
-  if (session && !session.valid) {
-    outlook += `Note: Current time is outside optimal trading sessions; volatility may be low.`;
+  // ── 9. Probability Summary ───────────────────────────────
+  if (upProb != null && downProb != null) {
+    const dominant = upProb > downProb ? `${upProb}% bullish` : `${downProb}% bearish`;
+    parts.push(`Overall directional probability is weighted ${dominant} based on the multi-timeframe confluence model.`);
   }
 
-  return outlook;
+  return parts.join(' ');
 }

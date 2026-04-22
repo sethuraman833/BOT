@@ -20,12 +20,13 @@ function PillarStatus({ factors }) {
     <div className="pillars-grid stagger">
       {pillars.map(p => {
         const factor = factors[p.key];
+        const isCaution = factor?.caution;
         return (
           <div className="pillar-item" key={p.key}>
-            <div className={`pillar-icon ${factor?.met ? 'met' : 'unmet'}`}>
-              {factor?.met ? '✓' : '✗'}
+            <div className={`pillar-icon ${factor?.met ? 'met' : isCaution ? 'caution' : 'unmet'}`}>
+              {factor?.met ? '✓' : isCaution ? '⚠' : '✗'}
             </div>
-            <span className="pillar-label">{p.label}</span>
+            <span className="pillar-label">{factor?.name || p.label}</span>
           </div>
         );
       })}
@@ -154,6 +155,18 @@ export default function AnalysisPanel({ analysis, loading }) {
           maxScore={steps.step10.maxScore}
           rating={steps.step10.rating}
         />
+      )}
+
+      {/* CAUTION Banner */}
+      {analysis.decision?.action === 'CAUTION' && (
+        <div className="caution-banner fade-in">
+          <div className="caution-banner-icon">⚠️</div>
+          <div>
+            <div className="caution-banner-title">CAUTION — Reduced Confidence Trade</div>
+            <div className="caution-banner-text">{analysis.decision.reason}</div>
+            <div className="caution-banner-text" style={{ marginTop: '4px', opacity: 0.7 }}>Use 50% of your normal position size. Place a tighter stop.</div>
+          </div>
+        </div>
       )}
 
       {/* Direction Probability */}
