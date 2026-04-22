@@ -16,7 +16,7 @@ import ErrorBoundary from './components/ErrorBoundary.jsx';
 
 export default function App() {
   // ── State ────────────────────────────────────────────
-  const [activeAsset, setActiveAsset] = useState('ETHUSDT');
+  const [activeAsset, setActiveAsset] = useState('BTCUSDT');
   const [riskAmount, setRiskAmount] = useState(5);
   const [timeframe, setTimeframe] = useState('m15');
   const [connected, setConnected] = useState(false);

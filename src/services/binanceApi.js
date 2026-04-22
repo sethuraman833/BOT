@@ -35,20 +35,16 @@ export async function fetchKlines(symbol, interval, limit = 500) {
 
 /**
  * Fetch candles for all required timeframes at once.
- * Carefully bounded limits to guarantee structural visibility:
- * - Daily: 200 (~6 months)
- * - 4H: 200 (33 days) — CRITICAL for deep unmitigated OBs
- * - 1H: 150 (6 days)  — BOS/CHOCH sequence and OTE legs
- * - 15m: 100 (~1 day) — Sweep validation and displacement
- * - 5m: 80 (~6 hours)— Entry timing precision
+ * 500 candles is MANDATORY: The EMA200 requires 199 candles just to "warm up".
+ * If we fetch fewer than 500, the EMA200 won't render across the chart history.
  */
 export async function fetchAllTimeframes(symbol) {
   const [daily, h4, h1, m15, m5] = await Promise.all([
-    fetchKlines(symbol, '1d', 200),
-    fetchKlines(symbol, '4h', 200),
-    fetchKlines(symbol, '1h', 150),
-    fetchKlines(symbol, '15m', 100),
-    fetchKlines(symbol, '5m', 80),
+    fetchKlines(symbol, '1d', 500),
+    fetchKlines(symbol, '4h', 500),
+    fetchKlines(symbol, '1h', 500),
+    fetchKlines(symbol, '15m', 500),
+    fetchKlines(symbol, '5m', 500),
   ]);
   return { daily, h4, h1, m15, m5 };
 }

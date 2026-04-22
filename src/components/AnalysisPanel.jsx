@@ -13,7 +13,7 @@ function PillarStatus({ factors }) {
     { key: 'pillar2', label: 'Liquidity Event' },
     { key: 'pillar3', label: '15m BOS/CHOCH' },
     { key: 'pillar4', label: 'Session Active' },
-    { key: 'pillar5', label: 'RRR ≥ 1:3' },
+    { key: 'pillar5', label: 'RRR ≥ 1:1.5' },
   ];
 
   return (

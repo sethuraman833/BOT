@@ -45,11 +45,11 @@ async function fetchKlines(symbol, interval, limit = 500) {
 
 async function fetchAllTimeframes(symbol) {
   const [daily, h4, h1, m15, m5] = await Promise.all([
-    fetchKlines(symbol, '1d', 200),
-    fetchKlines(symbol, '4h', 200),
-    fetchKlines(symbol, '1h', 150),
-    fetchKlines(symbol, '15m', 100),
-    fetchKlines(symbol, '5m', 80),
+    fetchKlines(symbol, '1d', 500),
+    fetchKlines(symbol, '4h', 500),
+    fetchKlines(symbol, '1h', 500),
+    fetchKlines(symbol, '15m', 500),
+    fetchKlines(symbol, '5m', 500),
   ]);
   return { daily, h4, h1, m15, m5 };
 }
