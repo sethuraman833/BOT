@@ -34,6 +34,7 @@ export function runAnalysis(data, btcData, config) {
   // DAILY RISK RULES — check FIRST before any analysis
   // Two-Loss Stop, Hard Floor, Max Trades Per Session
   // ║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║
+  const currentPrice = data.m15[data.m15.length - 1].close;
   const dailyRules = checkDailyRules(sessionLosses, accountBalance, baselineBalance);
   steps.dailyRules = dailyRules;
   if (!dailyRules.canTrade) {
@@ -223,7 +224,6 @@ export function runAnalysis(data, btcData, config) {
 
   // Premium / Discount Framework
   // Buy ONLY from discount (below 50%), Sell ONLY from premium (above 50%)
-  const currentPrice = data.m15[data.m15.length - 1].close;
   const h4SwingH = swings15m.swingHighs.length > 0 ? Math.max(...steps.step3.activeOBs.map(o => o.upper).filter(Boolean)) : null;
   const h4SwingL = swings15m.swingLows.length  > 0 ? Math.min(...steps.step3.activeOBs.map(o => o.lower).filter(Boolean)) : null;
   const premiumDiscount = h4SwingH && h4SwingL
@@ -245,7 +245,6 @@ export function runAnalysis(data, btcData, config) {
   // STEP 15 — TRADE SETUP (Entry, SL, TP)
   // ═══════════════════════════════════════════════
   let tradeSetup = null;
-  const currentPrice = data.m15[data.m15.length - 1].close;
 
   if (direction) {
     // Find nearest active OB for entry
