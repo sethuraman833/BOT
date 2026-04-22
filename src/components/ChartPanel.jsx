@@ -207,9 +207,12 @@ export default function ChartPanel({ candles, marketUpdate, timeframe, onTimefra
     }
 
     // Trade level lines
+    // Clear previous Trade level lines unconditionally
+    markerSeriesRef.current.forEach(s => { try { chartRef.current.removeSeries(s); } catch (_) {} });
+    markerSeriesRef.current = [];
+
+    // Redraw if there's a valid new setup
     if (tradeSetup?.valid && chartRef.current) {
-      markerSeriesRef.current.forEach(s => { try { chartRef.current.removeSeries(s); } catch (_) {} });
-      markerSeriesRef.current = [];
       const addLevelLine = (price, color, title) => {
         if (!price || !candles.length) return;
         const line = chartRef.current.addSeries(LineSeries, {
