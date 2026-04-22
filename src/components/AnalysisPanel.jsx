@@ -314,7 +314,6 @@ export default function AnalysisPanel({ analysis, loading }) {
         </div>
       )}
       </div>
-      </div>
     </div>
   );
 }
