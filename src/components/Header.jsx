@@ -6,7 +6,16 @@
 import { useState, useEffect } from 'react';
 import { getSessionDisplay } from '../engine/sessionFilter.js';
 
-export default function Header({ activeAsset, onAssetChange, marketUpdate, connected, riskAmount, onRiskChange }) {
+export default function Header({ 
+  activeAsset, 
+  onAssetChange, 
+  marketUpdate, 
+  connected, 
+  riskAmount, 
+  onRiskChange,
+  onRunAnalysis,
+  loading,
+}) {
   const [session, setSession] = useState(getSessionDisplay());
 
   const livePrice = marketUpdate; // Bridge for easy refactor
@@ -40,15 +49,30 @@ export default function Header({ activeAsset, onAssetChange, marketUpdate, conne
       </div>
 
       <div className="header-center">
-        {assets.map(a => (
-          <button
-            key={a.key}
-            className={`asset-btn ${activeAsset === a.key ? 'active' : ''}`}
-            onClick={() => onAssetChange(a.key)}
-          >
-            {a.label}
-          </button>
-        ))}
+        <div className="asset-selector-group">
+          {assets.map(a => (
+            <button
+              key={a.key}
+              className={`asset-btn ${activeAsset === a.key ? 'active' : ''}`}
+              onClick={() => onAssetChange(a.key)}
+            >
+              {a.label}
+            </button>
+          ))}
+        </div>
+        
+        {/* Analyze Button in Header */}
+        <button
+          className={`header-analyze-btn ${loading ? 'loading' : ''}`}
+          onClick={onRunAnalysis}
+          disabled={loading}
+        >
+          {loading ? (
+            <><span className="spinner" /> Scanning...</>
+          ) : (
+            <>⚡ Run Analysis</>
+          )}
+        </button>
       </div>
 
       <div className="header-right">

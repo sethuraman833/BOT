@@ -284,6 +284,8 @@ export default function App() {
         connected={connected}
         riskAmount={riskAmount}
         onRiskChange={setRiskAmount}
+        onRunAnalysis={handleRunAnalysis}
+        loading={loading}
       />
 
       {/* Error Banner */}
@@ -307,6 +309,7 @@ export default function App() {
         </div>
       )}
 
+      {/* Main Grid Content */}
       <div className="main-content">
         {/* Chart — wrapped in ErrorBoundary to prevent chart crashes */}
         <ErrorBoundary>
@@ -328,23 +331,12 @@ export default function App() {
         />
       </div>
 
-      {/* Analyze Button */}
-      <button
-        className={`analyze-btn ${loading ? 'loading' : ''}`}
-        onClick={handleRunAnalysis}
-        disabled={loading || !currentData}
-      >
-        {loading ? (
-          <><span className="spinner" /> Analyzing {activeAsset}...</>
-        ) : (
-          <>⚡ Run 17-Step Analysis — {activeAsset}</>
-        )}
-      </button>
-
-      {/* Trade Card */}
-      <div className="trade-section">
-        <TradeCard analysis={analysis} />
-      </div>
+      {/* Trade Notification Layer */}
+      {analysis && (
+        <div className="trade-overlay-layer fade-in">
+          <TradeCard analysis={analysis} />
+        </div>
+      )}
     </div>
   );
 }

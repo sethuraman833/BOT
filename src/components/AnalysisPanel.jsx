@@ -110,13 +110,20 @@ function ProbabilityBar({ up, down, range }) {
 export default function AnalysisPanel({ analysis, loading }) {
   if (!analysis) {
     return (
-      <div className="analysis-panel glass-card">
-        <div className="analysis-panel-title">Analysis</div>
-        <div style={{ padding: '40px 20px', textAlign: 'center' }}>
-          <div style={{ fontSize: '2rem', marginBottom: '12px', opacity: 0.3 }}>📊</div>
-          <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-            Click <strong>Run Analysis</strong> to start<br />
-            the 17-step confluence scan
+      <div className="analysis-panel">
+        <div className="analysis-panel-header">
+          <div className="analysis-panel-title">HUD Analysis</div>
+        </div>
+        <div className="analysis-panel-scroll" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{
+            width: '64px', height: '64px', borderRadius: '50%',
+            background: 'var(--bg-glass-active)', border: '1px solid var(--border-medium)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: '1.5rem', marginBottom: '16px',
+            boxShadow: '0 0 32px rgba(0,200,255,0.05)'
+          }}>⚡</div>
+          <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', lineHeight: '1.5' }}>
+            System standby.<br/>Click <strong>Run Analysis</strong> to initialize<br/>the 17-step confluence engine.
           </div>
         </div>
       </div>
@@ -126,8 +133,11 @@ export default function AnalysisPanel({ analysis, loading }) {
   const { steps, confluenceScore, confluenceFactors, rejections, outlook } = analysis;
 
   return (
-    <div className="analysis-panel glass-card">
-      <div className="analysis-panel-title">Analysis Engine</div>
+    <div className="analysis-panel">
+      <div className="analysis-panel-header">
+        <div className="analysis-panel-title">Engine Matrix</div>
+      </div>
+      <div className="analysis-panel-scroll">
 
       {/* Real-time Outlook Summary */}
       {outlook && Array.isArray(outlook) && (
@@ -303,6 +313,8 @@ export default function AnalysisPanel({ analysis, loading }) {
           </ul>
         </div>
       )}
+      </div>
+      </div>
     </div>
   );
 }

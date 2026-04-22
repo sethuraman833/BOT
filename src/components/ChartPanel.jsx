@@ -149,6 +149,8 @@ export default function ChartPanel({ candles, marketUpdate, timeframe, onTimefra
       });
 
     seriesRef.current.setData(sanitizedData);
+    chartRef.current?.timeScale().fitContent();
+    chartRef.current?.priceScale('right').applyOptions({ autoScale: true });
 
     // Re-apply the live tick immediately after setData so
     // the chart doesn't freeze on the last historical price

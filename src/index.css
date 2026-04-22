@@ -7,18 +7,19 @@
 
 /* ── CSS Variables ──────────────────────────────────────── */
 :root {
-  /* Background */
-  --bg-primary: #08090d;
-  --bg-secondary: #0d0f14;
-  --bg-card: rgba(14, 17, 24, 0.75);
-  --bg-glass: rgba(255, 255, 255, 0.03);
-  --bg-glass-hover: rgba(255, 255, 255, 0.06);
-  --bg-glass-active: rgba(255, 255, 255, 0.08);
+  /* Backgrounds */
+  --bg-primary: #0b0e14;
+  --bg-secondary: #0b0e14;
+  --bg-card: #151822;
+  --bg-card-hover: #1c202a;
+  --bg-glass: #151822;
+  --bg-glass-hover: #1c202a;
+  --bg-glass-active: #212632;
 
   /* Borders */
-  --border-subtle: rgba(255, 255, 255, 0.06);
-  --border-medium: rgba(255, 255, 255, 0.10);
-  --border-accent: rgba(255, 255, 255, 0.15);
+  --border-subtle: #242936;
+  --border-medium: #2f3646;
+  --border-accent: #3a4256;
 
   /* Text */
   --text-primary: #e8eaed;
@@ -45,10 +46,6 @@
   --radius-md: 14px;
   --radius-lg: 20px;
   --radius-xl: 28px;
-
-  /* Fonts */
-  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
 
   /* Shadows */
   --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.4);
@@ -86,19 +83,6 @@ body {
 body::before { 
   display: none; 
 }
-body::before {
-  content: '';
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background:
-    radial-gradient(ellipse 60% 40% at 20% 10%, rgba(0, 200, 255, 0.04), transparent 60%),
-    radial-gradient(ellipse 50% 50% at 80% 90%, rgba(167, 139, 250, 0.04), transparent 60%);
-  pointer-events: none;
-  z-index: 0;
-}
 
 #root {
   position: relative;
@@ -134,25 +118,30 @@ body::before {
   background: rgba(255, 255, 255, 0.18);
 }
 
-/* ── App Layout ─────────────────────────────────────────── */
+/* ── Extreme Premium Grid App Layout ─────────────────────────── */
 .app {
-  display: flex;
-  flex-direction: column;
-  min-height: 100vh;
-  padding: 16px;
-  gap: 16px;
-  max-width: 1600px;
-  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 350px;
+  grid-template-rows: 72px 1fr;
+  grid-template-areas: 
+    "header header"
+    "chart analysis";
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  background: var(--bg-primary);
 }
 
-/* ── Header ─────────────────────────────────────────────── */
+/* ── Header TopNav ─────────────────────────────────────────────── */
 .header {
+  grid-area: header;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 24px;
-  gap: 16px;
-  flex-wrap: wrap;
+  padding: 0 24px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border-subtle);
+  z-index: 10;
 }
 
 .header-left {
@@ -316,20 +305,26 @@ body::before {
   box-shadow: 0 0 8px var(--red-glow);
 }
 
-/* ── Main Layout ────────────────────────────────────────── */
-.main-content {
-  display: grid;
-  grid-template-columns: 1fr 380px;
-  gap: 16px;
-  flex: 1;
-}
-
-/* ── Chart Panel ────────────────────────────────────────── */
-.chart-panel {
-  padding: 20px;
+/* ── Chart ──────────────────────────────────────────────── */
+.chart-container {
+  grid-area: chart;
+  position: relative;
+  background: var(--bg-primary);
+  border-right: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  overflow: hidden;
+}
+
+.chart-wrapper {
+  flex: 1;
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.chart-watermark {
+  display: none; /* Hide old watermark */
 }
 
 .chart-tabs {
@@ -874,6 +869,47 @@ body::before {
 .rejection-icon {
   flex-shrink: 0;
   margin-top: 1px;
+}
+
+/* ── Run Analysis Action (Header) ───────────────────────── */
+.header-analyze-btn {
+  margin-left: 12px;
+  background: linear-gradient(135deg, var(--cyan), var(--cyan-dim));
+  color: #000;
+  border: none;
+  border-radius: var(--radius-md);
+  padding: 8px 18px;
+  font-size: 0.85rem;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 0 16px rgba(0, 200, 255, 0.2);
+  transition: all 0.2s var(--ease);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.header-analyze-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 20px rgba(0, 200, 255, 0.4);
+}
+
+.header-analyze-btn.loading {
+  background: var(--bg-glass-active);
+  color: var(--text-secondary);
+  pointer-events: none;
+  box-shadow: none;
+}
+
+/* ── Trade Notification Overlay ─────────────────────────── */
+.trade-overlay-layer {
+  position: absolute;
+  bottom: 24px;
+  left: 24px;
+  z-index: 50;
+  width: 320px;
 }
 
 /* ── Analyze Button ─────────────────────────────────────── */
