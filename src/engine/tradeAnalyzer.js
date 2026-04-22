@@ -8,6 +8,7 @@ import { detectOrderBlocks, detectFVGs, detectLiquiditySweeps, detectStructureSh
 import { analyzeDailyBias, analyze4HBias, analyze1HStructure } from './marketStructure.js';
 import { getCurrentSession } from './sessionFilter.js';
 import { buildTradeSetup, refineEntryWithOTE, calculateRRR } from './riskManager.js';
+import { calcPDHL, calcAsianRange, calcWeeklyOpen, checkPremiumDiscount, detectInducement, checkDailyRules } from './smcLevels.js';
 
 /**
  * Run the full 17-step analysis pipeline.
@@ -17,11 +18,32 @@ import { buildTradeSetup, refineEntryWithOTE, calculateRRR } from './riskManager
  * @returns {Object} complete analysis result
  */
 export function runAnalysis(data, btcData, config) {
-  const { riskAmount = 5, symbol = 'ETHUSDT' } = config;
+  const {
+    riskAmount = 5,
+    symbol = 'ETHUSDT',
+    sessionLosses = 0,
+    accountBalance = null,
+    baselineBalance = null,
+  } = config;
   const steps = {};
   const rejections = [];
   let confluenceScore = 0;
   const confluenceFactors = {};
+
+  // ║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║
+  // DAILY RISK RULES — check FIRST before any analysis
+  // Two-Loss Stop, Hard Floor, Max Trades Per Session
+  // ║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║
+  const dailyRules = checkDailyRules(sessionLosses, accountBalance, baselineBalance);
+  steps.dailyRules = dailyRules;
+  if (!dailyRules.canTrade) {
+    rejections.push(dailyRules.twoLossRule.triggered
+      ? dailyRules.twoLossRule.description
+      : dailyRules.hardFloor.triggered
+        ? dailyRules.hardFloor.description
+        : dailyRules.maxTrades.description
+    );
+  }
 
   // ═══════════════════════════════════════════════
   // STEP 1 — DAILY BIAS CONTEXT
@@ -97,17 +119,43 @@ export function runAnalysis(data, btcData, config) {
       ...smcH4.orderBlocks.filter(ob => !ob.mitigated),
       ...smcH1.orderBlocks.filter(ob => !ob.mitigated),
       ...smc15m.orderBlocks.filter(ob => !ob.mitigated),
-    ],
+    ].sort((a, b) => Math.abs(currentPrice - a.entryBoundary) - Math.abs(currentPrice - b.entryBoundary)).slice(0, 5),
     unfilledFVGs: [
       ...smcH4.fvgs.filter(f => f.status === 'unfilled'),
       ...smcH1.fvgs.filter(f => f.status === 'unfilled'),
       ...smc15m.fvgs.filter(f => f.status === 'unfilled'),
-    ],
+    ].sort((a, b) => Math.abs(currentPrice - a.midpoint) - Math.abs(currentPrice - b.midpoint)).slice(0, 5),
     validatedSweeps: [
       ...smcH1.sweeps.filter(s => s.validated),
       ...smc15m.sweeps.filter(s => s.validated),
-    ],
+    ].sort((a, b) => b.time - a.time).slice(0, 3), // Most recent first
   };
+
+  // ║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║
+  // STEP 3b — INSTITUTIONAL REFERENCE LEVELS
+  // PDH/PDL, Asian Range, Weekly Open
+  // These are the primary London liquidity targets.
+  // ║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║
+  const pdhl        = calcPDHL(data.daily);
+  const asianRange  = calcAsianRange(data.h1);
+  const weeklyOpen  = calcWeeklyOpen(data.daily);
+
+  steps.refLevels = { pdhl, asianRange, weeklyOpen };
+
+  // Add TP targets from PDH/PDL and Asian Range to the TP pool later
+  const extraTpTargets = [];
+  if (pdhl) {
+    extraTpTargets.push({ level: pdhl.pdh, reason: 'PDH — Primary buy-side liquidity target', priority: 1 });
+    extraTpTargets.push({ level: pdhl.pdl, reason: 'PDL — Primary sell-side liquidity target', priority: 1 });
+  }
+  if (asianRange) {
+    extraTpTargets.push({ level: asianRange.high, reason: 'Asian Range High — London sweep target', priority: 2 });
+    extraTpTargets.push({ level: asianRange.low,  reason: 'Asian Range Low — London sweep target', priority: 2 });
+  }
+  if (weeklyOpen) {
+    extraTpTargets.push({ level: weeklyOpen.level, reason: 'Weekly Open — Institutional magnet', priority: 3 });
+  }
+
 
   // ═══════════════════════════════════════════════
   // STEP 4 — ORDER FLOW SIGNALS (if available from API)
@@ -125,20 +173,31 @@ export function runAnalysis(data, btcData, config) {
 
   // ═══════════════════════════════════════════════
   // STEP 7 — ENTRY TIMING 15m — PILLAR 3
+  // Includes Inducement Detection — the first BOS after a sweep is
+  // often a FAKE designed to trap breakout traders.
   // ═══════════════════════════════════════════════
   const structureShifts15m = detectStructureShifts(data.m15, swings15m.swingHighs, swings15m.swingLows);
 
-  const hasBOS = structureShifts15m.some(s => s.type === 'BOS');
-  const hasCHOCH = structureShifts15m.some(s => s.type === 'CHOCH');
-  const pillar3 = hasBOS || hasCHOCH;
-  confluenceFactors.pillar3 = { name: '15m BOS/CHOCH confirmed', met: pillar3, core: true };
+  // Tag each structure shift as real or likely induced
+  const shiftsWithInducement = detectInducement(data.m15, structureShifts15m);
+  const realShifts = shiftsWithInducement.filter(s => !s.likelyInducement);
+  const inducementWarnings = shiftsWithInducement.filter(s => s.likelyInducement);
+
+  // Pillar 3 ONLY counts real structure shifts (not inducement)
+  const hasBOS   = realShifts.some(s => s.type === 'BOS');
+  const hasCHOCH = realShifts.some(s => s.type === 'CHOCH');
+  const pillar3  = hasBOS || hasCHOCH;
+  confluenceFactors.pillar3 = { name: '15m BOS/CHOCH confirmed (real, not induced)', met: pillar3, core: true };
   if (pillar3) confluenceScore++;
 
   steps.step7 = {
-    structureShifts: structureShifts15m,
+    structureShifts: shiftsWithInducement,
+    realShifts,
+    inducementWarnings,
     hasBOS,
     hasCHOCH,
     confirmed: pillar3,
+    inducements: inducementWarnings.length,
   };
 
   // ═══════════════════════════════════════════════
@@ -152,15 +211,34 @@ export function runAnalysis(data, btcData, config) {
   steps.step8 = session;
 
   // ═══════════════════════════════════════════════
-  // DETERMINE TRADE DIRECTION
+  // DETERMINE TRADE DIRECTION + PREMIUM/DISCOUNT CHECK
   // ═══════════════════════════════════════════════
   let direction = null;
   if (bias4H === 'bullish') direction = 'long';
   else if (bias4H === 'bearish') direction = 'short';
   else {
-    // Check 1H for direction if 4H is neutral
     if (steps.step5.setupType?.includes('bullish')) direction = 'long';
     else if (steps.step5.setupType?.includes('bearish')) direction = 'short';
+  }
+
+  // Premium / Discount Framework
+  // Buy ONLY from discount (below 50%), Sell ONLY from premium (above 50%)
+  const currentPrice = data.m15[data.m15.length - 1].close;
+  const h4SwingH = swings15m.swingHighs.length > 0 ? Math.max(...steps.step3.activeOBs.map(o => o.upper).filter(Boolean)) : null;
+  const h4SwingL = swings15m.swingLows.length  > 0 ? Math.min(...steps.step3.activeOBs.map(o => o.lower).filter(Boolean)) : null;
+  const premiumDiscount = h4SwingH && h4SwingL
+    ? checkPremiumDiscount(currentPrice, h4SwingH, h4SwingL)
+    : null;
+  steps.premiumDiscount = premiumDiscount;
+
+  // Reject if direction is COUNTER to premium/discount zone logic
+  if (premiumDiscount) {
+    if (direction === 'long' && premiumDiscount.zone === 'premium') {
+      rejections.push(`Price is in PREMIUM zone (${premiumDiscount.pct}% of range) — cannot go long from premium. Wait for discount.`);
+    }
+    if (direction === 'short' && premiumDiscount.zone === 'discount') {
+      rejections.push(`Price is in DISCOUNT zone (${premiumDiscount.pct}% of range) — cannot go short from discount. Wait for premium.`);
+    }
   }
 
   // ═══════════════════════════════════════════════
@@ -439,7 +517,7 @@ export function runAnalysis(data, btcData, config) {
   return {
     steps,
     decision,
-    outlook, // NEW
+    outlook,
     tradeSetup: tradeSetup?.valid ? tradeSetup : null,
     confluenceScore,
     confluenceFactors,
@@ -447,109 +525,71 @@ export function runAnalysis(data, btcData, config) {
     direction,
     symbol,
     currentPrice,
+    // New SMC reference levels
+    refLevels: steps.refLevels,
+    premiumDiscount: steps.premiumDiscount,
+    dailyRules: steps.dailyRules,
+    inducementWarnings: steps.step7?.inducementWarnings || [],
     timestamp: new Date().toISOString(),
   };
 }
 
 /**
- * Generate a rich, detailed market narrative — like an AI analyst would describe it.
+ * Generate a structured bullet-point market narrative.
  */
 function generateOutlook(steps, direction) {
   const bias4H    = steps.step2?.bias;
   const biasDaily = steps.step1?.bias;
   const session   = steps.step8;
-  const hasLiq    = steps.step3?.hasLiquidityEvent;
-  const hasBOS    = steps.step7?.hasBOS;
-  const hasCHOCH  = steps.step7?.hasCHOCH;
   const activeOBs = steps.step3?.activeOBs || [];
   const fvgs      = steps.step3?.unfilledFVGs || [];
   const sweeps    = steps.step3?.validatedSweeps || [];
   const rsiBias   = steps.step5?.rsiContext;
-  const divergence = steps.step5?.divergence;
   const upProb    = steps.step13?.upProb;
   const downProb  = steps.step13?.downProb;
-  const tradeSetup = steps.step15;
-  const structure = steps.step5?.description || '';
 
-  let parts = [];
+  let bullets = [];
 
-  // ── 1. Higher Timeframe Bias ─────────────────────────────
+  // Macro
   if (bias4H === 'neutral') {
-    parts.push('The 4H market structure is currently ranging with no clear directional bias. Price is consolidating between key levels, and the EMAs are flat — this is a low-probability environment for directional trades.');
+    bullets.push('4H market structure is ranging (no clear bias). EMAs are flat.');
   } else {
-    const dir4H = bias4H === 'bullish' ? 'bullish' : 'bearish';
-    const align = biasDaily === bias4H ? 'in alignment with' : 'counter to';
-    parts.push(`The 4H timeframe is firmly ${dir4H}, ${align} the daily trend. ${bias4H === 'bullish' ? 'Price is trading above the EMA stack (20 > 50 > 200), indicating continuation pressure to the upside.' : 'Price is below the EMA stack (20 < 50 < 200), reflecting sustained selling pressure.'}`);
+    const align = biasDaily === bias4H ? 'aligned with' : 'counter to';
+    bullets.push(`4H timeframe is ${bias4H?.toUpperCase()}, ${align} the daily trend.`);
   }
 
-  // ── 2. Daily Context ─────────────────────────────────────
-  if (biasDaily === 'bullish') {
-    parts.push('On the daily chart, the macro trend is bullish — higher highs and higher lows are intact. Bulls are in control of the larger timeframe narrative.');
-  } else if (biasDaily === 'bearish') {
-    parts.push('The daily trend remains bearish. The macro structure favors downside continuation, with price rejected from key distribution zones.');
-  } else {
-    parts.push('The daily chart is showing mixed signals — price is consolidating inside a range. A breakout in either direction could define the next major move.');
-  }
-
-  // ── 3. Smart Money / Liquidity ───────────────────────────
+  // Liquidity
   if (sweeps.length > 0) {
-    parts.push(`Smart money has conducted ${sweeps.length} confirmed liquidity sweep(s), suggesting institutional activity. This is a key signal that a reversal or continuation move may be loading.`);
-  } else if (hasLiq) {
-    parts.push('A liquidity event is in progress — either a Fair Value Gap is being tested or price is approaching a key sweep level. This gives smart money a mechanism to position.');
+    bullets.push(`${sweeps.length} recent liquidity sweep(s) detected — smart money manipulation.`);
   } else {
-    parts.push(`No liquidity event has been detected yet. Price is likely still in a delivery phase. Wait for a sweep of ${bias4H === 'bullish' ? 'sell-side liquidity (recent lows)' : 'buy-side liquidity (recent highs)'} before looking for entries.`);
+    bullets.push('No recent liquidity sweeps. Approaching delivery phase.');
   }
 
-  // ── 4. Order Block Context ───────────────────────────────
+  // Structure targets
   if (activeOBs.length > 0) {
-    const nearest = activeOBs[activeOBs.length - 1];
-    parts.push(`There ${activeOBs.length === 1 ? 'is' : 'are'} ${activeOBs.length} active Order Block(s) on the chart. The nearest is a ${nearest.type?.toUpperCase()} zone around $${nearest.entryBoundary?.toFixed(2)}. ${nearest.type === 'demand' ? 'This is a potential buy zone if structure confirms.' : 'This is a potential short entry if price retraces into it with confirmation.'}`);
+    bullets.push(`Nearest active Order Block is a ${activeOBs[0].type?.toUpperCase()} zone at $${activeOBs[0].entryBoundary?.toFixed(2)}.`);
   }
   if (fvgs.length > 0) {
-    parts.push(`${fvgs.length} unfilled Fair Value Gap(s) remain open, acting as price magnets. Expect price to gravitate towards these imbalances before committing to a directional move.`);
+    bullets.push(`${fvgs.length} immediate unfilled FVGs acting as price magnets.`);
   }
 
-  // ── 5. 15m Structure ─────────────────────────────────────
-  if (hasBOS) {
-    parts.push('The 15-minute chart has confirmed a Break of Structure (BOS), signalling that the internal trend is shifting and expansion in the direction of the higher timeframe bias is likely.');
-  } else if (hasCHOCH) {
-    parts.push('A 15-minute Change of Character (CHOCH) has been detected — this is an early signal that the short-term trend is reversing. Watch for a follow-through BOS to confirm the new direction.');
-  } else {
-    parts.push('No 15-minute BOS or CHOCH has formed yet. This is the missing piece for a trade entry. Monitor for a structural break after the liquidity event to signal the expansion phase.');
+  // Momentum
+  if (rsiBias) {
+    bullets.push(`RSI momentum is trending ${rsiBias} on 1H.`);
   }
 
-  // ── 6. RSI & Divergence ──────────────────────────────────
-  if (divergence) {
-    parts.push(`⚡ RSI divergence detected: ${divergence.description}. This adds extra confluence for a ${divergence.type?.includes('bullish') ? 'long' : 'short'} trade.`);
-  } else if (rsiBias === 'bullish') {
-    parts.push('RSI is trending bullishly on the 1H, reinforcing upside momentum.');
-  } else if (rsiBias === 'bearish') {
-    parts.push('RSI is trending bearishly on the 1H, adding pressure to the downside.');
-  }
-
-  // ── 7. Session ───────────────────────────────────────────
+  // Session
   if (session?.valid) {
-    parts.push(`We are currently in the ${session.name} session — this is a high-volatility, high-liquidity window where institutional players are most active. Trade setups that form now carry the highest weight.`);
+    bullets.push(`Current session (${session.name}) carries high institutional volume.`);
   } else {
-    parts.push(`The market is currently in the ${session?.name || 'off-hours'} session. Liquidity is lower and spreads may be wider. Setups that form now should be treated with caution until a major session opens.`);
+    bullets.push(`Off-hours session (${session?.name || 'Asian'}) — low volume, higher risk.`);
   }
 
-  // ── 8. Trade Levels (if set up) ─────────────────────────
-  if (tradeSetup?.valid) {
-    const dir = direction === 'long' ? 'LONG' : 'SHORT';
-    const rrr = tradeSetup.rrr?.toFixed(1);
-    const sl  = tradeSetup.stopLoss?.final?.toFixed(2);
-    const tp1 = tradeSetup.takeProfits?.[0]?.level?.toFixed(2);
-    if (sl && tp1) {
-      parts.push(`A ${dir} setup is available: Entry ~$${tradeSetup.entry?.toFixed(2)}, Stop Loss at $${sl}, first target at $${tp1}. This gives a Risk-to-Reward of 1:${rrr}.`);
-    }
-  }
-
-  // ── 9. Probability Summary ───────────────────────────────
+  // Probability
   if (upProb != null && downProb != null) {
-    const dominant = upProb > downProb ? `${upProb}% bullish` : `${downProb}% bearish`;
-    parts.push(`Overall directional probability is weighted ${dominant} based on the multi-timeframe confluence model.`);
+    const dominant = upProb > downProb ? `${upProb}% BULLISH` : `${downProb}% BEARISH`;
+    bullets.push(`Overall model probability leans ${dominant}.`);
   }
 
-  return parts.join(' ');
+  return bullets;
 }

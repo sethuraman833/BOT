@@ -67,9 +67,7 @@ function ConflScore({ score, maxScore, rating }) {
   );
 }
 
-function AnalysisStep({ label, status, children, defaultOpen = false }) {
-  const [open, setOpen] = useState(defaultOpen);
-
+function AnalysisStep({ label, status, children }) {
   const statusMap = {
     pass: { label: 'PASS', className: 'pass' },
     fail: { label: 'FAIL', className: 'fail' },
@@ -80,17 +78,14 @@ function AnalysisStep({ label, status, children, defaultOpen = false }) {
   const s = statusMap[status] || statusMap.neutral;
 
   return (
-    <div className="analysis-step">
-      <div className="analysis-step-header" onClick={() => setOpen(!open)}>
-        <span className="analysis-step-label">{label}</span>
+    <div className="analysis-step-card fade-in">
+      <div className="analysis-step-card-header">
+        <span className="analysis-step-card-title">{label}</span>
         <span className={`analysis-step-status ${s.className}`}>{s.label}</span>
-        <span className={`analysis-step-chevron ${open ? 'open' : ''}`}>▾</span>
       </div>
-      {open && (
-        <div className="analysis-step-body fade-in">
-          {children}
-        </div>
-      )}
+      <div className="analysis-step-card-content">
+        {children}
+      </div>
     </div>
   );
 }
@@ -135,13 +130,17 @@ export default function AnalysisPanel({ analysis, loading }) {
       <div className="analysis-panel-title">Analysis Engine</div>
 
       {/* Real-time Outlook Summary */}
-      {outlook && (
+      {outlook && Array.isArray(outlook) && (
         <div className="outlook-card fade-in">
           <div className="outlook-header">
             <div className="radar-ping" />
             <span className="outlook-label">Technical Outlook</span>
           </div>
-          <div className="outlook-text">{outlook}</div>
+          <ul className="outlook-bullets">
+            {outlook.map((bullet, idx) => (
+              <li key={idx}>{bullet}</li>
+            ))}
+          </ul>
         </div>
       )}
 
@@ -184,11 +183,10 @@ export default function AnalysisPanel({ analysis, loading }) {
       )}
 
       {/* Analysis Steps */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '8px' }}>
+      <div className="analysis-cards-grid">
         <AnalysisStep
           label="Step 1 — Daily Bias"
           status={steps.step1?.bias !== 'neutral' ? 'pass' : 'neutral'}
-          defaultOpen
         >
           <div>{steps.step1?.description}</div>
           <div style={{ marginTop: '4px', color: 'var(--text-muted)' }}>

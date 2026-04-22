@@ -148,10 +148,22 @@ export function calculateSmartTP(direction, entry, swingPoints4H, swingPoints1H,
 }
 
 /**
- * Calculate position size based on risk.
+ * Calculate position size based on risk, accounting for spread + slippage buffer.
+ *
+ * SPREAD BUFFER: On BTC/XAU with tight SLs, a 2-3 point spread at entry
+ * materially distorts actual risk. We add 0.05% of entry as a safety margin.
+ *
+ * @param {number} entry       – planned entry price
+ * @param {number} stopLoss    – stop loss price
+ * @param {number} riskAmount  – $ risk per trade
+ * @param {string} symbol      – e.g. 'BTCUSDT'
  */
-export function calculatePositionSize(entry, stopLoss, riskAmount) {
-  const slDistance = Math.abs(entry - stopLoss);
+export function calculatePositionSize(entry, stopLoss, riskAmount, symbol = '') {
+  // Spread buffer: 0.05% for BTC/ETH, 0.08% for XAU (wider spread)
+  const spreadPct = symbol.includes('XAU') ? 0.0008 : 0.0005;
+  const spreadBuffer = entry * spreadPct;
+
+  const slDistance = Math.abs(entry - stopLoss) + spreadBuffer;
   if (slDistance === 0) return 0;
   return riskAmount / slDistance;
 }
@@ -165,6 +177,7 @@ export function calculateRRR(entry, stopLoss, takeProfit) {
   if (risk === 0) return 0;
   return reward / risk;
 }
+
 
 /**
  * Refine entry using OTE zone.
@@ -219,18 +232,19 @@ export function buildTradeSetup(params) {
 
   // RRR from TP1
   const rrr = calculateRRR(entry, sl.final, tps[0].level);
-  if (rrr < 3) {
-    return { valid: false, reason: `RRR ${rrr.toFixed(2)} below minimum 1:3`, rrr };
-  }
+  
+  // (We no longer exit early here so CAUTION setups and UI features get full data)
+  // If rrr < 3, the setup is returned, but the tradeAnalyzer will flag it as caution or reject it.
 
   // Position size
-  const positionSize = calculatePositionSize(entry, sl.final, riskAmount);
+  const positionSize = calculatePositionSize(entry, sl.final, riskAmount, symbol);
 
   // Min position size check
   const minSize = symbol.includes('BTC') ? 0.00001 : 0.001;
-  if (positionSize < minSize) {
-    return { valid: false, reason: 'Position size too small to be meaningful' };
-  }
+  const isTooSmall = positionSize < minSize;
+  
+  // We still consider the setup "valid" structurally so the UI can display it
+  // tradeAnalyzer will handle the final decision.
 
   // TP structure decision
   const tpStructure = rrr >= 4 ? 'multiple' : 'single';
