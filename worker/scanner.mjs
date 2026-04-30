@@ -45,7 +45,7 @@ export async function runScan() {
         const aiResponse = await getAiSecondOpinion(result);
         result.aiAnalysis = aiResponse;
         
-        if (result.decision === 'TAKE_NOW' && result.confluenceScore.total >= 7) {
+        if (result.decision === 'TAKE_NOW' && result.confluenceScore.total >= 6) {
           await sendTradeAlert(result);
         } else if (result.decision === 'WAIT') {
           // Optional: Send WAIT signals to Telegram if AI AGREES
