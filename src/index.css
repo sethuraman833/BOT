@@ -79,6 +79,40 @@ body {
   background: var(--bg-base);
 }
 
+/* ── Mobile Layout ─────────────────────────────────────── */
+@media (max-width: 1024px) {
+  html, body, #root {
+    overflow-y: auto;
+    overflow-x: hidden;
+    height: auto;
+  }
+  
+  .app-shell {
+    display: flex;
+    flex-direction: column;
+    height: auto;
+    min-height: 100vh;
+  }
+
+  .chart-panel {
+    min-height: 55vh; /* Gives chart plenty of space on mobile */
+    flex: none;
+  }
+
+  .analysis-sidebar {
+    width: 100%;
+    min-height: auto;
+    overflow: visible;
+    border-left: none;
+    border-top: 1px solid var(--bg-border);
+  }
+
+  .sidebar-scroll {
+    overflow-y: visible; /* Let the main window handle scrolling */
+  }
+}
+
+
 /* ── Utility ───────────────────────────────────────────── */
 .mono { font-family: var(--font-mono); }
 .heading { font-family: var(--font-heading); }

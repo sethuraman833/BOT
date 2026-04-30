@@ -68,3 +68,24 @@
 }
 .live-change.positive { color: var(--accent-green); background: rgba(0,212,170,0.1); }
 .live-change.negative { color: var(--accent-red);   background: rgba(255,77,106,0.1); }
+
+@media (max-width: 768px) {
+  .header {
+    flex-wrap: wrap;
+    height: auto;
+    padding: 10px;
+    gap: 10px;
+  }
+  .header-brand {
+    display: none; /* Hide 'TERMINUS' on mobile to save space */
+  }
+  .header-center {
+    width: 100%;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+  .header-right {
+    width: 100%;
+    justify-content: space-between;
+  }
+}

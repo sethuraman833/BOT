@@ -66,3 +66,24 @@
 /* Right info */
 .control-right { min-width: 140px; text-align: right; flex-shrink: 0; }
 .last-run { font-size: 0.68rem; color: var(--text-dim); }
+
+@media (max-width: 768px) {
+  .control-bar {
+    flex-wrap: wrap;
+    height: auto;
+    padding: 10px;
+    gap: 12px;
+  }
+  .control-left {
+    width: 100%;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+  .analyze-btn {
+    flex: 1;
+    justify-content: center;
+  }
+  .control-right {
+    min-width: auto;
+  }
+}
