@@ -6,6 +6,8 @@ import { useCandles } from '../../hooks/useCandles.js';
 import { formatUTCTime } from '../../utils/formatters.js';
 import './ControlBar.css';
 
+import { getFrontendAiOpinion } from '../../engine/aiAgent.js';
+
 export default function ControlBar() {
   const { asset, timeframe, isAnalyzing } = useMarket();
   const dispatch = useMarketDispatch();
@@ -24,10 +26,24 @@ export default function ControlBar() {
       }
 
       const result = runAnalysis(freshData, { symbol: asset });
+      
+      // Update state with algorithmic result first
       dispatch({ type: 'SET_ANALYSIS', payload: result });
+      
+      // If it's a high quality setup, request AI opinion
+      if (result.decision === 'TAKE_NOW' || (result.decision === 'WAIT' && result.confluenceScore.total >= 5)) {
+        const aiResponse = await getFrontendAiOpinion(result);
+        if (aiResponse) {
+          result.aiAnalysis = aiResponse;
+          // Dispatch again with the AI data
+          dispatch({ type: 'SET_ANALYSIS', payload: { ...result } });
+        }
+      }
+
       setLastRun(formatUTCTime());
     } catch (err) {
       dispatch({ type: 'SET_ERROR', payload: 'Analysis failed: ' + err.message });
+    } finally {
       dispatch({ type: 'SET_ANALYZING', payload: false });
     }
   };

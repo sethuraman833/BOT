@@ -99,6 +99,27 @@ export default function AnalysisSidebar() {
     );
   }
 
+function AIOpinion({ aiAnalysis }) {
+  if (!aiAnalysis) return null;
+
+  let colorClass = 'text-dim';
+  if (aiAnalysis.decision === 'AGREE') colorClass = 'text-green';
+  if (aiAnalysis.decision === 'DISAGREE') colorClass = 'text-red';
+  if (aiAnalysis.decision === 'CAUTION') colorClass = 'text-yellow';
+
+  return (
+    <div className="sidebar-section">
+      <div className="section-header">🧠 AI SECOND OPINION</div>
+      <div style={{ padding: '12px 14px', fontSize: '0.8rem', lineHeight: '1.5' }}>
+        <div style={{ marginBottom: '6px', fontWeight: 'bold' }} className={colorClass}>
+          {aiAnalysis.decision}
+        </div>
+        <div className="text-secondary">{aiAnalysis.reasoning}</div>
+      </div>
+    </div>
+  );
+}
+
   if (!analysis) {
     return (
       <aside className="analysis-sidebar">
@@ -119,6 +140,7 @@ export default function AnalysisSidebar() {
           <div className="sidebar-section"><div className="rejection-banner">✗ {analysis.rejectionReason}</div></div>
         )}
         <ConfluenceSection score={analysis.confluenceScore} />
+        <AIOpinion aiAnalysis={analysis.aiAnalysis} />
         <ProbabilityBars up={analysis.upProbability} down={analysis.downProbability} range={analysis.rangeProbability} />
         <SMCSection smcData={analysis.smcData} />
         <TradeBox analysis={analysis} />
