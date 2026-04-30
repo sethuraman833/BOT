@@ -258,7 +258,19 @@ export function runAnalysis(data, config = {}) {
     );
 
     if (onlyTriggersMissing && confluenceScore.total >= 5) {
-      waitCondition = `Waiting for triggers: ${missingPillars.join(', ')}`;
+      const isSweepMissing = missingPillars.includes('Liquidity Sweep / FVG Fill');
+      const isBOSMissing = missingPillars.includes('15m BOS / CHOCH');
+      
+      const triggerDetails = [];
+      if (isSweepMissing) {
+         const targetSwing = direction === 'long' 
+           ? recentLows1h[recentLows1h.length - 1]?.price 
+           : recentHighs1h[recentHighs1h.length - 1]?.price;
+         triggerDetails.push(`Sweep at ~${targetSwing ? targetSwing.toFixed(2) : 'zone boundary'}`);
+      }
+      if (isBOSMissing) triggerDetails.push('15m BOS close');
+      
+      waitCondition = `Waiting for triggers: ${triggerDetails.join(' and ')}`;
     } else {
       rejectionReason = `Missing pillars: ${missingPillars.join(', ')}`;
     }
