@@ -30,8 +30,12 @@ jobs:
         with:
           node-version: '24'
 
+      - name: Install Dependencies
+        run: npm install
+
       - name: Run SMC Scanner
         env:
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: node scanner/scanner.mjs
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: node worker/run-once.mjs

@@ -2,7 +2,7 @@
 //  Scanner — 15-min Scan Loop
 // ─────────────────────────────────────────────────────────
 
-import fetch from 'node-fetch';
+
 import { sendTradeAlert } from './telegramBot.mjs';
 import { getAiSecondOpinion } from './aiAgent.mjs';
 
