@@ -219,6 +219,7 @@ export function runAnalysis(data, config = {}) {
   // ═══════════════════════════════════════════════
   // STEP 15 — CONFLUENCE SCORING
   // ═══════════════════════════════════════════════
+  const trend4HAligned = (direction === 'long' && trend4h === 'bullish') || (direction === 'short' && trend4h === 'bearish');
   // Liquidity event = actual sweep confirmed OR price is currently filling an FVG
   const priceInFVG = [...fvgs4h, ...fvgs1h].some(f => currentPrice >= f.lower && currentPrice <= f.upper);
   const liquidityEvent = sweeps.length > 0 || priceInFVG;
