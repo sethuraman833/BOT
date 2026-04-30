@@ -4,6 +4,7 @@
 
 import fetch from 'node-fetch';
 import { sendTradeAlert } from './telegramBot.mjs';
+import { getAiSecondOpinion } from './aiAgent.mjs';
 
 const REST = 'https://fapi.binance.com/fapi/v1';
 const ASSETS = ['BTCUSDT', 'ETHUSDT'];
@@ -38,10 +39,21 @@ export async function runScan() {
       const result = runAnalysis(data, { symbol });
       console.log(`[SCANNER] ${symbol}: ${result.decision} (Score: ${result.confluenceScore.total}/11)`);
 
-      if (result.decision === 'TAKE_NOW' && result.confluenceScore.total >= 7) {
-        await sendTradeAlert(result);
-      } else if (result.decision === 'WAIT' && result.confluenceScore.total >= 5) {
-        console.log(`[SCANNER] ${symbol}: CAUTION signal — not sending (score ${result.confluenceScore.total})`);
+      // Trigger AI Analysis for high confluence or valid decisions
+      if (result.decision === 'TAKE_NOW' || (result.decision === 'WAIT' && result.confluenceScore.total >= 5)) {
+        console.log(`[SCANNER] Requesting AI Second Opinion for ${symbol}...`);
+        const aiResponse = await getAiSecondOpinion(result);
+        result.aiAnalysis = aiResponse;
+        
+        if (result.decision === 'TAKE_NOW' && result.confluenceScore.total >= 7) {
+          await sendTradeAlert(result);
+        } else if (result.decision === 'WAIT') {
+          // Optional: Send WAIT signals to Telegram if AI AGREES
+          if (aiResponse.decision === 'AGREE' || aiResponse.decision === 'CAUTION') {
+            console.log(`[SCANNER] ${symbol}: AI agrees with WAIT signal. (Reason: ${aiResponse.reasoning})`);
+            // await sendTradeAlert(result); // Uncomment if you want WAIT alerts too
+          }
+        }
       }
     } catch (err) {
       console.error(`[SCANNER] Error on ${symbol}:`, err.message);

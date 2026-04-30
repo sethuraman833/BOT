@@ -21,6 +21,12 @@ export async function sendTradeAlert(analysis) {
 
   const slPct = entry && stopLoss?.value ? ((Math.abs(entry - stopLoss.value) / entry) * 100).toFixed(2) : '?';
 
+  const aiSection = analysis.aiAnalysis ? `
+🧠 *AI SECOND OPINION*
+Status  : ${analysis.aiAnalysis.decision}
+Reason  : ${analysis.aiAnalysis.reasoning}
+` : '';
+
   const msg = `🚨 *HIGH PROBABILITY SETUP — ${symbol}*
 
 Direction : ${direction?.toUpperCase() || '—'}
@@ -32,7 +38,7 @@ Session   : ${session.name}
 🎯 TP1       : $${tp1?.toFixed(2)} → RRR 1:${rrr.tp1?.toFixed(1)}
 🎯 TP2       : $${tp2?.toFixed(2) || '—'} → RRR 1:${rrr.tp2?.toFixed(1) || '—'}
 🎯 TP3       : $${tp3?.toFixed(2) || '—'} → RRR 1:${rrr.tp3?.toFixed(1) || '—'}
-
+${aiSection}
 📦 Size      : ${positionSize?.toFixed(4)}
 💰 Max Risk  : $5.00
 ⚡ Breakeven : $${breakevenMove?.toFixed(2)}
