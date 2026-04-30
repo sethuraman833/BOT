@@ -33,10 +33,10 @@ export function runAnalysis(data, config = {}) {
   // ═══════════════════════════════════════════════
   // STEP 1 — DAILY BIAS
   // ═══════════════════════════════════════════════
-  const ema20_1d = calculateEMA(candles1d, 20);
-  const lastEma20_1d = ema20_1d[ema20_1d.length - 1];
-  const dailyBias = currentPrice > (lastEma20_1d || currentPrice) ? 'bullish' : 'bearish';
-  steps.push(`Step 1 — Daily Bias: ${dailyBias.toUpperCase()} (Price ${dailyBias === 'bullish' ? 'above' : 'below'} Daily EMA20)`);
+  const ema200_1d = calculateEMA(candles1d, 200);
+  const lastEma200_1d = ema200_1d[ema200_1d.length - 1];
+  const dailyBias = lastEma200_1d ? (currentPrice > lastEma200_1d ? 'bullish' : 'bearish') : 'neutral';
+  steps.push(`Step 1 — Daily Bias: ${dailyBias.toUpperCase()} (Price ${dailyBias === 'bullish' ? 'above' : 'below'} Daily EMA200)`);
 
   // ═══════════════════════════════════════════════
   // STEP 2 — 4H TREND STRUCTURE
@@ -242,7 +242,7 @@ export function runAnalysis(data, config = {}) {
   steps.push(`Step 15 — Confluence: ${confluenceScore.total} / ${confluenceScore.max} (${confluenceScore.tier}) | Pillars: ${confluenceScore.pillarsMet}/${confluenceScore.pillarsTotal}`);
 
   // ═══════════════════════════════════════════════
-  // STEP 16 — REJECTION CHECKS
+  // STEP 16 — REJECTION & WAIT CHECKS
   // ═══════════════════════════════════════════════
   let rejectionReason = null;
   let waitCondition = null;
@@ -251,7 +251,17 @@ export function runAnalysis(data, config = {}) {
     rejectionReason = 'No clear directional bias — market is ranging';
   } else if (!confluenceScore.pillarsAllMet) {
     const missingPillars = confluenceScore.checks.filter(c => c.pillar && !c.met).map(c => c.label);
-    rejectionReason = `Missing pillars: ${missingPillars.join(', ')}`;
+    
+    // If the ONLY missing pillars are entry triggers (Sweep or BOS) but structure/session are aligned
+    const onlyTriggersMissing = missingPillars.every(p => 
+      p === '15m BOS / CHOCH' || p === 'Liquidity Sweep / FVG Fill'
+    );
+
+    if (onlyTriggersMissing && confluenceScore.total >= 5) {
+      waitCondition = `Waiting for triggers: ${missingPillars.join(', ')}`;
+    } else {
+      rejectionReason = `Missing pillars: ${missingPillars.join(', ')}`;
+    }
   } else if (confluenceScore.total <= 4) {
     rejectionReason = `Confluence too low: ${confluenceScore.total}/11`;
   } else if (slData && Math.abs(entry - slData.value) / entry > 0.025) {
@@ -260,11 +270,15 @@ export function runAnalysis(data, config = {}) {
     rejectionReason = `Directional probability too low (${Math.max(upProb, downProb)}%)`;
   }
 
-  if (!rejectionReason && rrrCaution && !rrrMeetsMinimum) {
+  if (!rejectionReason && !waitCondition && rrrCaution && !rrrMeetsMinimum) {
     waitCondition = 'RRR is between 1:1.5 and 1:3 — proceed with caution';
   }
 
-  steps.push(`Step 16 — Rejection: ${rejectionReason || 'NONE'}`);
+  if (waitCondition && !rejectionReason) {
+    steps.push(`Step 16 — Status: PENDING — ${waitCondition}`);
+  } else {
+    steps.push(`Step 16 — Rejection: ${rejectionReason || 'NONE'}`);
+  }
 
   // ═══════════════════════════════════════════════
   // STEP 17 — FINAL DECISION
