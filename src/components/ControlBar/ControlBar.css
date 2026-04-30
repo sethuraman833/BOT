@@ -1,0 +1,68 @@
+.control-bar {
+  grid-area: controls;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--bg-border);
+  z-index: 10;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Timeframe buttons */
+.control-left { display: flex; gap: 4px; flex-shrink: 0; }
+.tf-btn {
+  padding: 6px 13px;
+  border: 1px solid var(--bg-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-body);
+  font-weight: 500;
+  font-size: 0.77rem;
+  cursor: pointer;
+  transition: var(--transition);
+  white-space: nowrap;
+}
+.tf-btn:hover { color: var(--text-primary); border-color: var(--text-dim); }
+.tf-btn.active {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border-color: var(--text-dim);
+}
+
+/* Main CTA */
+.analyze-btn {
+  padding: 10px 36px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--accent-green);
+  color: #080b10;
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 0.82rem;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: var(--transition);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.analyze-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 20px rgba(0, 212, 170, 0.35);
+}
+.analyze-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.analyze-btn.running {
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  border: 1px solid var(--bg-border);
+}
+
+/* Right info */
+.control-right { min-width: 140px; text-align: right; flex-shrink: 0; }
+.last-run { font-size: 0.68rem; color: var(--text-dim); }

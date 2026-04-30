@@ -1,0 +1,29 @@
+.trade-box {
+  border-radius: var(--radius-md);
+  border: 1px solid var(--bg-border);
+  background: var(--bg-panel);
+  overflow: hidden;
+  font-size: 0.78rem;
+}
+.trade-box.long { border-left: 3px solid var(--accent-green); }
+.trade-box.short { border-left: 3px solid var(--accent-red); }
+.trade-box-header {
+  padding: 10px 14px;
+  background: var(--bg-elevated);
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--bg-border);
+}
+.trade-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 12px;
+  padding: 6px 14px;
+}
+.trade-row span:nth-child(odd) { color: var(--text-dim); font-size: 0.72rem; }
+.trade-row span:nth-child(even) { text-align: right; color: var(--text-primary); }
+.trade-divider { height: 1px; background: var(--bg-border); margin: 4px 14px; }
+.trade-meta { padding: 10px 14px; font-size: 0.72rem; color: var(--text-secondary); line-height: 1.6; }

@@ -1,0 +1,36 @@
+.chart-panel {
+  grid-area: chart;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-base);
+  position: relative;
+  /* Critical: without these, grid item grows to content height
+     and the inner chart container never gets a concrete pixel height */
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.chart-legend {
+  display: flex;
+  gap: 16px;
+  padding: 6px 14px;
+  justify-content: flex-end;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--bg-border);
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+.legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+.chart-container {
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+}

@@ -1,0 +1,70 @@
+.header {
+  grid-area: header;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--bg-border);
+  z-index: 10;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Brand */
+.header-left { display: flex; align-items: center; flex-shrink: 0; }
+.header-brand { display: flex; align-items: center; gap: 10px; }
+.header-title { font-size: 1.1rem; letter-spacing: 0.09em; color: var(--text-primary); white-space: nowrap; }
+
+/* Asset tabs */
+.header-center { display: flex; gap: 4px; flex-shrink: 0; }
+.asset-tab {
+  padding: 7px 16px;
+  border: 1px solid var(--bg-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: var(--transition);
+  white-space: nowrap;
+}
+.asset-tab:hover { color: var(--text-primary); border-color: var(--text-dim); }
+.asset-tab.active {
+  background: var(--accent-green);
+  color: #080b10;
+  border-color: var(--accent-green);
+}
+
+/* Right side — price + session */
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+/* Live price */
+.live-price-group {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+}
+.live-price {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+.live-change {
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+.live-change.positive { color: var(--accent-green); background: rgba(0,212,170,0.1); }
+.live-change.negative { color: var(--accent-red);   background: rgba(255,77,106,0.1); }

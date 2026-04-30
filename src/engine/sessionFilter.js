@@ -1,111 +1,34 @@
 // ─────────────────────────────────────────────────────────
-//  Session Filter — Step 8 (Pillar 4) + News Filter (Step 9)
+//  Session Filter — London / NY / Asian Detection
 // ─────────────────────────────────────────────────────────
 
-/**
- * Determine current trading session based on UTC time.
- */
 export function getCurrentSession() {
   const now = new Date();
-  const utcHour = now.getUTCHours();
+  const utcH = now.getUTCHours();
+  const utcM = now.getUTCMinutes();
+  const utcTime = utcH + utcM / 60;
 
-  if (utcHour >= 0 && utcHour < 7) {
-    return {
-      name: 'Asian',
-      status: 'low_probability',
-      valid: false,
-      description: 'Asian session — low volume, avoid entries unless explosive move >2%',
-      color: '#6b7280',
-    };
+  if (utcTime >= 7 && utcTime < 10) {
+    return { name: 'London Open', status: 'optimal', color: 'var(--accent-green)' };
   }
-  if (utcHour >= 7 && utcHour < 10) {
-    return {
-      name: 'London Open',
-      status: 'best',
-      valid: true,
-      description: 'London Open — BEST entries, high probability window',
-      color: '#10b981',
-    };
+  if (utcTime >= 12 && utcTime < 16) {
+    return { name: 'London–NY Overlap', status: 'optimal', color: 'var(--accent-green)' };
   }
-  if (utcHour >= 10 && utcHour < 12) {
-    return {
-      name: 'London',
-      status: 'valid',
-      valid: true,
-      description: 'London session — valid entries',
-      color: '#10b981',
-    };
+  if (utcTime >= 10 && utcTime < 12) {
+    return { name: 'London Session', status: 'valid', color: 'var(--accent-green)' };
   }
-  if (utcHour >= 12 && utcHour < 16) {
-    return {
-      name: 'London–NY Overlap',
-      status: 'highest_volume',
-      valid: true,
-      description: 'London–NY Overlap — Highest volume, excellent entries',
-      color: '#f59e0b',
-    };
+  if (utcTime >= 16 && utcTime < 20) {
+    return { name: 'NY Session', status: 'valid', color: 'var(--accent-green)' };
   }
-  if (utcHour >= 16 && utcHour < 20) {
-    return {
-      name: 'NY Session',
-      status: 'valid',
-      valid: true,
-      description: 'NY session — valid entries',
-      color: '#3b82f6',
-    };
+  if (utcTime >= 20 && utcTime < 24) {
+    return { name: 'NY Close', status: 'caution', color: 'var(--accent-yellow)' };
   }
-  // 20-24 UTC
-  return {
-    name: 'NY Close',
-    status: 'caution',
-    valid: false,
-    description: 'NY Close — Only trade with strong confirmed momentum',
-    color: '#ef4444',
-  };
+  if (utcTime >= 0 && utcTime < 7) {
+    return { name: 'Asian Session', status: 'avoid', color: 'var(--accent-red)' };
+  }
+  return { name: 'Pre-Market', status: 'avoid', color: 'var(--accent-red)' };
 }
 
-/**
- * Calculate time until next optimal session.
- */
-export function getNextSessionStart() {
-  const now = new Date();
-  const utcHour = now.getUTCHours();
-  const utcMinutes = now.getUTCMinutes();
-
-  let hoursUntil;
-  let nextSession;
-
-  if (utcHour < 7) {
-    hoursUntil = 7 - utcHour;
-    nextSession = 'London Open';
-  } else if (utcHour >= 20) {
-    hoursUntil = 24 - utcHour + 7;
-    nextSession = 'London Open';
-  } else {
-    hoursUntil = 0;
-    nextSession = 'Current';
-  }
-
-  return {
-    nextSession,
-    hoursUntil,
-    minutesUntil: hoursUntil * 60 - utcMinutes,
-  };
-}
-
-/**
- * Format session status for display.
- */
-export function getSessionDisplay() {
-  const current = getCurrentSession();
-  const next = getNextSessionStart();
-
-  return {
-    ...current,
-    nextSession: next.nextSession,
-    countdown: next.minutesUntil > 0
-      ? `${Math.floor(next.minutesUntil / 60)}h ${next.minutesUntil % 60}m`
-      : null,
-    utcTime: new Date().toISOString().slice(11, 16) + ' UTC',
-  };
+export function isSessionValid(session) {
+  return session.status === 'optimal' || session.status === 'valid';
 }

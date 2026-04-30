@@ -6,12 +6,9 @@ export default defineConfig({
   server: {
     port: 5173,
     open: true,
-    proxy: {
-      '/fapi': {
-        target: 'https://fapi.binance.com',
-        changeOrigin: true,
-        secure: true,
-      },
-    },
+  },
+  build: {
+    outDir: 'dist',
+    sourcemap: false,
   },
 });

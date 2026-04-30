@@ -1,15 +1,11 @@
 services:
   - type: worker
-    name: smc-scanner-bot
-    runtime: node
-    plan: free
-    rootDir: .
-    buildCommand: npm install --legacy-peer-deps
-    startCommand: node scanner/worker.mjs
+    name: smc-scanner
+    env: node
+    buildCommand: cd worker && npm install
+    startCommand: node worker/worker.mjs
     envVars:
-      - key: TELEGRAM_TOKEN
-        value: 7692139204:AAFalwvSeYMunaY_T_zUqQn3rSRWhzo-8N4
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
       - key: TELEGRAM_CHAT_ID
-        value: "1068346212"
-      - key: NODE_ENV
-        value: production
+        sync: false

@@ -1,0 +1,205 @@
+/* ── Sidebar container ──────────────────────────────────── */
+.analysis-sidebar {
+  grid-area: sidebar;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--bg-border);
+  /* Critical for CSS Grid: without min-height:0, grid items
+     grow to fit content and the inner overflow never triggers */
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Scrollable inner area ──────────────────────────────── */
+.sidebar-scroll {
+  flex: 1 1 0;           /* flex-grow:1, flex-shrink:1, flex-basis:0 */
+  min-height: 0;         /* allow shrinking below content height */
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ── Empty / loading state ──────────────────────────────── */
+.sidebar-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--text-secondary);
+  text-align: center;
+  padding: 24px;
+}
+.empty-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--bg-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+}
+
+/* ── Section card ───────────────────────────────────────── */
+.sidebar-section {
+  border: 1px solid var(--bg-border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  overflow: hidden;
+  flex-shrink: 0;       /* prevent cards from collapsing */
+}
+
+.section-header {
+  display: block;
+  width: 100%;
+  padding: 9px 13px;
+  font-family: var(--font-heading);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--bg-border);
+  background: transparent;
+  border-top: none;
+  border-left: none;
+  border-right: none;
+  text-align: left;
+  cursor: default;
+}
+.section-header.clickable { cursor: pointer; }
+.section-header.clickable:hover { color: var(--text-secondary); }
+
+/* ── Decision badge ─────────────────────────────────────── */
+.decision-badge {
+  margin: 13px;
+  text-align: center;
+  padding: 13px;
+  border: 2px solid;
+  border-radius: var(--radius-md);
+  font-family: var(--font-heading);
+  font-weight: 800;
+  font-size: 1.05rem;
+  letter-spacing: 0.08em;
+}
+.wait-note {
+  padding: 0 13px 11px;
+  font-size: 0.72rem;
+  color: var(--accent-yellow);
+  line-height: 1.5;
+}
+.rejection-banner {
+  padding: 11px 13px;
+  color: var(--accent-red);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+/* ── Confluence score ───────────────────────────────────── */
+.score-display {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 11px 13px 8px;
+}
+.score-number { font-size: 1.9rem; font-weight: 700; color: var(--text-primary); }
+.score-divider { font-size: 1.1rem; color: var(--text-dim); }
+.score-max { font-size: 1.1rem; color: var(--text-dim); }
+.score-tier {
+  margin-left: auto;
+  padding: 3px 9px;
+  border-radius: var(--radius-sm);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+.score-tier.exceptional,
+.score-tier.high   { background: rgba(0,212,170,0.12); color: var(--accent-green); }
+.score-tier.medium { background: rgba(245,200,66,0.12); color: var(--accent-yellow); }
+.score-tier.reject { background: rgba(255,77,106,0.12); color: var(--accent-red); }
+
+.score-bar-track {
+  height: 4px;
+  background: var(--bg-border);
+  margin: 0 13px 12px;
+  border-radius: 2px;
+}
+.score-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.5s ease;
+}
+
+/* ── Checklist ──────────────────────────────────────────── */
+.check-list { list-style: none; padding: 7px 13px 11px; }
+.check-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 0;
+  font-size: 0.74rem;
+}
+.check-item.pillar {
+  border-left: 2px solid var(--accent-blue);
+  padding-left: 8px;
+  margin-left: -2px;
+}
+.check-icon { width: 16px; text-align: center; font-weight: 700; font-size: 0.75rem; }
+.check-icon.met   { color: var(--accent-green); }
+.check-icon.unmet { color: var(--accent-red); }
+.check-label { color: var(--text-secondary); flex: 1; line-height: 1.4; }
+.pillar-tag {
+  font-size: 0.55rem;
+  color: var(--accent-blue);
+  background: rgba(61,156,240,0.1);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* ── Direction probability ──────────────────────────────── */
+.prob-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 13px;
+}
+.prob-label { font-size: 0.72rem; font-weight: 600; width: 56px; white-space: nowrap; }
+.prob-track { flex: 1; height: 6px; background: var(--bg-border); border-radius: 3px; overflow: hidden; }
+.prob-fill  { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
+
+/* ── SMC counts ─────────────────────────────────────────── */
+.smc-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 11px 13px;
+  gap: 8px;
+}
+.smc-stat { text-align: center; }
+.smc-count {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--accent-blue);
+}
+.smc-label { font-size: 0.64rem; color: var(--text-dim); }
+
+/* ── Analysis steps accordion ───────────────────────────── */
+.steps-list  { list-style: none; padding: 9px 13px 12px; }
+.step-item {
+  padding: 5px 0;
+  font-size: 0.71rem;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--bg-border);
+  line-height: 1.5;
+}
+.step-item:last-child { border-bottom: none; }

@@ -1,0 +1,11 @@
+{
+  "name": "smc-worker",
+  "type": "module",
+  "version": "1.0.0",
+  "scripts": { "start": "node worker.mjs" },
+  "dependencies": {
+    "node-cron": "^3.0.3",
+    "node-telegram-bot-api": "^0.64.0",
+    "node-fetch": "^3.3.2"
+  }
+}
