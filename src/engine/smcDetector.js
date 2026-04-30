@@ -70,13 +70,13 @@ export function detectOrderBlocks(candles, currentPrice) {
       });
     }
   }
-  // Only active OBs from last 100 candles, sorted by proximity, limit 5
-  const recencyCutoff = candles.length - 100;
+  // Only active OBs from last 30 candles, sorted by proximity, limit 3
+  const recencyCutoff = candles.length - 30;
   return obs
     .filter(o => o.status === 'active' && o.candleIndex >= recencyCutoff)
     .reverse()
     .sort((a, b) => Math.abs((a.entryBoundary - (currentPrice || 0))) - Math.abs((b.entryBoundary - (currentPrice || 0))))
-    .slice(0, 5);
+    .slice(0, 3);
 }
 
 /**
@@ -116,12 +116,12 @@ export function detectFVGs(candles, currentPrice) {
       });
     }
   }
-  // Only unfilled FVGs from last 100 candles, limit 5
-  const fvgRecencyCutoff = candles.length - 100;
+  // Only unfilled FVGs from last 50 candles, limit 3
+  const fvgRecencyCutoff = candles.length - 50;
   return fvgs
     .filter(f => f.status === 'unfilled' && f.candleIndex >= fvgRecencyCutoff)
     .reverse()
-    .slice(0, 5);
+    .slice(0, 3);
 }
 
 /**
@@ -209,8 +209,8 @@ export function detectStructureShifts(candles) {
     else if (!hhCount && !hlCount) prevailingTrend = 'bearish';
   }
 
-  // Check last few candles for structure breaks
-  for (let i = candles.length - 5; i < candles.length; i++) {
+  // Check last 12 candles for structure breaks (3 hours on 15m)
+  for (let i = candles.length - 12; i < candles.length; i++) {
     if (i < 0) continue;
     const c = candles[i];
 
