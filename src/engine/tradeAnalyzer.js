@@ -3,7 +3,7 @@
 //  Pure logic — no React dependencies
 // ─────────────────────────────────────────────────────────
 
-import { detectOrderBlocks, detectFVGs, detectSweeps, detectStructureShifts, calculateEMA, calculateRSI, findSwingPoints } from './smcDetector.js';
+import { detectOrderBlocks, detectFVGs, detectSweeps, detectStructureShifts, calculateEMA, calculateRSI, detectRSIDivergence, findSwingPoints } from './smcDetector.js';
 import { calculateOTE, isInOTE } from './oteCalculator.js';
 import { calculateSmartSL, calculateTPs, calculatePositionSize, calculateRRR, calculateBreakevenMove } from './riskManager.js';
 import { scoreConfluence } from './confluenceScorer.js';
@@ -126,15 +126,24 @@ export function runAnalysis(data, config = {}) {
   const recentHighs1h = swings1h.filter(s => s.type === 'high').slice(-2);
   const recentLows1h = swings1h.filter(s => s.type === 'low').slice(-2);
 
+  // Find the correct impulse leg that brackets current price
   let oteZone = null;
   if (direction === 'long' && recentHighs1h.length > 0 && recentLows1h.length > 0) {
-    const impulseHigh = recentHighs1h[recentHighs1h.length - 1].price;
-    const impulseLow = recentLows1h[recentLows1h.length - 1].price;
-    oteZone = calculateOTE(impulseHigh, impulseLow, 'long');
+    // For long: find the most recent swing low BELOW price and swing high ABOVE price
+    const relevantLow = [...swings1h.filter(s => s.type === 'low' && s.price < currentPrice)].pop();
+    const relevantHigh = [...swings1h.filter(s => s.type === 'high' && s.price > currentPrice)].pop()
+      || recentHighs1h[recentHighs1h.length - 1];
+    if (relevantLow && relevantHigh) {
+      oteZone = calculateOTE(relevantHigh.price, relevantLow.price, 'long');
+    }
   } else if (direction === 'short' && recentHighs1h.length > 0 && recentLows1h.length > 0) {
-    const impulseHigh = recentHighs1h[recentHighs1h.length - 1].price;
-    const impulseLow = recentLows1h[recentLows1h.length - 1].price;
-    oteZone = calculateOTE(impulseHigh, impulseLow, 'short');
+    // For short: find the most recent swing high ABOVE price and swing low BELOW price
+    const relevantHigh = [...swings1h.filter(s => s.type === 'high' && s.price > currentPrice)].pop();
+    const relevantLow = [...swings1h.filter(s => s.type === 'low' && s.price < currentPrice)].pop()
+      || recentLows1h[recentLows1h.length - 1];
+    if (relevantHigh && relevantLow) {
+      oteZone = calculateOTE(relevantHigh.price, relevantLow.price, 'short');
+    }
   }
 
   const inOTE = isInOTE(currentPrice, oteZone);
@@ -181,12 +190,16 @@ export function runAnalysis(data, config = {}) {
   // ═══════════════════════════════════════════════
   // STEP 12 — RSI CHECK
   // ═══════════════════════════════════════════════
-  const rsi1h = calculateRSI(candles1h, 14);
-  const rsiDivergence = rsi1h != null && (
-    (direction === 'long' && rsi1h < 35) ||
-    (direction === 'short' && rsi1h > 65)
-  );
-  steps.push(`Step 12 — RSI (1H): ${rsi1h ? rsi1h.toFixed(1) : 'N/A'} | Divergence: ${rsiDivergence ? 'YES' : 'NO'}`);
+  // True RSI divergence detection (not just overbought/oversold)
+  const rsiResult = detectRSIDivergence(candles1h, direction, 14);
+  const rsi1h = rsiResult.rsiValue;
+  const rsiDivergence = rsiResult.hasDivergence;
+  const rsiDetail = rsiDivergence
+    ? rsiResult.detail
+    : rsiResult.isOverbought ? 'Overbought (not divergence)'
+    : rsiResult.isOversold ? 'Oversold (not divergence)'
+    : 'Neutral';
+  steps.push(`Step 12 — RSI (1H): ${rsi1h ? rsi1h.toFixed(1) : 'N/A'} | Divergence: ${rsiDivergence ? 'YES — ' + rsiDetail : 'NO — ' + rsiDetail}`);
 
   // ═══════════════════════════════════════════════
   // STEP 13 — EMA200 SUPPORT/RESISTANCE
@@ -197,7 +210,8 @@ export function runAnalysis(data, config = {}) {
   // ═══════════════════════════════════════════════
   // STEP 14 — RRR EVALUATION
   // ═══════════════════════════════════════════════
-  const bestRRR = tpData && tpData.tps.length > 0 ? tpData.tps[0].rrr : 0;
+  // Use the BEST RRR across all TPs, not just TP1
+  const bestRRR = tpData && tpData.tps.length > 0 ? Math.max(...tpData.tps.map(t => t.rrr)) : 0;
   const rrrMeetsMinimum = bestRRR >= 3.0;
   const rrrCaution = bestRRR >= 1.5 && bestRRR < 3.0;
   steps.push(`Step 14 — RRR: ${bestRRR.toFixed(1)} (${rrrMeetsMinimum ? 'MEETS MINIMUM' : rrrCaution ? 'CAUTION — below 1:3' : 'INSUFFICIENT'})`);
