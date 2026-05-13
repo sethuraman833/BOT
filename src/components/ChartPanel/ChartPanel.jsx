@@ -145,10 +145,15 @@ export default function ChartPanel() {
 
     add(analysis.entry,        '#3d9cf0', 'ENTRY');
     add(analysis.stopLoss?.value, '#ff4d6a', 'SL', 0);
-    add(analysis.tp1,          '#00d4aa', 'TP1');
-    add(analysis.tp2,          '#00d4aa', 'TP2');
-    add(analysis.tp3,          '#00d4aa', 'TP3');
+    
+    if (analysis.tpDetails && Array.isArray(analysis.tpDetails)) {
+      analysis.tpDetails.forEach((tp, i) => {
+        add(tp.level, '#00d4aa', `TP${i + 1}`);
+      });
+    }
   }, [analysis]);
+
+  const showRibbon = analysis && analysis.decision !== 'NO_TRADE' && analysis.entry;
 
   return (
     <div className="chart-panel">
@@ -157,6 +162,30 @@ export default function ChartPanel() {
         <span className="legend-item"><span className="legend-dot" style={{ background: '#3d9cf0' }} /> EMA 50</span>
         <span className="legend-item"><span className="legend-dot" style={{ background: '#9b6dff' }} /> EMA 200</span>
       </div>
+
+      {showRibbon && (
+        <div className={`trade-ribbon fade-in ${analysis.direction}`}>
+          <div className="ribbon-sec">
+            <span className="ribbon-label">ENTRY</span>
+            <span className="ribbon-val mono">{analysis.entry.toLocaleString()}</span>
+          </div>
+          <div className="ribbon-sec">
+            <span className="ribbon-label">STOP LOSS</span>
+            <span className="ribbon-val mono text-red">{analysis.stopLoss?.value?.toLocaleString()}</span>
+          </div>
+          {analysis.tpDetails?.map((tp, i) => (
+            <div className="ribbon-sec" key={i}>
+              <span className="ribbon-label">TP{i + 1}</span>
+              <span className="ribbon-val mono text-green">{tp.level?.toLocaleString()}</span>
+            </div>
+          ))}
+          <div className="ribbon-sec size">
+            <span className="ribbon-label">POSITION</span>
+            <span className="ribbon-val mono">{analysis.positionSize} units</span>
+          </div>
+        </div>
+      )}
+
       <div className="chart-container" ref={containerRef} />
     </div>
   );
