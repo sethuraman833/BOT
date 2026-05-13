@@ -1,3 +1,5 @@
+/* ── TradeBox v2 — Institutional Trade Card ─────────────── */
+
 .trade-box {
   border-radius: var(--radius-md);
   border: 1px solid var(--bg-border);
@@ -5,25 +7,144 @@
   overflow: hidden;
   font-size: 0.78rem;
 }
-.trade-box.long { border-left: 3px solid var(--accent-green); }
+.trade-box.long  { border-left: 3px solid var(--accent-green); }
 .trade-box.short { border-left: 3px solid var(--accent-red); }
+
+/* ── Header ──────────────────────────────────────────────── */
 .trade-box-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 10px 14px;
   background: var(--bg-elevated);
   font-family: var(--font-heading);
   font-weight: 700;
-  font-size: 0.7rem;
+  font-size: 0.68rem;
   letter-spacing: 0.1em;
   color: var(--text-secondary);
   border-bottom: 1px solid var(--bg-border);
 }
-.trade-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px 12px;
-  padding: 6px 14px;
+.trade-dir-badge {
+  padding: 2px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
 }
-.trade-row span:nth-child(odd) { color: var(--text-dim); font-size: 0.72rem; }
-.trade-row span:nth-child(even) { text-align: right; color: var(--text-primary); }
-.trade-divider { height: 1px; background: var(--bg-border); margin: 4px 14px; }
-.trade-meta { padding: 10px 14px; font-size: 0.72rem; color: var(--text-secondary); line-height: 1.6; }
+.trade-dir-badge.long  { background: rgba(0,212,170,0.15); color: var(--accent-green); }
+.trade-dir-badge.short { background: rgba(255,77,106,0.15); color: var(--accent-red); }
+
+/* ── Meta row ────────────────────────────────────────────── */
+.trade-meta-row {
+  display: flex;
+  padding: 8px 14px;
+  gap: 8px;
+}
+.trade-meta-cell {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.tm-label { font-size: 0.62rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.06em; }
+.tm-value { font-size: 0.76rem; color: var(--text-primary); }
+
+/* ── Big Entry Block ─────────────────────────────────────── */
+.trade-entry-block {
+  padding: 14px 14px 12px;
+  background: linear-gradient(135deg, rgba(0,212,170,0.05), transparent);
+}
+.teb-label {
+  font-family: var(--font-heading);
+  font-size: 0.6rem;
+  letter-spacing: 0.12em;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+.teb-price {
+  font-family: var(--font-mono);
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1;
+  margin-bottom: 6px;
+}
+.teb-sub {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+.teb-sub strong { color: var(--text-primary); }
+
+/* ── Level Rows (SL and TPs) ────────────────────────────── */
+.trade-level-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 14px;
+  gap: 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+.trade-level-row:last-of-type { border-bottom: none; }
+.trade-level-row.sl { background: rgba(255,77,106,0.04); }
+.trade-level-row.tp { background: rgba(0,212,170,0.03); }
+
+.tlr-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+.tlr-badge {
+  padding: 2px 7px;
+  border-radius: 3px;
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  flex-shrink: 0;
+}
+.sl-badge  { background: rgba(255,77,106,0.2); color: var(--accent-red); }
+.tp-badge  { background: rgba(0,212,170,0.15); color: var(--accent-green); }
+.tp2-badge { background: rgba(61,156,240,0.15); color: var(--accent-blue); }
+.tp3-badge { background: rgba(155,109,255,0.15); color: var(--accent-purple); }
+
+.tlr-label {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tlr-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.tlr-price { font-family: var(--font-mono); font-size: 0.84rem; font-weight: 600; }
+.tlr-rrr   { font-family: var(--font-mono); font-size: 0.72rem; font-weight: 700; padding: 1px 5px; border-radius: 3px; background: rgba(0,212,170,0.1); color: var(--accent-green); }
+.tlr-pct   { font-size: 0.68rem; }
+.tlr-close { font-size: 0.66rem; }
+
+/* ── Breakeven row ───────────────────────────────────────── */
+.trade-be-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  background: rgba(245,200,66,0.04);
+}
+
+/* ── Warnings ────────────────────────────────────────────── */
+.trade-warnings {
+  padding: 10px 14px;
+  font-size: 0.71rem;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  border-top: 1px solid var(--bg-border);
+}
+
+/* ── Divider ─────────────────────────────────────────────── */
+.trade-divider { height: 1px; background: var(--bg-border); }

@@ -1,50 +1,111 @@
-import { formatPrice, formatPercent, formatSize, formatRRR } from '../../utils/formatters.js';
+import { formatPrice, formatSize } from '../../utils/formatters.js';
 import './TradeBox.css';
 
 export default function TradeBox({ analysis }) {
   if (!analysis || !analysis.direction) return null;
-  const { direction, entry, stopLoss, tp1, tp2, tp3, rrr, positionSize, breakevenMove, confluenceScore, session, keyRisk, invalidationLevel, tpDetails } = analysis;
+
+  const {
+    direction, entry, stopLoss, tpDetails,
+    positionSize, breakevenMove, confluenceScore,
+    session, keyRisk, invalidationLevel, symbol,
+  } = analysis;
 
   const isLong = direction === 'long';
-  const slPct = entry && stopLoss?.value ? ((Math.abs(entry - stopLoss.value) / entry) * 100).toFixed(2) : '—';
+  const slPct  = entry && stopLoss?.value
+    ? ((Math.abs(entry - stopLoss.value) / entry) * 100).toFixed(2)
+    : '—';
 
   return (
     <div className={`trade-box ${isLong ? 'long' : 'short'}`}>
-      <div className="trade-box-header">TRADE SETUP</div>
-      <div className="trade-row">
-        <span>Asset</span><span className="mono">{analysis.symbol}</span>
-        <span>Direction</span><span className={isLong ? 'text-green' : 'text-red'}>{direction.toUpperCase()}</span>
+
+      {/* ── Header ───────────────────────────────────── */}
+      <div className="trade-box-header">
+        <span>TRADE SETUP</span>
+        <span className={`trade-dir-badge ${isLong ? 'long' : 'short'}`}>
+          {isLong ? '▲ LONG' : '▼ SHORT'}
+        </span>
       </div>
-      <div className="trade-row">
-        <span>Confluence</span><span className="mono">{confluenceScore.total} / {confluenceScore.max}</span>
-        <span>Session</span><span>{session.name}</span>
-      </div>
-      <div className="trade-divider" />
-      <div className="trade-row">
-        <span>Entry</span><span className="mono">{formatPrice(entry)}</span>
-      </div>
-      <div className="trade-row">
-        <span>Stop Loss</span><span className="mono text-red">{formatPrice(stopLoss?.value)} ({slPct}%)</span>
-      </div>
-      {tpDetails.map((tp, i) => (
-        <div className="trade-row" key={i}>
-          <span>TP{i + 1}</span>
-          <span className="mono text-green">{formatPrice(tp.level)} → {formatRRR(tp.rrr)} → Close {tp.closePercent}%</span>
+
+      {/* ── Meta row ─────────────────────────────────── */}
+      <div className="trade-meta-row">
+        <div className="trade-meta-cell">
+          <span className="tm-label">Asset</span>
+          <span className="tm-value mono">{symbol}</span>
         </div>
-      ))}
-      <div className="trade-divider" />
-      <div className="trade-row">
-        <span>Position</span><span className="mono">{formatSize(positionSize)}</span>
-        <span>Max Risk</span><span className="mono">$5.00</span>
+        <div className="trade-meta-cell">
+          <span className="tm-label">Session</span>
+          <span className="tm-value">{session?.name || '—'}</span>
+        </div>
+        <div className="trade-meta-cell">
+          <span className="tm-label">Confluence</span>
+          <span className="tm-value mono">{confluenceScore.total}/{confluenceScore.max}</span>
+        </div>
       </div>
-      <div className="trade-row">
-        <span>Breakeven</span><span className="mono">{formatPrice(breakevenMove)}</span>
-      </div>
+
       <div className="trade-divider" />
-      <div className="trade-meta">
+
+      {/* ── Big Entry Block ───────────────────────────── */}
+      <div className="trade-entry-block">
+        <div className="teb-label">ENTRY</div>
+        <div className="teb-price">{formatPrice(entry)}</div>
+        <div className="teb-sub">
+          Size&nbsp;
+          <strong className="mono">{formatSize(positionSize)} units</strong>
+          &nbsp;·&nbsp;Max Risk&nbsp;<strong>$5.00</strong>
+        </div>
+      </div>
+
+      <div className="trade-divider" />
+
+      {/* ── SL Row ───────────────────────────────────── */}
+      <div className="trade-level-row sl">
+        <div className="tlr-left">
+          <span className="tlr-badge sl-badge">SL</span>
+          <span className="tlr-label">Stop Loss</span>
+        </div>
+        <div className="tlr-right">
+          <span className="tlr-price text-red mono">{formatPrice(stopLoss?.value)}</span>
+          <span className="tlr-pct text-red">−{slPct}%</span>
+        </div>
+      </div>
+
+      <div className="trade-divider" />
+
+      {/* ── TP Rows ───────────────────────────────────── */}
+      {tpDetails && tpDetails.map((tp, i) => {
+        const pctMove = entry
+          ? ((Math.abs(tp.level - entry) / entry) * 100).toFixed(2)
+          : '—';
+        return (
+          <div className={`trade-level-row tp tp${i + 1}`} key={i}>
+            <div className="tlr-left">
+              <span className={`tlr-badge tp-badge tp${i + 1}-badge`}>TP{i + 1}</span>
+              <span className="tlr-label">{tp.reason || 'Target'}</span>
+            </div>
+            <div className="tlr-right">
+              <span className="tlr-price text-green mono">{formatPrice(tp.level)}</span>
+              <span className="tlr-rrr text-green">1:{tp.rrr?.toFixed(1)}</span>
+              <span className="tlr-pct text-dim">+{pctMove}%</span>
+              <span className="tlr-close text-dim">→ {tp.closePercent}%</span>
+            </div>
+          </div>
+        );
+      })}
+
+      <div className="trade-divider" />
+
+      {/* ── Breakeven ─────────────────────────────────── */}
+      <div className="trade-be-row">
+        <span className="text-dim">⚡ Move SL to breakeven at</span>
+        <span className="mono text-yellow">{formatPrice(breakevenMove)}</span>
+      </div>
+
+      {/* ── Warnings ─────────────────────────────────── */}
+      <div className="trade-warnings">
         <div><span className="text-yellow">⚠</span> {keyRisk}</div>
         <div><span className="text-red">✗</span> {invalidationLevel}</div>
       </div>
+
     </div>
   );
 }
