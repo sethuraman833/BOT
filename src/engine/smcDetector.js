@@ -1,350 +1,302 @@
 // ─────────────────────────────────────────────────────────
-//  SMC Detector — Order Blocks, FVGs, Sweeps, BOS/CHOCH
+//  SMC Detector v6.0 — High-Conviction Institutional Engine
 //  Pure functions — no React dependencies
 // ─────────────────────────────────────────────────────────
 
 /**
- * Find swing highs and swing lows using a 5-bar lookback/forward.
+ * Find swing highs and lows using a configurable lookback.
  */
 export function findSwingPoints(candles, lookback = 5) {
   const swings = [];
   for (let i = lookback; i < candles.length - lookback; i++) {
-    let isHigh = true;
-    let isLow = true;
+    let isHigh = true, isLow = true;
     for (let j = 1; j <= lookback; j++) {
       if (candles[i].high <= candles[i - j].high || candles[i].high <= candles[i + j].high) isHigh = false;
       if (candles[i].low >= candles[i - j].low || candles[i].low >= candles[i + j].low) isLow = false;
     }
     if (isHigh) swings.push({ type: 'high', price: candles[i].high, index: i, time: candles[i].time });
-    if (isLow) swings.push({ type: 'low', price: candles[i].low, index: i, time: candles[i].time });
+    if (isLow)  swings.push({ type: 'low',  price: candles[i].low,  index: i, time: candles[i].time });
   }
   return swings;
 }
 
 /**
- * Detect Order Blocks.
- * Demand OB: last bearish candle before a strong bullish impulse.
- * Supply OB: last bullish candle before a strong bearish impulse.
+ * Detect Order Blocks (v6: requires 2.5x impulse ratio, body validation, recency cap 50 bars).
  */
 export function detectOrderBlocks(candles, currentPrice) {
   const obs = [];
-  for (let i = 2; i < candles.length - 1; i++) {
-    const prev = candles[i - 1];
+  const recencyCutoff = candles.length - 50;
+
+  for (let i = 2; i < candles.length - 2; i++) {
     const ob = candles[i];
     const impulse = candles[i + 1];
-
     const obBody = Math.abs(ob.close - ob.open);
     const impulseBody = Math.abs(impulse.close - impulse.open);
-    const isBearishOB = ob.close < ob.open;
-    const isBullishImpulse = impulse.close > impulse.open;
-    const isBullishOB = ob.close > ob.open;
-    const isBearishImpulse = impulse.close < impulse.open;
+    if (obBody === 0) continue; // skip doji
 
-    // Demand OB — impulse must be at least 2× the OB body
-    if (isBearishOB && isBullishImpulse && impulseBody >= obBody * 2.0) {
+    // Demand OB: bearish candle followed by strong bullish impulse
+    if (ob.close < ob.open && impulse.close > impulse.open && impulseBody >= obBody * 2.5) {
       const mitigated = currentPrice != null && currentPrice < ob.low;
-      obs.push({
-        type: 'demand',
-        upperBound: ob.high,
-        lowerBound: ob.low,
-        entryBoundary: ob.high,
-        slBoundary: ob.low,
-        status: mitigated ? 'mitigated' : 'active',
-        candleIndex: i,
-        time: ob.time,
-      });
+      if (!mitigated && i >= recencyCutoff) {
+        obs.push({
+          type: 'demand',
+          upperBound: ob.high,
+          lowerBound: ob.low,
+          entryBoundary: ob.high,
+          slBoundary: ob.low,
+          status: 'active',
+          strength: impulseBody / obBody,
+          candleIndex: i,
+          time: ob.time,
+        });
+      }
     }
 
-    // Supply OB — impulse must be at least 2× the OB body
-    if (isBullishOB && isBearishImpulse && impulseBody >= obBody * 2.0) {
+    // Supply OB: bullish candle followed by strong bearish impulse
+    if (ob.close > ob.open && impulse.close < impulse.open && impulseBody >= obBody * 2.5) {
       const mitigated = currentPrice != null && currentPrice > ob.high;
-      obs.push({
-        type: 'supply',
-        upperBound: ob.high,
-        lowerBound: ob.low,
-        entryBoundary: ob.low,
-        slBoundary: ob.high,
-        status: mitigated ? 'mitigated' : 'active',
-        candleIndex: i,
-        time: ob.time,
-      });
+      if (!mitigated && i >= recencyCutoff) {
+        obs.push({
+          type: 'supply',
+          upperBound: ob.high,
+          lowerBound: ob.low,
+          entryBoundary: ob.low,
+          slBoundary: ob.high,
+          status: 'active',
+          strength: impulseBody / obBody,
+          candleIndex: i,
+          time: ob.time,
+        });
+      }
     }
   }
-  // Only active OBs from last 30 candles, sorted by proximity, limit 3
-  const recencyCutoff = candles.length - 30;
+
+  // Sort by proximity to price, strongest first, limit to 5
   return obs
-    .filter(o => o.status === 'active' && o.candleIndex >= recencyCutoff)
-    .reverse()
-    .sort((a, b) => Math.abs((a.entryBoundary - (currentPrice || 0))) - Math.abs((b.entryBoundary - (currentPrice || 0))))
-    .slice(0, 3);
+    .sort((a, b) => {
+      const distA = Math.abs(a.entryBoundary - (currentPrice || 0));
+      const distB = Math.abs(b.entryBoundary - (currentPrice || 0));
+      return distA - distB;
+    })
+    .slice(0, 5);
 }
 
 /**
- * Detect Fair Value Gaps.
- * Bullish FVG: candle[i-1].high < candle[i+1].low
- * Bearish FVG: candle[i-1].low > candle[i+1].high
+ * Detect Fair Value Gaps. Only unfilled, recent (last 60 bars), with minimum size filter.
  */
 export function detectFVGs(candles, currentPrice) {
   const fvgs = [];
+  const recencyCutoff = candles.length - 60;
+  const minGapPct = 0.001; // 0.1% minimum gap size
+
   for (let i = 1; i < candles.length - 1; i++) {
+    if (i < recencyCutoff) continue;
     const c1 = candles[i - 1];
     const c3 = candles[i + 1];
 
-    // Bullish FVG
-    if (c3.low > c1.high) {
+    // Bullish FVG: gap up
+    if (c3.low > c1.high && (c3.low - c1.high) / c1.high > minGapPct) {
       const filled = currentPrice != null && currentPrice <= c3.low && currentPrice >= c1.high;
-      fvgs.push({
-        type: 'bullish',
-        upper: c3.low,
-        lower: c1.high,
-        status: filled ? 'filled' : 'unfilled',
-        candleIndex: i,
-        time: candles[i].time,
-      });
+      if (!filled) {
+        fvgs.push({ type: 'bullish', upper: c3.low, lower: c1.high, midpoint: (c3.low + c1.high) / 2, status: 'unfilled', candleIndex: i, time: candles[i].time });
+      }
     }
 
-    // Bearish FVG
-    if (c3.high < c1.low) {
+    // Bearish FVG: gap down
+    if (c1.low > c3.high && (c1.low - c3.high) / c3.high > minGapPct) {
       const filled = currentPrice != null && currentPrice >= c3.high && currentPrice <= c1.low;
-      fvgs.push({
-        type: 'bearish',
-        upper: c1.low,
-        lower: c3.high,
-        status: filled ? 'filled' : 'unfilled',
-        candleIndex: i,
-        time: candles[i].time,
-      });
+      if (!filled) {
+        fvgs.push({ type: 'bearish', upper: c1.low, lower: c3.high, midpoint: (c1.low + c3.high) / 2, status: 'unfilled', candleIndex: i, time: candles[i].time });
+      }
     }
   }
-  // Only unfilled FVGs from last 50 candles, limit 3
-  const fvgRecencyCutoff = candles.length - 50;
+
+  // Sort by proximity to current price
   return fvgs
-    .filter(f => f.status === 'unfilled' && f.candleIndex >= fvgRecencyCutoff)
-    .reverse()
-    .slice(0, 3);
+    .sort((a, b) => Math.abs(a.midpoint - currentPrice) - Math.abs(b.midpoint - currentPrice))
+    .slice(0, 5);
 }
 
 /**
- * Detect Liquidity Sweeps.
- * Three conditions required:
- * 1. Wick pierces prior swing by ≥ 0.15%
- * 2. Close returns inside the range
- * 3. Next candle(s) show displacement (body ≥ 60% of range)
+ * Detect Liquidity Sweeps — wick extends beyond a prior swing, then closes back inside.
+ * This is the core institutional manipulation signal.
  */
 export function detectSweeps(candles) {
-  const swings = findSwingPoints(candles, 3);
   const sweeps = [];
+  const swings = findSwingPoints(candles, 3);
+  const recentHighs = swings.filter(s => s.type === 'high').slice(-6);
+  const recentLows  = swings.filter(s => s.type === 'low').slice(-6);
 
-  // Scan last 20 candles (5 hours on 15m) to catch session sweeps
-  for (let i = candles.length - 20; i < candles.length - 1; i++) {
-    if (i < 1) continue;
-    const candle = candles[i];
-    const nextCandle = candles[i + 1];
-    if (!nextCandle) continue;
+  // Check last 10 candles for sweep events
+  const lookback = Math.min(10, candles.length - 1);
+  for (let i = candles.length - lookback; i < candles.length; i++) {
+    const c = candles[i];
 
-    // Check against recent swing highs (buy-side sweep)
-    const recentHighs = swings.filter(s => s.type === 'high' && s.index < i && s.index > i - 30);
+    // Bearish sweep: wick above a prior high, then closes below it (bull trap)
     for (const swing of recentHighs) {
-      const pierce = (candle.high - swing.price) / swing.price;
-      const closedBelow = candle.close < swing.price;
-      const nextBody = Math.abs(nextCandle.close - nextCandle.open);
-      const nextRange = nextCandle.high - nextCandle.low;
-      const displacement = nextRange > 0 && nextBody / nextRange >= 0.6;
-
-      if (pierce >= 0.0015 && closedBelow && displacement) {
+      if (swing.index >= i) continue;
+      if (c.high > swing.price && c.close < swing.price) {
         sweeps.push({
           type: 'bearish',
           sweptLevel: swing.price,
-          sweepCandle: i,
-          displacementCandle: i + 1,
-          confirmed: true,
-          time: candle.time,
+          candleIndex: i,
+          time: c.time,
+          direction: 'short',
         });
+        break;
       }
     }
 
-    // Check against recent swing lows (sell-side sweep)
-    const recentLows = swings.filter(s => s.type === 'low' && s.index < i && s.index > i - 30);
+    // Bullish sweep: wick below a prior low, then closes above it (bear trap)
     for (const swing of recentLows) {
-      const pierce = (swing.price - candle.low) / swing.price;
-      const closedAbove = candle.close > swing.price;
-      const nextBody = Math.abs(nextCandle.close - nextCandle.open);
-      const nextRange = nextCandle.high - nextCandle.low;
-      const displacement = nextRange > 0 && nextBody / nextRange >= 0.6;
-
-      if (pierce >= 0.0015 && closedAbove && displacement) {
+      if (swing.index >= i) continue;
+      if (c.low < swing.price && c.close > swing.price) {
         sweeps.push({
           type: 'bullish',
           sweptLevel: swing.price,
-          sweepCandle: i,
-          displacementCandle: i + 1,
-          confirmed: true,
-          time: candle.time,
+          candleIndex: i,
+          time: c.time,
+          direction: 'long',
         });
+        break;
       }
     }
   }
-  return sweeps.filter(s => s.confirmed).slice(-3);
+
+  return sweeps.slice(-3);
 }
 
 /**
- * Detect BOS (Break of Structure) and CHOCH (Change of Character).
- * BOS: close beyond last swing in the SAME direction as prevailing trend.
- * CHOCH: close beyond swing in OPPOSITE direction.
+ * Detect BOS (Break of Structure) and CHOCH (Change of Character) on 15m.
+ * BOS = trend continuation. CHOCH = potential reversal.
  */
 export function detectStructureShifts(candles) {
-  const swings = findSwingPoints(candles, 3);
   const shifts = [];
-  if (swings.length < 4) return shifts;
+  const swings = findSwingPoints(candles, 3);
+  const highs = swings.filter(s => s.type === 'high').slice(-5);
+  const lows  = swings.filter(s => s.type === 'low').slice(-5);
+  const last = candles[candles.length - 1];
 
-  // Determine prevailing trend from swing sequence
-  const lastHighs = swings.filter(s => s.type === 'high').slice(-3);
-  const lastLows = swings.filter(s => s.type === 'low').slice(-3);
+  if (highs.length >= 2) {
+    const prevHigh = highs[highs.length - 2];
+    const lastHigh = highs[highs.length - 1];
 
-  let prevailingTrend = 'neutral';
-  if (lastHighs.length >= 2 && lastLows.length >= 2) {
-    const hhCount = lastHighs[lastHighs.length - 1].price > lastHighs[lastHighs.length - 2].price ? 1 : 0;
-    const hlCount = lastLows[lastLows.length - 1].price > lastLows[lastLows.length - 2].price ? 1 : 0;
-    if (hhCount && hlCount) prevailingTrend = 'bullish';
-    else if (!hhCount && !hlCount) prevailingTrend = 'bearish';
-  }
-
-  // Check last 12 candles for structure breaks (3 hours on 15m)
-  for (let i = candles.length - 12; i < candles.length; i++) {
-    if (i < 0) continue;
-    const c = candles[i];
-
-    // Break above last swing high
-    const lastSwingHigh = lastHighs[lastHighs.length - 1];
-    if (lastSwingHigh && c.close > lastSwingHigh.price) {
-      shifts.push({
-        type: prevailingTrend === 'bullish' ? 'BOS' : 'CHOCH',
-        direction: 'bullish',
-        level: lastSwingHigh.price,
-        candleIndex: i,
-        time: c.time,
-      });
+    // BOS Bullish: price closes above previous HH
+    if (last.close > prevHigh.price) {
+      shifts.push({ type: 'BOS', direction: 'bullish', level: prevHigh.price, time: last.time });
     }
-
-    // Break below last swing low
-    const lastSwingLow = lastLows[lastLows.length - 1];
-    if (lastSwingLow && c.close < lastSwingLow.price) {
-      shifts.push({
-        type: prevailingTrend === 'bearish' ? 'BOS' : 'CHOCH',
-        direction: 'bearish',
-        level: lastSwingLow.price,
-        candleIndex: i,
-        time: c.time,
-      });
+    // CHOCH Bearish: price closes below a recent HL after uptrend (reversal signal)
+    if (lows.length >= 2) {
+      const lastLow = lows[lows.length - 1];
+      if (lastHigh.price > prevHigh.price && last.close < lastLow.price) {
+        shifts.push({ type: 'CHOCH', direction: 'bearish', level: lastLow.price, time: last.time });
+      }
     }
   }
-  return shifts.slice(-3);
+
+  if (lows.length >= 2) {
+    const prevLow = lows[lows.length - 2];
+    const lastLow = lows[lows.length - 1];
+
+    // BOS Bearish: price closes below previous LL
+    if (last.close < prevLow.price) {
+      shifts.push({ type: 'BOS', direction: 'bearish', level: prevLow.price, time: last.time });
+    }
+    // CHOCH Bullish: price closes above a recent LH after downtrend (reversal signal)
+    if (highs.length >= 2) {
+      const lastHigh = highs[highs.length - 1];
+      if (lastLow.price < prevLow.price && last.close > lastHigh.price) {
+        shifts.push({ type: 'CHOCH', direction: 'bullish', level: lastHigh.price, time: last.time });
+      }
+    }
+  }
+
+  return shifts;
 }
 
 /**
- * Calculate EMA for a given period from candle closes.
+ * Calculate EMA (Exponential Moving Average).
  */
 export function calculateEMA(candles, period) {
   if (candles.length < period) return [];
   const k = 2 / (period + 1);
-  const emaValues = [];
-  let ema = candles.slice(0, period).reduce((sum, c) => sum + c.close, 0) / period;
-  for (let i = 0; i < candles.length; i++) {
-    if (i < period - 1) {
-      emaValues.push(null);
-    } else if (i === period - 1) {
-      emaValues.push(ema);
-    } else {
-      ema = candles[i].close * k + ema * (1 - k);
-      emaValues.push(ema);
-    }
+  const closes = candles.map(c => c.close);
+  const ema = [closes.slice(0, period).reduce((a, b) => a + b, 0) / period];
+  for (let i = period; i < closes.length; i++) {
+    ema.push(closes[i] * k + ema[ema.length - 1] * (1 - k));
   }
-  return emaValues;
+  return ema;
 }
 
 /**
- * Calculate RSI for a given period.
+ * Calculate RSI.
  */
 export function calculateRSI(candles, period = 14) {
-  if (candles.length < period + 1) return null;
-  let gains = 0;
-  let losses = 0;
-  for (let i = candles.length - period; i < candles.length; i++) {
-    const diff = candles[i].close - candles[i - 1].close;
-    if (diff > 0) gains += diff;
-    else losses += Math.abs(diff);
-  }
-  const avgGain = gains / period;
-  const avgLoss = losses / period;
-  if (avgLoss === 0) return 100;
-  const rs = avgGain / avgLoss;
-  return 100 - (100 / (1 + rs));
-}
-
-/**
- * Calculate RSI at a specific candle index.
- */
-function rsiAtIndex(candles, index, period = 14) {
-  if (index < period) return null;
+  if (candles.length < period + 1) return [];
+  const closes = candles.map(c => c.close);
+  const rsis = [];
   let gains = 0, losses = 0;
-  for (let i = index - period + 1; i <= index; i++) {
-    const diff = candles[i].close - candles[i - 1].close;
-    if (diff > 0) gains += diff;
-    else losses += Math.abs(diff);
+
+  for (let i = 1; i <= period; i++) {
+    const diff = closes[i] - closes[i - 1];
+    if (diff > 0) gains += diff; else losses -= diff;
   }
-  const avgGain = gains / period;
-  const avgLoss = losses / period;
-  if (avgLoss === 0) return 100;
-  return 100 - (100 / (1 + avgGain / avgLoss));
+  let avgGain = gains / period, avgLoss = losses / period;
+
+  for (let i = period; i < closes.length; i++) {
+    if (i > period) {
+      const diff = closes[i] - closes[i - 1];
+      avgGain = (avgGain * (period - 1) + Math.max(diff, 0)) / period;
+      avgLoss = (avgLoss * (period - 1) + Math.max(-diff, 0)) / period;
+    }
+    const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+    rsis.push(100 - 100 / (1 + rs));
+  }
+  return rsis;
 }
 
 /**
- * Detect true RSI divergence (not just overbought/oversold).
- * Bearish divergence: price makes Higher High, RSI makes Lower High.
- * Bullish divergence: price makes Lower Low, RSI makes Higher Low.
+ * Detect RSI divergence by comparing price swings vs RSI swings.
+ * Bearish: higher price high, lower RSI high.
+ * Bullish: lower price low, higher RSI low.
  */
 export function detectRSIDivergence(candles, direction, period = 14) {
-  const swings = findSwingPoints(candles, 3);
-  if (swings.length < 4) return { hasDivergence: false, rsiValue: calculateRSI(candles, period) };
+  const rsiValues = calculateRSI(candles, period);
+  const rsiValue = rsiValues[rsiValues.length - 1];
+  const isOverbought = rsiValue > 70;
+  const isOversold = rsiValue < 30;
+  let hasDivergence = false;
+  let detail = '';
 
-  const rsiValue = calculateRSI(candles, period);
+  const swings = findSwingPoints(candles.slice(-50), 3);
+  const offset = candles.length - 50 - period;
+  const rsiOffset = Math.max(0, offset);
 
   if (direction === 'short') {
-    // Bearish divergence: price HH but RSI LH
-    const highs = swings.filter(s => s.type === 'high').slice(-3);
-    if (highs.length >= 2) {
-      const prev = highs[highs.length - 2];
-      const last = highs[highs.length - 1];
-      const rsiPrev = rsiAtIndex(candles, prev.index, period);
-      const rsiLast = rsiAtIndex(candles, last.index, period);
-      if (rsiPrev != null && rsiLast != null) {
-        const priceHH = last.price > prev.price;
-        const rsiLH = rsiLast < rsiPrev;
-        if (priceHH && rsiLH) {
-          return { hasDivergence: true, rsiValue, type: 'bearish', detail: `Price HH but RSI LH (${rsiPrev.toFixed(0)}→${rsiLast.toFixed(0)})` };
-        }
+    const priceHighs = swings.filter(s => s.type === 'high').slice(-3);
+    if (priceHighs.length >= 2) {
+      const ph1 = priceHighs[priceHighs.length - 2];
+      const ph2 = priceHighs[priceHighs.length - 1];
+      const ri1 = rsiValues[rsiOffset + ph1.index];
+      const ri2 = rsiValues[rsiOffset + ph2.index];
+      if (ri1 && ri2 && ph2.price > ph1.price && ri2 < ri1) {
+        hasDivergence = true;
+        detail = `Bearish divergence: price HH (${ph2.price.toFixed(0)}) but RSI LH (${ri2?.toFixed(1)})`;
+      }
+    }
+  } else if (direction === 'long') {
+    const priceLows = swings.filter(s => s.type === 'low').slice(-3);
+    if (priceLows.length >= 2) {
+      const pl1 = priceLows[priceLows.length - 2];
+      const pl2 = priceLows[priceLows.length - 1];
+      const ri1 = rsiValues[rsiOffset + pl1.index];
+      const ri2 = rsiValues[rsiOffset + pl2.index];
+      if (ri1 && ri2 && pl2.price < pl1.price && ri2 > ri1) {
+        hasDivergence = true;
+        detail = `Bullish divergence: price LL (${pl2.price.toFixed(0)}) but RSI HL (${ri2?.toFixed(1)})`;
       }
     }
   }
 
-  if (direction === 'long') {
-    // Bullish divergence: price LL but RSI HL
-    const lows = swings.filter(s => s.type === 'low').slice(-3);
-    if (lows.length >= 2) {
-      const prev = lows[lows.length - 2];
-      const last = lows[lows.length - 1];
-      const rsiPrev = rsiAtIndex(candles, prev.index, period);
-      const rsiLast = rsiAtIndex(candles, last.index, period);
-      if (rsiPrev != null && rsiLast != null) {
-        const priceLL = last.price < prev.price;
-        const rsiHL = rsiLast > rsiPrev;
-        if (priceLL && rsiHL) {
-          return { hasDivergence: true, rsiValue, type: 'bullish', detail: `Price LL but RSI HL (${rsiPrev.toFixed(0)}→${rsiLast.toFixed(0)})` };
-        }
-      }
-    }
-  }
-
-  return { hasDivergence: false, rsiValue, isOverbought: rsiValue > 70, isOversold: rsiValue < 30 };
+  return { rsiValue, hasDivergence, detail, isOverbought, isOversold };
 }
-

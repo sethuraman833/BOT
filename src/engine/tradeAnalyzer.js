@@ -1,103 +1,133 @@
 // ─────────────────────────────────────────────────────────
-//  Trade Analyzer — Master 17-Step Orchestrator
-//  Pure logic — no React dependencies
+//  Trade Analyzer v6.0 — High-Conviction Institutional Engine
+//  Multi-timeframe alignment + weighted confluence scoring
 // ─────────────────────────────────────────────────────────
 
-import { detectOrderBlocks, detectFVGs, detectSweeps, detectStructureShifts, calculateEMA, calculateRSI, detectRSIDivergence, findSwingPoints } from './smcDetector.js';
+import {
+  detectOrderBlocks, detectFVGs, detectSweeps, detectStructureShifts,
+  calculateEMA, calculateRSI, detectRSIDivergence, findSwingPoints
+} from './smcDetector.js';
 import { calculateOTE, isInOTE } from './oteCalculator.js';
-import { calculateSmartSL, calculateTPs, calculatePositionSize, calculateRRR, calculateBreakevenMove } from './riskManager.js';
-import { scoreConfluence } from './confluenceScorer.js';
+import {
+  calculateSmartSL, calculateTPs, calculatePositionSize,
+  calculateRRR, calculateBreakevenMove
+} from './riskManager.js';
 import { getCurrentSession, isSessionValid } from './sessionFilter.js';
 import { RISK_AMOUNT } from '../utils/constants.js';
+
+// ─── CONSTANTS ───────────────────────────────────────────
+const MAX_SL_PCT     = 0.030; // 3.0% max SL (slightly wider for crypto volatility)
+const MIN_CONFLUENCE = 6;     // minimum score to trade
+const MIN_PILLARS    = 3;     // minimum pillars out of 5 to trade
+const MIN_RRR        = 2.5;   // minimum RRR (was 3.0, lowered for more opportunities)
 
 export function runAnalysis(data, config = {}) {
   const { symbol = 'BTCUSDT' } = config;
   const steps = [];
+
   const candles15m = data['15m'] || [];
-  const candles1h = data['1h'] || [];
-  const candles4h = data['4h'] || [];
-  const candles1d = data['1d'] || [];
+  const candles1h  = data['1h']  || [];
+  const candles4h  = data['4h']  || [];
+  const candles1d  = data['1d']  || [];
 
   if (candles15m.length < 50 || candles4h.length < 50) {
     return {
       decision: 'NO_TRADE',
       direction: null,
       rejectionReason: 'Insufficient candle data for analysis',
-      analysisSteps: ['ERROR: Not enough data loaded. Need at least 50 candles per timeframe.'],
-      confluenceScore: { total: 0, max: 11, checks: [], pillarsAllMet: false },
+      analysisSteps: ['ERROR: Not enough data. Need at least 50 candles per timeframe.'],
+      confluenceScore: { total: 0, max: 10, checks: [], pillarsAllMet: false, pillarsMet: 0, pillarsTotal: 5, tier: 'REJECT' },
     };
   }
 
   const currentPrice = candles15m[candles15m.length - 1].close;
 
   // ═══════════════════════════════════════════════
-  // STEP 1 — DAILY BIAS
+  // STEP 1 — MACRO DAILY BIAS (EMA 200)
   // ═══════════════════════════════════════════════
   const ema200_1d = calculateEMA(candles1d, 200);
   const lastEma200_1d = ema200_1d[ema200_1d.length - 1];
-  const dailyBias = lastEma200_1d ? (currentPrice > lastEma200_1d ? 'bullish' : 'bearish') : 'neutral';
-  steps.push(`Step 1 — Daily Bias: ${dailyBias.toUpperCase()} (Price ${dailyBias === 'bullish' ? 'above' : 'below'} Daily EMA200)`);
+
+  // Also check short-term daily trend via 50 EMA
+  const ema50_1d = calculateEMA(candles1d, 50);
+  const lastEma50_1d = ema50_1d[ema50_1d.length - 1];
+
+  const dailyBias = lastEma200_1d
+    ? (currentPrice > lastEma200_1d ? 'bullish' : 'bearish')
+    : 'neutral';
+  const dailyTrendStrong = lastEma200_1d && lastEma50_1d
+    ? (dailyBias === 'bullish' ? lastEma50_1d > lastEma200_1d : lastEma50_1d < lastEma200_1d)
+    : false;
+
+  steps.push(`Step 1 — Daily Bias: ${dailyBias.toUpperCase()} (Price ${dailyBias === 'bullish' ? 'above' : 'below'} Daily EMA200${dailyTrendStrong ? ' — Strong' : ''})`);
 
   // ═══════════════════════════════════════════════
-  // STEP 2 — 4H TREND STRUCTURE
+  // STEP 2 — 4H TREND STRUCTURE (HH/HL or LH/LL)
   // ═══════════════════════════════════════════════
   const swings4h = findSwingPoints(candles4h, 3);
   const lastHighs4h = swings4h.filter(s => s.type === 'high').slice(-3);
-  const lastLows4h = swings4h.filter(s => s.type === 'low').slice(-3);
+  const lastLows4h  = swings4h.filter(s => s.type === 'low').slice(-3);
 
   let trend4h = 'ranging';
   if (lastHighs4h.length >= 2 && lastLows4h.length >= 2) {
     const hh = lastHighs4h[lastHighs4h.length - 1].price > lastHighs4h[lastHighs4h.length - 2].price;
     const hl = lastLows4h[lastLows4h.length - 1].price > lastLows4h[lastLows4h.length - 2].price;
+    const lh = !hh;
+    const ll = !hl;
     if (hh && hl) trend4h = 'bullish';
-    else if (!hh && !hl) trend4h = 'bearish';
+    else if (lh && ll) trend4h = 'bearish';
   }
-  steps.push(`Step 2 — 4H Trend: ${trend4h.toUpperCase()} (${trend4h === 'bullish' ? 'HH/HL' : trend4h === 'bearish' ? 'LH/LL' : 'No clear structure'})`);
+  steps.push(`Step 2 — 4H Trend: ${trend4h.toUpperCase()} (${trend4h === 'bullish' ? 'HH/HL' : trend4h === 'bearish' ? 'LH/LL' : 'Ranging'})`);
 
   // ═══════════════════════════════════════════════
-  // STEP 3 — EMA STACK (4H)
+  // STEP 3 — EMA STACK ALIGNMENT (4H)
   // ═══════════════════════════════════════════════
-  const ema20_4h = calculateEMA(candles4h, 20);
-  const ema50_4h = calculateEMA(candles4h, 50);
+  const ema20_4h  = calculateEMA(candles4h, 20);
+  const ema50_4h  = calculateEMA(candles4h, 50);
   const ema200_4h = calculateEMA(candles4h, 200);
-  const lastEma20 = ema20_4h[ema20_4h.length - 1];
-  const lastEma50 = ema50_4h[ema50_4h.length - 1];
-  const lastEma200 = ema200_4h[ema200_4h.length - 1];
+  const e20 = ema20_4h[ema20_4h.length - 1];
+  const e50 = ema50_4h[ema50_4h.length - 1];
+  const e200 = ema200_4h[ema200_4h.length - 1];
 
-  const emaStackBullish = lastEma20 && lastEma50 && lastEma200 && lastEma20 > lastEma50 && lastEma50 > lastEma200;
-  const emaStackBearish = lastEma20 && lastEma50 && lastEma200 && lastEma20 < lastEma50 && lastEma50 < lastEma200;
-  steps.push(`Step 3 — EMA Stack: ${emaStackBullish ? 'Bullish (20>50>200)' : emaStackBearish ? 'Bearish (20<50<200)' : 'Mixed'}`);
+  const emaStackBullish = e20 && e50 && e200 && e20 > e50 && e50 > e200;
+  const emaStackBearish = e20 && e50 && e200 && e20 < e50 && e50 < e200;
+  const emaStackLabel   = emaStackBullish ? 'Bullish (20>50>200)' : emaStackBearish ? 'Bearish (20<50<200)' : 'Mixed';
+  steps.push(`Step 3 — EMA Stack: ${emaStackLabel}`);
 
   // ═══════════════════════════════════════════════
-  // STEP 4 — SMC DETECTION (Order Blocks)
+  // STEP 4 — ORDER BLOCK DETECTION
   // ═══════════════════════════════════════════════
   const obs4h = detectOrderBlocks(candles4h, currentPrice);
   const obs1h = detectOrderBlocks(candles1h, currentPrice);
-  steps.push(`Step 4 — Order Blocks: ${obs4h.length} active on 4H, ${obs1h.length} active on 1H`);
+  steps.push(`Step 4 — Order Blocks: ${obs4h.length} on 4H, ${obs1h.length} on 1H`);
 
   // ═══════════════════════════════════════════════
-  // STEP 5 — FVG DETECTION
+  // STEP 5 — FAIR VALUE GAPS
   // ═══════════════════════════════════════════════
   const fvgs4h = detectFVGs(candles4h, currentPrice);
   const fvgs1h = detectFVGs(candles1h, currentPrice);
   steps.push(`Step 5 — Fair Value Gaps: ${fvgs4h.length} unfilled on 4H, ${fvgs1h.length} on 1H`);
 
   // ═══════════════════════════════════════════════
-  // STEP 6 — LIQUIDITY SWEEPS
+  // STEP 6 — LIQUIDITY SWEEPS (15m)
   // ═══════════════════════════════════════════════
-  const sweeps = detectSweeps(candles15m);
-  steps.push(`Step 6 — Liquidity Sweeps: ${sweeps.length} confirmed (${sweeps.length > 0 ? sweeps.map(s => s.type).join(', ') : 'none'})`);
+  const sweeps15m = detectSweeps(candles15m);
+  const sweeps1h  = detectSweeps(candles1h);
+  const allSweeps = [...sweeps15m, ...sweeps1h];
+  steps.push(`Step 6 — Liquidity Sweeps: ${allSweeps.length} confirmed (${allSweeps.length > 0 ? allSweeps.map(s => s.type).join(', ') : 'none'})`);
 
   // ═══════════════════════════════════════════════
-  // STEP 7 — STRUCTURE SHIFTS (15m)
+  // STEP 7 — 15m / 1H STRUCTURE SHIFTS (BOS / CHOCH)
   // ═══════════════════════════════════════════════
   const shifts15m = detectStructureShifts(candles15m);
-  steps.push(`Step 7 — 15m Structure: ${shifts15m.length > 0 ? shifts15m.map(s => `${s.type} ${s.direction}`).join(', ') : 'No confirmed shifts'}`);
+  const shifts1h  = detectStructureShifts(candles1h);
+  const allShifts = [...shifts15m, ...shifts1h];
+  steps.push(`Step 7 — Structure Shifts: ${allShifts.length > 0 ? allShifts.map(s => `${s.type} ${s.direction}`).join(', ') : 'None'}`);
 
   // ═══════════════════════════════════════════════
   // STEP 8 — SESSION FILTER
   // ═══════════════════════════════════════════════
-  const session = getCurrentSession();
+  const session   = getCurrentSession();
   const sessionOk = isSessionValid(session);
   steps.push(`Step 8 — Session: ${session.name} (${session.status})`);
 
@@ -107,43 +137,40 @@ export function runAnalysis(data, config = {}) {
   let direction = null;
   let upProb = 50, downProb = 50, rangeProb = 0;
 
-  if (trend4h === 'bullish' && emaStackBullish) { direction = 'long'; upProb = 70; downProb = 20; rangeProb = 10; }
-  else if (trend4h === 'bearish' && emaStackBearish) { direction = 'short'; upProb = 20; downProb = 70; rangeProb = 10; }
-  else if (trend4h === 'bullish') { direction = 'long'; upProb = 60; downProb = 25; rangeProb = 15; }
+  // Primary: 4H trend aligned with macro daily bias
+  if (trend4h === 'bullish' && dailyBias === 'bullish') { direction = 'long';  upProb = 75; downProb = 15; rangeProb = 10; }
+  else if (trend4h === 'bearish' && dailyBias === 'bearish') { direction = 'short'; upProb = 15; downProb = 75; rangeProb = 10; }
+  // Secondary: 4H trend alone (counter-daily is lower probability)
+  else if (trend4h === 'bullish') { direction = 'long';  upProb = 60; downProb = 25; rangeProb = 15; }
   else if (trend4h === 'bearish') { direction = 'short'; upProb = 25; downProb = 60; rangeProb = 15; }
   else { rangeProb = 50; upProb = 25; downProb = 25; }
 
-  // Sweep confirmation boosts
-  if (sweeps.some(s => s.type === 'bullish') && direction === 'long') upProb += 5;
-  if (sweeps.some(s => s.type === 'bearish') && direction === 'short') downProb += 5;
+  // Boosts from EMA stack alignment
+  if (emaStackBullish && direction === 'long')  upProb   = Math.min(upProb + 5, 90);
+  if (emaStackBearish && direction === 'short') downProb = Math.min(downProb + 5, 90);
+
+  // Boost from sweep confirmation
+  if (allSweeps.some(s => s.type === 'bullish') && direction === 'long')  upProb   = Math.min(upProb + 5, 90);
+  if (allSweeps.some(s => s.type === 'bearish') && direction === 'short') downProb = Math.min(downProb + 5, 90);
 
   steps.push(`Step 9 — Direction: ${direction ? direction.toUpperCase() : 'NEUTRAL'} (↑${upProb}% ↓${downProb}% ◼${rangeProb}%)`);
 
   // ═══════════════════════════════════════════════
-  // STEP 10 — OTE ZONE CALCULATION
+  // STEP 10 — OTE ZONE (Optimal Trade Entry, 61.8–79%)
   // ═══════════════════════════════════════════════
   const swings1h = findSwingPoints(candles1h, 3);
-  const recentHighs1h = swings1h.filter(s => s.type === 'high').slice(-2);
-  const recentLows1h = swings1h.filter(s => s.type === 'low').slice(-2);
+  const recentHighs1h = swings1h.filter(s => s.type === 'high').slice(-3);
+  const recentLows1h  = swings1h.filter(s => s.type === 'low').slice(-3);
 
-  // Find the correct impulse leg that brackets current price
   let oteZone = null;
   if (direction === 'long' && recentHighs1h.length > 0 && recentLows1h.length > 0) {
-    // For long: find the most recent swing low BELOW price and swing high ABOVE price
-    const relevantLow = [...swings1h.filter(s => s.type === 'low' && s.price < currentPrice)].pop();
-    const relevantHigh = [...swings1h.filter(s => s.type === 'high' && s.price > currentPrice)].pop()
-      || recentHighs1h[recentHighs1h.length - 1];
-    if (relevantLow && relevantHigh) {
-      oteZone = calculateOTE(relevantHigh.price, relevantLow.price, 'long');
-    }
+    const relevantLow  = [...swings1h.filter(s => s.type === 'low'  && s.price < currentPrice)].pop();
+    const relevantHigh = [...swings1h.filter(s => s.type === 'high' && s.price > currentPrice)].pop() || recentHighs1h[recentHighs1h.length - 1];
+    if (relevantLow && relevantHigh) oteZone = calculateOTE(relevantHigh.price, relevantLow.price, 'long');
   } else if (direction === 'short' && recentHighs1h.length > 0 && recentLows1h.length > 0) {
-    // For short: find the most recent swing high ABOVE price and swing low BELOW price
     const relevantHigh = [...swings1h.filter(s => s.type === 'high' && s.price > currentPrice)].pop();
-    const relevantLow = [...swings1h.filter(s => s.type === 'low' && s.price < currentPrice)].pop()
-      || recentLows1h[recentLows1h.length - 1];
-    if (relevantHigh && relevantLow) {
-      oteZone = calculateOTE(relevantHigh.price, relevantLow.price, 'short');
-    }
+    const relevantLow  = [...swings1h.filter(s => s.type === 'low'  && s.price < currentPrice)].pop() || recentLows1h[recentLows1h.length - 1];
+    if (relevantHigh && relevantLow) oteZone = calculateOTE(relevantHigh.price, relevantLow.price, 'short');
   }
 
   const inOTE = isInOTE(currentPrice, oteZone);
@@ -159,160 +186,186 @@ export function runAnalysis(data, config = {}) {
   let breakevenMove = null;
 
   if (direction) {
-    // Find nearest OB for invalidation
+    // Identify nearest OB for invalidation boundary
     const nearestOB = direction === 'long'
       ? obs4h.filter(o => o.type === 'demand').sort((a, b) => b.entryBoundary - a.entryBoundary)[0]
       : obs4h.filter(o => o.type === 'supply').sort((a, b) => a.entryBoundary - b.entryBoundary)[0];
 
     const invalidationLevel = nearestOB
       ? (direction === 'long' ? nearestOB.lowerBound : nearestOB.upperBound)
-      : (direction === 'long' ? currentPrice * 0.98 : currentPrice * 1.02);
+      : (direction === 'long' ? currentPrice * 0.97 : currentPrice * 1.03);
 
-    // Refine entry with OTE if available
+    // Refine entry: if in OTE, use midpoint. Otherwise, use OB entry boundary if price is near one.
     if (inOTE && oteZone) {
       entry = oteZone.midpoint;
+    } else if (nearestOB) {
+      entry = nearestOB.entryBoundary;
     }
 
     slData = calculateSmartSL(invalidationLevel, direction, [...fvgs4h, ...fvgs1h]);
 
-    // Calculate TPs using 4H swing targets
     const allSwings = [...swings4h.filter(s =>
       direction === 'long' ? s.type === 'high' && s.price > entry : s.type === 'low' && s.price < entry
     )];
     tpData = calculateTPs(entry, slData.value, allSwings, fvgs4h, direction);
 
-    positionSize = calculatePositionSize(entry, slData.value);
+    positionSize  = calculatePositionSize(entry, slData.value);
     breakevenMove = calculateBreakevenMove(entry, slData.value);
   }
 
-  steps.push(`Step 11 — Trade Levels: Entry ${entry.toFixed(2)} | SL ${slData ? slData.value.toFixed(2) : 'N/A'} | TPs ${tpData ? tpData.tps.map(t => t.level.toFixed(2)).join(' / ') : 'N/A'}`);
+  const slPct = slData ? Math.abs(entry - slData.value) / entry : 0;
+  steps.push(`Step 11 — Entry: ${entry.toFixed(2)} | SL: ${slData ? slData.value.toFixed(2) : 'N/A'} (${(slPct * 100).toFixed(2)}%) | TPs: ${tpData ? tpData.tps.map(t => t.level.toFixed(2)).join(' / ') : 'N/A'}`);
 
   // ═══════════════════════════════════════════════
-  // STEP 12 — RSI CHECK
+  // STEP 12 — RSI DIVERGENCE CHECK (1H)
   // ═══════════════════════════════════════════════
-  // True RSI divergence detection (not just overbought/oversold)
-  const rsiResult = detectRSIDivergence(candles1h, direction, 14);
-  const rsi1h = rsiResult.rsiValue;
+  const rsiResult     = detectRSIDivergence(candles1h, direction, 14);
+  const rsi1h         = rsiResult.rsiValue;
   const rsiDivergence = rsiResult.hasDivergence;
-  const rsiDetail = rsiDivergence
+  const rsiDetail     = rsiDivergence
     ? rsiResult.detail
     : rsiResult.isOverbought ? 'Overbought (not divergence)'
-    : rsiResult.isOversold ? 'Oversold (not divergence)'
+    : rsiResult.isOversold   ? 'Oversold (not divergence)'
     : 'Neutral';
+
   steps.push(`Step 12 — RSI (1H): ${rsi1h ? rsi1h.toFixed(1) : 'N/A'} | Divergence: ${rsiDivergence ? 'YES — ' + rsiDetail : 'NO — ' + rsiDetail}`);
 
   // ═══════════════════════════════════════════════
-  // STEP 13 — EMA200 SUPPORT/RESISTANCE
+  // STEP 13 — EMA200 S/R CHECK
   // ═══════════════════════════════════════════════
-  const ema200Acting = lastEma200 && Math.abs(currentPrice - lastEma200) / lastEma200 < 0.005;
-  steps.push(`Step 13 — EMA200 S/R: ${ema200Acting ? 'Price near EMA200 — acting as support/resistance' : 'Not a factor'}`);
+  const ema200Acting = e200 && Math.abs(currentPrice - e200) / e200 < 0.005;
+  steps.push(`Step 13 — EMA200 S/R: ${ema200Acting ? `Price near EMA200 (${e200 ? e200.toFixed(2) : 'N/A'}) — acting as ${direction === 'long' ? 'support' : 'resistance'}` : 'Not a factor'}`);
 
   // ═══════════════════════════════════════════════
   // STEP 14 — RRR EVALUATION
   // ═══════════════════════════════════════════════
-  // Use the BEST RRR across all TPs, not just TP1
-  const bestRRR = tpData && tpData.tps.length > 0 ? Math.max(...tpData.tps.map(t => t.rrr)) : 0;
-  const rrrMeetsMinimum = bestRRR >= 3.0;
-  const rrrCaution = bestRRR >= 1.5 && bestRRR < 3.0;
-  steps.push(`Step 14 — RRR: ${bestRRR.toFixed(1)} (${rrrMeetsMinimum ? 'MEETS MINIMUM' : rrrCaution ? 'CAUTION — below 1:3' : 'INSUFFICIENT'})`);
+  const bestRRR       = tpData && tpData.tps.length > 0 ? Math.max(...tpData.tps.map(t => t.rrr)) : 0;
+  const rrrMeetsMin   = bestRRR >= MIN_RRR;
+  const rrrCaution    = bestRRR >= 1.5 && bestRRR < MIN_RRR;
+  steps.push(`Step 14 — RRR: ${bestRRR.toFixed(1)} (${rrrMeetsMin ? `MEETS MINIMUM ≥ ${MIN_RRR}` : rrrCaution ? 'CAUTION — below minimum' : 'INSUFFICIENT'})`);
 
   // ═══════════════════════════════════════════════
-  // STEP 15 — CONFLUENCE SCORING
+  // STEP 15 — CONFLUENCE SCORING (10-point weighted system)
   // ═══════════════════════════════════════════════
-  const trend4HAligned = (direction === 'long' && trend4h === 'bullish') || (direction === 'short' && trend4h === 'bearish');
-  // Liquidity event = actual sweep confirmed OR price is currently filling an FVG
-  const priceInFVG = [...fvgs4h, ...fvgs1h].some(f => currentPrice >= f.lower && currentPrice <= f.upper);
-  const liquidityEvent = sweeps.length > 0 || priceInFVG;
-  const structureShift15m = shifts15m.length > 0;
+  const trend4HAligned  = (direction === 'long' && trend4h === 'bullish') || (direction === 'short' && trend4h === 'bearish');
+  const dailyAligned    = (direction === 'long' && dailyBias === 'bullish') || (direction === 'short' && dailyBias === 'bearish');
+  const priceInFVG      = [...fvgs4h, ...fvgs1h].some(f => currentPrice >= f.lower && currentPrice <= f.upper);
+  const liquidityEvent  = allSweeps.length > 0 || priceInFVG;
+  const structureShift  = allShifts.length > 0;
+  const hasBOS          = allShifts.some(s => s.type === 'BOS');
+  const hasCHOCH        = allShifts.some(s => s.type === 'CHOCH');
+  const orderFlowAligned = emaStackBullish && direction === 'long' || emaStackBearish && direction === 'short';
 
-  const confluenceScore = scoreConfluence({
-    trend4HAligned,
-    liquidityEvent,
-    structureShift15m,
-    sessionActive: sessionOk,
-    rrrMeetsMinimum,
-    dailyAligned: (direction === 'long' && dailyBias === 'bullish') || (direction === 'short' && dailyBias === 'bearish'),
-    rsiDivergence,
-    patternAligned: shifts15m.some(s => s.type === 'BOS'),
-    ema200Support: ema200Acting,
-    orderFlowAligned: emaStackBullish || emaStackBearish,
-    oteEntry: inOTE,
-  });
+  // 10 weighted checks (5 pillars marked as critical)
+  const checks = [
+    // PILLARS (critical)
+    { label: '4H Trend Aligned',            met: trend4HAligned,   pillar: true,  weight: 2 },
+    { label: 'Liquidity Sweep / FVG Fill',  met: liquidityEvent,   pillar: true,  weight: 2 },
+    { label: '15m / 1H BOS or CHOCH',       met: structureShift,   pillar: true,  weight: 2 },
+    { label: 'London / NY Session',         met: sessionOk,        pillar: true,  weight: 1 },
+    { label: 'RRR ≥ 1:2.5',                met: rrrMeetsMin,      pillar: true,  weight: 1 },
+    // SUPPORTING
+    { label: 'Daily Bias Aligned',          met: dailyAligned,     pillar: false, weight: 1 },
+    { label: 'RSI Divergence Present',      met: rsiDivergence,    pillar: false, weight: 1 },
+    { label: 'BOS Confirmed (not just CHOCH)', met: hasBOS,        pillar: false, weight: 1 },
+    { label: 'EMA200 Acting as S/R',        met: ema200Acting,     pillar: false, weight: 1 },
+    { label: 'Entry in OTE Zone (Fib)',     met: inOTE,            pillar: false, weight: 1 },
+  ];
 
-  steps.push(`Step 15 — Confluence: ${confluenceScore.total} / ${confluenceScore.max} (${confluenceScore.tier}) | Pillars: ${confluenceScore.pillarsMet}/${confluenceScore.pillarsTotal}`);
+  const totalWeight  = checks.reduce((s, c) => s + c.weight, 0); // 13 weighted
+  const scoredWeight = checks.reduce((s, c) => s + (c.met ? c.weight : 0), 0);
+  const pillarsMet   = checks.filter(c => c.pillar && c.met).length;
+  const pillarsTotal = checks.filter(c => c.pillar).length; // 5
+
+  // Normalize to /10 for display
+  const normalizedTotal = Math.round((scoredWeight / totalWeight) * 10);
+  const pillarsAllMet   = pillarsMet >= MIN_PILLARS;
+  const tier = normalizedTotal >= 8 ? 'EXCEPTIONAL'
+    : normalizedTotal >= 6 ? 'HIGH'
+    : normalizedTotal >= 4 ? 'MEDIUM'
+    : 'REJECT';
+
+  const confluenceScore = {
+    total: normalizedTotal,
+    max: 10,
+    rawScore: scoredWeight,
+    rawMax: totalWeight,
+    pillarsMet,
+    pillarsTotal,
+    pillarsAllMet,
+    tier,
+    checks,
+  };
+
+  steps.push(`Step 15 — Confluence: ${normalizedTotal}/10 (${tier}) | Pillars: ${pillarsMet}/${pillarsTotal}`);
 
   // ═══════════════════════════════════════════════
-  // STEP 16 — REJECTION & WAIT CHECKS
+  // STEP 16 — REJECTION / WAIT / APPROVE
   // ═══════════════════════════════════════════════
   let rejectionReason = null;
-  let waitCondition = null;
+  let waitCondition   = null;
 
   if (!direction) {
     rejectionReason = 'No clear directional bias — market is ranging';
-  } else if (!confluenceScore.pillarsAllMet) {
-    const missingPillars = confluenceScore.checks.filter(c => c.pillar && !c.met).map(c => c.label);
-    
-    // If the ONLY missing pillars are entry triggers (Sweep or BOS) but structure/session are aligned
-    const onlyTriggersMissing = missingPillars.every(p => 
-      p === '15m BOS / CHOCH' || p === 'Liquidity Sweep / FVG Fill'
-    );
+  } else if (!sessionOk && normalizedTotal < 8) {
+    rejectionReason = 'Outside London / NY session window (low-probability time)';
+  } else if (slPct > MAX_SL_PCT) {
+    rejectionReason = `SL distance exceeds ${MAX_SL_PCT * 100}% (${(slPct * 100).toFixed(1)}%) — too wide`;
+  } else if (pillarsMet < MIN_PILLARS) {
+    const missingPillars = checks.filter(c => c.pillar && !c.met).map(c => c.label);
 
-    if (onlyTriggersMissing && confluenceScore.total >= 5) {
-      const isSweepMissing = missingPillars.includes('Liquidity Sweep / FVG Fill');
-      const isBOSMissing = missingPillars.includes('15m BOS / CHOCH');
-      
-      const triggerDetails = [];
-      if (isSweepMissing) {
-         const targetSwing = direction === 'long' 
-           ? recentLows1h[recentLows1h.length - 1]?.price 
-           : recentHighs1h[recentHighs1h.length - 1]?.price;
-         triggerDetails.push(`Sweep at ~${targetSwing ? targetSwing.toFixed(2) : 'zone boundary'}`);
+    // Is ONLY the entry trigger (Sweep/BOS) missing while everything else is aligned?
+    const entryTriggerPillars = ['Liquidity Sweep / FVG Fill', '15m / 1H BOS or CHOCH'];
+    const onlyEntryMissing = missingPillars.every(p => entryTriggerPillars.includes(p));
+
+    if (onlyEntryMissing && normalizedTotal >= 5) {
+      const targets = [];
+      if (!liquidityEvent) {
+        const targetSwing = direction === 'long'
+          ? recentLows1h[recentLows1h.length - 1]?.price
+          : recentHighs1h[recentHighs1h.length - 1]?.price;
+        targets.push(`Sweep at ~$${targetSwing ? targetSwing.toFixed(2) : 'zone boundary'}`);
       }
-      if (isBOSMissing) triggerDetails.push('15m BOS close');
-      
-      waitCondition = `Waiting for triggers: ${triggerDetails.join(' and ')}`;
+      if (!structureShift) targets.push('15m BOS / CHOCH close');
+      waitCondition = `Setup is aligned — waiting for: ${targets.join(' or ')}`;
     } else {
-      rejectionReason = `Missing pillars: ${missingPillars.join(', ')}`;
+      rejectionReason = `Missing critical pillars: ${missingPillars.join(', ')}`;
     }
-  } else if (confluenceScore.total <= 4) {
-    rejectionReason = `Confluence too low: ${confluenceScore.total}/11`;
-  } else if (slData && Math.abs(entry - slData.value) / entry > 0.025) {
-    rejectionReason = `SL distance exceeds 2.5% (${(Math.abs(entry - slData.value) / entry * 100).toFixed(1)}%)`;
-  } else if (Math.max(upProb, downProb) < 55) {
-    rejectionReason = `Directional probability too low (${Math.max(upProb, downProb)}%)`;
+  } else if (normalizedTotal < MIN_CONFLUENCE) {
+    rejectionReason = `Confluence too low: ${normalizedTotal}/10 (minimum ${MIN_CONFLUENCE})`;
+  } else if (!rrrMeetsMin && !rrrCaution) {
+    rejectionReason = `RRR insufficient: ${bestRRR.toFixed(1)} (minimum ${MIN_RRR})`;
   }
 
-  if (!rejectionReason && !waitCondition && rrrCaution && !rrrMeetsMinimum) {
-    waitCondition = 'RRR is between 1:1.5 and 1:3 — proceed with caution';
+  if (!rejectionReason && !waitCondition && rrrCaution) {
+    waitCondition = `RRR is ${bestRRR.toFixed(1)} — acceptable but tighten entry if possible`;
   }
 
   if (waitCondition && !rejectionReason) {
     steps.push(`Step 16 — Status: PENDING — ${waitCondition}`);
+  } else if (rejectionReason) {
+    steps.push(`Step 16 — Rejection: ${rejectionReason}`);
   } else {
-    steps.push(`Step 16 — Rejection: ${rejectionReason || 'NONE'}`);
+    steps.push(`Step 16 — Approved: All filters passed`);
   }
 
   // ═══════════════════════════════════════════════
   // STEP 17 — FINAL DECISION
   // ═══════════════════════════════════════════════
   let decision;
-  if (rejectionReason) {
-    decision = 'NO_TRADE';
-  } else if (waitCondition) {
-    decision = 'WAIT';
-  } else {
-    decision = 'TAKE_NOW';
-  }
+  if (rejectionReason)  decision = 'NO_TRADE';
+  else if (waitCondition) decision = 'WAIT';
+  else                  decision = 'TAKE_NOW';
 
   steps.push(`Step 17 — Decision: ${decision}`);
 
-  // Build key risk and invalidation descriptions
-  const keyRisk = lastEma200
-    ? `EMA200 ${direction === 'long' ? 'overhead resistance' : 'support'} at ${lastEma200.toFixed(2)}`
+  // Key risk and invalidation text
+  const keyRisk = e200
+    ? `EMA200 ${direction === 'long' ? 'overhead resistance' : 'support'} at ${e200.toFixed(2)}`
     : 'Monitor higher timeframe structure';
 
   const invalidationLevel = slData
-    ? `Close ${direction === 'long' ? 'below' : 'above'} ${slData.rawInvalidation.toFixed(2)} (${direction === 'long' ? 'demand' : 'supply'} OB boundary)`
+    ? `Close ${direction === 'long' ? 'below' : 'above'} ${slData.rawInvalidation.toFixed(2)}`
     : 'N/A';
 
   return {
@@ -334,7 +387,7 @@ export function runAnalysis(data, config = {}) {
     breakevenMove,
     confluenceScore,
     session,
-    upProbability: upProb,
+    upProbability:   upProb,
     downProbability: downProb,
     rangeProbability: rangeProb,
     rejectionReason,
@@ -343,13 +396,13 @@ export function runAnalysis(data, config = {}) {
     invalidationLevel,
     analysisSteps: steps,
     smcData: {
-      orderBlocks: [...obs4h, ...obs1h],
-      fvgs: [...fvgs4h, ...fvgs1h],
-      sweeps,
-      structureShifts: shifts15m,
+      orderBlocks:     [...obs4h, ...obs1h],
+      fvgs:            [...fvgs4h, ...fvgs1h],
+      sweeps:          allSweeps,
+      structureShifts: allShifts,
     },
     oteZone,
-    ema200_4h: lastEma200,
+    ema200_4h: e200,
     symbol,
   };
 }

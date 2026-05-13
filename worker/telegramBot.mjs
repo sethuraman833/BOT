@@ -1,10 +1,10 @@
 // ─────────────────────────────────────────────────────────
-//  Telegram Bot — Message Dispatch + Formatting
+//  Telegram Bot v6 — Message Dispatch + Formatting
 // ─────────────────────────────────────────────────────────
 
 import TelegramBot from 'node-telegram-bot-api';
 
-const token = process.env.TELEGRAM_BOT_TOKEN;
+const token  = process.env.TELEGRAM_BOT_TOKEN;
 const chatId = process.env.TELEGRAM_CHAT_ID;
 let bot = null;
 
@@ -17,29 +17,49 @@ if (token && chatId) {
 
 export async function sendTradeAlert(analysis) {
   if (!bot || !chatId) return;
-  const { symbol, direction, entry, stopLoss, tp1, tp2, tp3, rrr, positionSize, breakevenMove, confluenceScore, session, keyRisk, invalidationLevel } = analysis;
 
-  const slPct = entry && stopLoss?.value ? ((Math.abs(entry - stopLoss.value) / entry) * 100).toFixed(2) : '?';
+  const {
+    symbol, direction, entry, stopLoss, tp1, tp2, tp3,
+    rrr, positionSize, breakevenMove, confluenceScore,
+    session, keyRisk, invalidationLevel, aiAnalysis,
+    upProbability, downProbability, waitCondition, decision,
+  } = analysis;
 
-  const aiSection = analysis.aiAnalysis ? `
-🧠 *AI SECOND OPINION*
-Status  : ${analysis.aiAnalysis.decision}
-Reason  : ${analysis.aiAnalysis.reasoning}
-` : '';
+  const slPct   = entry && stopLoss?.value ? ((Math.abs(entry - stopLoss.value) / entry) * 100).toFixed(2) : '?';
+  const isWait  = decision === 'WAIT';
 
-  const msg = `🚨 *HIGH PROBABILITY SETUP — ${symbol}*
+  // Direction emoji
+  const dirEmoji = direction === 'long' ? '🟢 LONG' : '🔴 SHORT';
 
-Direction : ${direction?.toUpperCase() || '—'}
-Confluence: ${confluenceScore.total} / ${confluenceScore.max} ⭐
+  // Confluence colour
+  const confEmoji = confluenceScore.total >= 8 ? '🔥' : confluenceScore.total >= 6 ? '✅' : '⚠️';
+
+  // AI section (optional)
+  const aiSection = aiAnalysis
+    ? `\n🧠 *AI OPINION*\nVerdict  : ${aiAnalysis.decision}\nReasoning: ${aiAnalysis.reasoning}\n`
+    : '';
+
+  const header = isWait
+    ? `⏳ *WATCH SETUP — ${symbol}*`
+    : `🚨 *HIGH-PROBABILITY SETUP — ${symbol}*`;
+
+  const waitNote = isWait
+    ? `\n⏳ _${waitCondition}_\n`
+    : '';
+
+  const msg = `${header}
+${waitNote}
+${dirEmoji} | Confluence ${confEmoji} ${confluenceScore.total}/10 (${confluenceScore.tier})
 Session   : ${session.name}
+Probability: ↑${upProbability}% ↓${downProbability}%
 
 📍 Entry     : $${entry?.toFixed(2)}
 🛑 Stop Loss : $${stopLoss?.value?.toFixed(2)} (${slPct}% risk)
-🎯 TP1       : $${tp1?.toFixed(2)} → RRR 1:${rrr.tp1?.toFixed(1)}
+🎯 TP1       : $${tp1?.toFixed(2) || '—'} → RRR 1:${rrr.tp1?.toFixed(1) || '—'}
 🎯 TP2       : $${tp2?.toFixed(2) || '—'} → RRR 1:${rrr.tp2?.toFixed(1) || '—'}
 🎯 TP3       : $${tp3?.toFixed(2) || '—'} → RRR 1:${rrr.tp3?.toFixed(1) || '—'}
 ${aiSection}
-📦 Size      : ${positionSize?.toFixed(4)}
+📦 Size      : ${positionSize?.toFixed(4)} units
 💰 Max Risk  : $5.00
 ⚡ Breakeven : $${breakevenMove?.toFixed(2)}
 
@@ -50,7 +70,7 @@ ${aiSection}
 
   try {
     await bot.sendMessage(chatId, msg, { parse_mode: 'Markdown' });
-    console.log(`[TELEGRAM] Alert sent for ${symbol}`);
+    console.log(`[TELEGRAM] Alert sent for ${symbol} — ${decision}`);
   } catch (err) {
     console.error('[TELEGRAM] Send failed:', err.message);
   }
