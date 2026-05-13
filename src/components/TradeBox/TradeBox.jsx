@@ -72,10 +72,17 @@ export default function TradeBox({ analysis }) {
       <div className="trade-divider" />
 
       {/* ── TP Rows ───────────────────────────────────── */}
-      {tpDetails && tpDetails.map((tp, i) => {
-        const pctMove = entry
+      {tpDetails && Array.isArray(tpDetails) && tpDetails.map((tp, i) => {
+        if (!tp || !tp.level) return null;
+        
+        const pctMove = (entry && tp.level)
           ? ((Math.abs(tp.level - entry) / entry) * 100).toFixed(2)
           : '—';
+        
+        const rrrLabel = tp.rrr !== undefined && tp.rrr !== null
+          ? `1:${Number(tp.rrr).toFixed(1)}`
+          : '—';
+
         return (
           <div className={`trade-level-row tp tp${i + 1}`} key={i}>
             <div className="tlr-left">
@@ -84,9 +91,9 @@ export default function TradeBox({ analysis }) {
             </div>
             <div className="tlr-right">
               <span className="tlr-price text-green mono">{formatPrice(tp.level)}</span>
-              <span className="tlr-rrr text-green">1:{tp.rrr?.toFixed(1)}</span>
+              <span className="tlr-rrr text-green">{rrrLabel}</span>
               <span className="tlr-pct text-dim">+{pctMove}%</span>
-              <span className="tlr-close text-dim">→ {tp.closePercent}%</span>
+              <span className="tlr-close text-dim">→ {tp.closePercent || 0}%</span>
             </div>
           </div>
         );

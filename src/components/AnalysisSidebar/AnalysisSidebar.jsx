@@ -88,17 +88,6 @@ function ProbabilityBars({ up, down, range }) {
   );
 }
 
-export default function AnalysisSidebar() {
-  const { analysis, isAnalyzing } = useMarket();
-
-  if (isAnalyzing) {
-    return (
-      <aside className="analysis-sidebar">
-        <div className="sidebar-empty"><div className="spinner" style={{ width: 24, height: 24 }} /><p>Running 17-step analysis...</p></div>
-      </aside>
-    );
-  }
-
 function AIOpinion({ aiAnalysis }) {
   if (!aiAnalysis) return null;
 
@@ -106,6 +95,7 @@ function AIOpinion({ aiAnalysis }) {
   if (aiAnalysis.decision === 'AGREE') colorClass = 'text-green';
   if (aiAnalysis.decision === 'DISAGREE') colorClass = 'text-red';
   if (aiAnalysis.decision === 'CAUTION') colorClass = 'text-yellow';
+  if (aiAnalysis.decision === 'ERROR') colorClass = 'text-red';
 
   return (
     <div className="sidebar-section">
@@ -119,6 +109,17 @@ function AIOpinion({ aiAnalysis }) {
     </div>
   );
 }
+
+export default function AnalysisSidebar() {
+  const { analysis, isAnalyzing } = useMarket();
+
+  if (isAnalyzing) {
+    return (
+      <aside className="analysis-sidebar">
+        <div className="sidebar-empty"><div className="spinner" style={{ width: 24, height: 24 }} /><p>Running 17-step analysis...</p></div>
+      </aside>
+    );
+  }
 
   if (!analysis) {
     return (
@@ -136,14 +137,27 @@ function AIOpinion({ aiAnalysis }) {
     <aside className="analysis-sidebar">
       <div className="sidebar-scroll">
         <DecisionBadge decision={analysis.decision} waitCondition={analysis.waitCondition} />
+        
         {analysis.rejectionReason && (
           <div className="sidebar-section"><div className="rejection-banner">✗ {analysis.rejectionReason}</div></div>
         )}
+
         <ConfluenceSection score={analysis.confluenceScore} />
+        
         <AIOpinion aiAnalysis={analysis.aiAnalysis} />
-        <ProbabilityBars up={analysis.upProbability} down={analysis.downProbability} range={analysis.rangeProbability} />
+
+        {analysis.upProbability !== undefined && (
+          <ProbabilityBars 
+            up={analysis.upProbability} 
+            down={analysis.downProbability} 
+            range={analysis.rangeProbability} 
+          />
+        )}
+
         <SMCSection smcData={analysis.smcData} />
+        
         <TradeBox analysis={analysis} />
+        
         <StepAccordion steps={analysis.analysisSteps} />
       </div>
     </aside>
