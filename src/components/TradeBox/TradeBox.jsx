@@ -2,7 +2,15 @@ import { formatPrice, formatSize } from '../../utils/formatters.js';
 import './TradeBox.css';
 
 export default function TradeBox({ analysis }) {
-  if (!analysis || !analysis.direction) return null;
+  if (!analysis || !analysis.direction) {
+    return (
+      <div className="sidebar-section">
+        <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-dim)' }}>
+          No trade direction detected.
+        </div>
+      </div>
+    );
+  }
 
   const {
     direction, entry, stopLoss, tpDetails,
@@ -11,7 +19,7 @@ export default function TradeBox({ analysis }) {
   } = analysis;
 
   const isLong = direction === 'long';
-  const slPct  = entry && stopLoss?.value
+  const slPct  = (entry && stopLoss?.value)
     ? ((Math.abs(entry - stopLoss.value) / entry) * 100).toFixed(2)
     : '—';
 
@@ -30,15 +38,15 @@ export default function TradeBox({ analysis }) {
       <div className="trade-meta-row">
         <div className="trade-meta-cell">
           <span className="tm-label">Asset</span>
-          <span className="tm-value mono">{symbol}</span>
+          <span className="tm-value mono">{String(symbol || '—')}</span>
         </div>
         <div className="trade-meta-cell">
           <span className="tm-label">Session</span>
-          <span className="tm-value">{session?.name || '—'}</span>
+          <span className="tm-value">{String(session?.name || '—')}</span>
         </div>
         <div className="trade-meta-cell">
           <span className="tm-label">Confluence</span>
-          <span className="tm-value mono">{confluenceScore.total}/{confluenceScore.max}</span>
+          <span className="tm-value mono">{String(confluenceScore?.total || 0)}/{String(confluenceScore?.max || 10)}</span>
         </div>
       </div>
 
@@ -79,7 +87,7 @@ export default function TradeBox({ analysis }) {
           ? ((Math.abs(tp.level - entry) / entry) * 100).toFixed(2)
           : '—';
         
-        const rrrLabel = tp.rrr !== undefined && tp.rrr !== null
+        const rrrLabel = (tp.rrr !== undefined && tp.rrr !== null)
           ? `1:${Number(tp.rrr).toFixed(1)}`
           : '—';
 
@@ -87,13 +95,13 @@ export default function TradeBox({ analysis }) {
           <div className={`trade-level-row tp tp${i + 1}`} key={i}>
             <div className="tlr-left">
               <span className={`tlr-badge tp-badge tp${i + 1}-badge`}>TP{i + 1}</span>
-              <span className="tlr-label">{tp.reason || 'Target'}</span>
+              <span className="tlr-label">{String(tp.reason || 'Target')}</span>
             </div>
             <div className="tlr-right">
               <span className="tlr-price text-green mono">{formatPrice(tp.level)}</span>
               <span className="tlr-rrr text-green">{rrrLabel}</span>
               <span className="tlr-pct text-dim">+{pctMove}%</span>
-              <span className="tlr-close text-dim">→ {tp.closePercent || 0}%</span>
+              <span className="tlr-close text-dim">→ {String(tp.closePercent || 0)}%</span>
             </div>
           </div>
         );
@@ -109,8 +117,8 @@ export default function TradeBox({ analysis }) {
 
       {/* ── Warnings ─────────────────────────────────── */}
       <div className="trade-warnings">
-        <div><span className="text-yellow">⚠</span> {keyRisk}</div>
-        <div><span className="text-red">✗</span> {invalidationLevel}</div>
+        <div><span className="text-yellow">⚠</span> {String(keyRisk || '—')}</div>
+        <div><span className="text-red">✗</span> {String(invalidationLevel || '—')}</div>
       </div>
 
     </div>

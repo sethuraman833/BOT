@@ -88,23 +88,27 @@ function ProbabilityBars({ up, down, range }) {
   );
 }
 
+// v6.2 — STABILITY RELEASE
 function AIOpinion({ aiAnalysis }) {
   if (!aiAnalysis) return null;
 
+  const decision = String(aiAnalysis.decision || 'ERROR');
+  const reasoning = String(aiAnalysis.reasoning || 'No reasoning provided');
+
   let colorClass = 'text-dim';
-  if (aiAnalysis.decision === 'AGREE') colorClass = 'text-green';
-  if (aiAnalysis.decision === 'DISAGREE') colorClass = 'text-red';
-  if (aiAnalysis.decision === 'CAUTION') colorClass = 'text-yellow';
-  if (aiAnalysis.decision === 'ERROR') colorClass = 'text-red';
+  if (decision === 'AGREE') colorClass = 'text-green';
+  if (decision === 'DISAGREE') colorClass = 'text-red';
+  if (decision === 'CAUTION') colorClass = 'text-yellow';
+  if (decision === 'ERROR') colorClass = 'text-red';
 
   return (
     <div className="sidebar-section">
       <div className="section-header">🧠 AI SECOND OPINION</div>
       <div style={{ padding: '12px 14px', fontSize: '0.8rem', lineHeight: '1.5' }}>
         <div style={{ marginBottom: '6px', fontWeight: 'bold' }} className={colorClass}>
-          {aiAnalysis.decision}
+          {decision}
         </div>
-        <div className="text-secondary">{aiAnalysis.reasoning}</div>
+        <div className="text-secondary">{reasoning}</div>
       </div>
     </div>
   );
@@ -126,7 +130,7 @@ export default function AnalysisSidebar() {
       <aside className="analysis-sidebar">
         <div className="sidebar-empty">
           <div className="empty-icon">⚡</div>
-          <p>System standby</p>
+          <p>System standby v6.2</p>
           <p className="text-dim" style={{ fontSize: '0.75rem' }}>Run analysis to initialize the confluence engine</p>
         </div>
       </aside>
@@ -136,29 +140,35 @@ export default function AnalysisSidebar() {
   return (
     <aside className="analysis-sidebar">
       <div className="sidebar-scroll">
+        {/* Vital Info */}
         <DecisionBadge decision={analysis.decision} waitCondition={analysis.waitCondition} />
         
         {analysis.rejectionReason && (
-          <div className="sidebar-section"><div className="rejection-banner">✗ {analysis.rejectionReason}</div></div>
+          <div className="sidebar-section"><div className="rejection-banner">✗ {String(analysis.rejectionReason)}</div></div>
         )}
 
         <ConfluenceSection score={analysis.confluenceScore} />
         
+        {/* Optional AI */}
         <AIOpinion aiAnalysis={analysis.aiAnalysis} />
 
-        {analysis.upProbability !== undefined && (
-          <ProbabilityBars 
-            up={analysis.upProbability} 
-            down={analysis.downProbability} 
-            range={analysis.rangeProbability} 
-          />
-        )}
+        {/* Trade Details (Most Important) */}
+        <TradeBox analysis={analysis} />
+
+        {/* Extra Context */}
+        <ProbabilityBars 
+          up={analysis.upProbability || 50} 
+          down={analysis.downProbability || 50} 
+          range={analysis.rangeProbability || 0} 
+        />
 
         <SMCSection smcData={analysis.smcData} />
         
-        <TradeBox analysis={analysis} />
-        
         <StepAccordion steps={analysis.analysisSteps} />
+        
+        <div style={{ padding: '10px', textAlign: 'center', opacity: 0.3, fontSize: '10px' }}>
+          ENGINE v6.2.14 LIVE
+        </div>
       </div>
     </aside>
   );
