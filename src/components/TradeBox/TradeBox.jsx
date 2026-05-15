@@ -57,9 +57,14 @@ export default function TradeBox({ analysis }) {
         <div className="teb-label">ENTRY</div>
         <div className="teb-price">{formatPrice(entry)}</div>
         <div className="teb-sub">
-          Size&nbsp;
-          <strong className="mono">{formatSize(positionSize)} units</strong>
-          &nbsp;·&nbsp;Max Risk&nbsp;<strong>$5.00</strong>
+          <div className="teb-sub-item">
+            <span className="text-dim">Size:</span>
+            <strong className="mono">{formatSize(positionSize)} units</strong>
+          </div>
+          <div className="teb-sub-item">
+            <span className="text-dim">Risk (1%):</span>
+            <strong className="mono text-red">${((analysis.balance || 10000) * 0.01).toFixed(2)}</strong>
+          </div>
         </div>
       </div>
 

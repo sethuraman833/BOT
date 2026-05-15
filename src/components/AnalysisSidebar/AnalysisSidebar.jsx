@@ -140,6 +140,26 @@ export default function AnalysisSidebar() {
   return (
     <aside className="analysis-sidebar">
       <div className="sidebar-scroll">
+        {/* ── High-Impact Summary ───────────────────── */}
+        <div className="trade-summary-bar">
+          <div className="ts-item">
+            <span className="ts-label">ENTRY</span>
+            <span className="ts-val mono">{analysis.entry?.toLocaleString()}</span>
+          </div>
+          <div className="ts-item">
+            <span className="ts-label">SL</span>
+            <span className="ts-val mono text-red">{analysis.stopLoss?.value?.toLocaleString()}</span>
+          </div>
+          <div className="ts-item">
+            <span className="ts-label">TP1</span>
+            <span className="ts-val mono text-green">{analysis.tpDetails?.[0]?.level?.toLocaleString()}</span>
+          </div>
+          <div className="ts-item">
+            <span className="ts-label">SIZE</span>
+            <span className="ts-val mono">{analysis.positionSize}</span>
+          </div>
+        </div>
+
         {/* Vital Info */}
         <DecisionBadge decision={analysis.decision} waitCondition={analysis.waitCondition} />
         

@@ -203,3 +203,30 @@
   line-height: 1.5;
 }
 .step-item:last-child { border-bottom: none; }
+
+/* ── Trade Summary Bar (Top of Sidebar) ──────────────────── */
+.trade-summary-bar {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  background: var(--bg-elevated);
+  border: 1px solid var(--bg-border);
+  border-radius: var(--radius-md);
+  padding: 10px 5px;
+  gap: 1px;
+}
+.ts-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.ts-label { font-size: 0.5rem; font-weight: 700; color: var(--text-dim); }
+.ts-val { font-size: 0.72rem; font-weight: 600; color: var(--text-primary); }
+
+.teb-sub {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  padding-bottom: 4px;
+}
+.teb-sub-item { display: flex; gap: 6px; align-items: baseline; font-size: 0.75rem; }
