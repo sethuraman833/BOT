@@ -99,7 +99,8 @@
   }
   .analyze-btn {
     width: 100%;
-    padding: 14px;
+    padding: 10px;
+    font-size: 0.75rem;
   }
   .control-divider { display: none; }
 }

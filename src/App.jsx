@@ -40,7 +40,8 @@ export default function App() {
         <AnalysisSidebar visible={mobileTab === 'analysis'} />
       </main>
 
-      <ControlBar />
+      {/* Hide controls in Analysis tab on mobile to save space */}
+      {mobileTab === 'chart' && <ControlBar />}
 
       {/* ── Mobile Tab Navigation ── */}
       <nav className="mobile-nav">
