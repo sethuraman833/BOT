@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════
-   TERMINUS — Institutional Design System v5.0
+   TERMINUS — Institutional Design System v6.5
    Matte Dark Terminal | Bloomberg-grade Precision
    ═══════════════════════════════════════════════════════════ */
 
@@ -33,154 +33,143 @@
 
   --header-height:  56px;
   --control-height: 52px;
+  --nav-height:     64px; /* Mobile Nav */
   --sidebar-width:  380px;
 }
 
 /* ── Reset ──────────────────────────────────────────────── */
-*, *::before, *::after {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+html, body, #root { height: 100%; width: 100%; overflow: hidden; background: var(--bg-base); }
+body { color: var(--text-primary); font-family: var(--font-body); font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
 
-html, body, #root {
-  height: 100%;
-  width: 100%;
-  overflow: hidden;
-}
-
-body {
-  background: var(--bg-base);
-  color: var(--text-primary);
-  font-family: var(--font-body);
-  font-size: 14px;
-  line-height: 1.5;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-/* ── Scrollbar ─────────────────────────────────────────── */
-::-webkit-scrollbar { width: 4px; height: 4px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--bg-border); border-radius: 10px; }
-::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
-
-/* ── App Grid ──────────────────────────────────────────── */
+/* ── App Shell ─────────────────────────────────────────── */
 .app-shell {
   display: grid;
   grid-template-columns: 1fr var(--sidebar-width);
   grid-template-rows: var(--header-height) 1fr var(--control-height);
   grid-template-areas:
     "header   header"
-    "chart    sidebar"
+    "main     sidebar"
     "controls controls";
   height: 100vh;
   width: 100vw;
-  background: var(--bg-base);
 }
 
-/* ── Mobile Layout ─────────────────────────────────────── */
+.main-content {
+  grid-area: main;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.mobile-nav { display: none; }
+
+/* ── Mobile Layout v2 ──────────────────────────────────── */
 @media (max-width: 1024px) {
-  html, body, #root {
-    overflow-y: auto;
-    overflow-x: hidden;
-    height: auto;
-  }
-  
   .app-shell {
     display: flex;
     flex-direction: column;
-    height: auto;
-    min-height: 100vh;
+    grid-template-columns: 100%;
+    grid-template-rows: auto 1fr auto auto;
+    overflow: hidden;
   }
 
-  .chart-panel {
-    min-height: 55vh; /* Gives chart plenty of space on mobile */
-    flex: none;
+  .main-content {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
   }
 
-  .analysis-sidebar {
-    width: 100%;
-    min-height: auto;
-    overflow: visible;
-    border-left: none;
+  /* Navigation switching logic via class on shell */
+  .app-shell.tab-chart .analysis-sidebar { display: none; }
+  .app-shell.tab-analysis .chart-panel { display: none; }
+
+  .analysis-sidebar { width: 100%; border-left: none; }
+  .chart-panel { width: 100%; height: 100%; }
+
+  .control-bar {
+    order: 3;
+    padding-bottom: 4px;
+  }
+
+  /* Bottom Tab Bar */
+  .mobile-nav {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    height: var(--nav-height);
+    background: var(--bg-elevated);
     border-top: 1px solid var(--bg-border);
+    order: 4;
+    padding-bottom: env(safe-area-inset-bottom);
   }
 
-  .sidebar-scroll {
-    overflow-y: visible; /* Let the main window handle scrolling */
+  .nav-item {
+    background: transparent;
+    border: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    color: var(--text-dim);
+    transition: var(--transition);
+    position: relative;
+  }
+
+  .nav-item.active { color: var(--accent-green); }
+  .nav-item.active::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 20%;
+    right: 20%;
+    height: 2px;
+    background: var(--accent-green);
+    border-radius: 0 0 2px 2px;
+  }
+
+  .nav-icon { font-size: 1.2rem; }
+  .nav-label { font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+  .nav-dot {
+    position: absolute;
+    top: 12px;
+    right: 35%;
+    width: 6px;
+    height: 6px;
+    background: var(--accent-red);
+    border-radius: 50%;
+    box-shadow: 0 0 10px var(--accent-red);
   }
 }
-
 
 /* ── Utility ───────────────────────────────────────────── */
 .mono { font-family: var(--font-mono); }
-.heading { font-family: var(--font-heading); }
 .text-green { color: var(--accent-green); }
 .text-red { color: var(--accent-red); }
 .text-yellow { color: var(--accent-yellow); }
-.text-blue { color: var(--accent-blue); }
-.text-purple { color: var(--accent-purple); }
 .text-dim { color: var(--text-dim); }
-.text-secondary { color: var(--text-secondary); }
 
-/* ── Spinner ───────────────────────────────────────────── */
-@keyframes spin { to { transform: rotate(360deg); } }
-.spinner {
-  display: inline-block;
-  width: 16px;
-  height: 16px;
-  border: 2px solid var(--bg-border);
-  border-top-color: var(--accent-green);
-  border-radius: 50%;
-  animation: spin 0.6s linear infinite;
-}
-
-/* ── Pulse Animation ───────────────────────────────────── */
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-.pulse { animation: pulse 2s ease-in-out infinite; }
-
-/* ── Fade In ───────────────────────────────────────────── */
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-.fade-in { animation: fadeIn 0.3s ease-out; }
-
-/* ── Live Dot ──────────────────────────────────────────── */
-@keyframes livePulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(0, 212, 170, 0.5); }
-  50% { box-shadow: 0 0 0 6px rgba(0, 212, 170, 0); }
-}
-.live-dot {
-  width: 8px;
-  height: 8px;
-  background: var(--accent-green);
-  border-radius: 50%;
-  animation: livePulse 2s ease-in-out infinite;
-}
-
-/* ── Error Banner ──────────────────────────────────────── */
-.error-banner {
-  padding: 10px 20px;
+.error-banner-fixed {
+  position: fixed;
+  bottom: 80px;
+  left: 16px;
+  right: 16px;
   background: rgba(255, 77, 106, 0.1);
-  border: 1px solid rgba(255, 77, 106, 0.2);
-  border-radius: var(--radius-sm);
+  border: 1px solid var(--accent-red);
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
   color: var(--accent-red);
-  font-size: 0.8rem;
   display: flex;
+  justify-content: space-between;
   align-items: center;
-  gap: 8px;
+  z-index: 1000;
+  backdrop-filter: blur(8px);
 }
+.error-banner-fixed button { background: none; border: none; color: inherit; cursor: pointer; }
 
-.error-banner button {
-  margin-left: auto;
-  background: none;
-  border: none;
-  color: var(--accent-red);
-  cursor: pointer;
-  font-size: 1rem;
-}
+/* ── Animation ─────────────────────────────────────────── */
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinner { width: 16px; height: 16px; border: 2px solid var(--bg-border); border-top-color: var(--accent-green); border-radius: 50%; animation: spin 0.6s linear infinite; }
+.fade-in { animation: fadeIn 0.3s ease-out; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }

@@ -69,23 +69,29 @@
 .live-change.positive { color: var(--accent-green); background: rgba(0,212,170,0.1); }
 .live-change.negative { color: var(--accent-red);   background: rgba(255,77,106,0.1); }
 
-@media (max-width: 768px) {
+@media (max-width: 1024px) {
   .header {
-    flex-wrap: wrap;
     height: auto;
-    padding: 10px;
-    gap: 10px;
+    padding: 8px 12px;
+    flex-direction: column;
+    gap: 8px;
   }
-  .header-brand {
-    display: none; /* Hide 'TERMINUS' on mobile to save space */
-  }
+  .header-left { width: 100%; justify-content: center; }
+  .header-title { font-size: 0.9rem; }
   .header-center {
     width: 100%;
     overflow-x: auto;
-    padding-bottom: 4px;
+    padding: 2px 0 6px;
+    justify-content: flex-start;
+    scrollbar-width: none;
   }
+  .header-center::-webkit-scrollbar { display: none; }
+  .asset-tab { padding: 5px 12px; font-size: 0.7rem; }
   .header-right {
     width: 100%;
     justify-content: space-between;
+    border-top: 1px solid var(--bg-border);
+    padding-top: 8px;
   }
+  .live-price { font-size: 1.1rem; }
 }

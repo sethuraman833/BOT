@@ -84,3 +84,22 @@
 .analyze-btn.running { background: var(--text-dim); }
 
 .last-run { font-size: 0.72rem; color: var(--text-dim); }
+
+@media (max-width: 1024px) {
+  .control-bar {
+    height: auto;
+    padding: 12px;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .control-left, .control-right {
+    width: 100%;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .analyze-btn {
+    width: 100%;
+    padding: 14px;
+  }
+  .control-divider { display: none; }
+}
