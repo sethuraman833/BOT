@@ -19,10 +19,11 @@ export async function sendTradeAlert(analysis) {
   if (!bot || !chatId) return;
 
   const {
-    symbol, direction, entry, stopLoss, tp1, tp2, tp3,
-    rrr, positionSize, breakevenMove, confluenceScore,
+    symbol, direction, entry, stopLoss, tpDetails,
+    positionSize, breakevenMove, confluenceScore,
     session, keyRisk, invalidationLevel, aiAnalysis,
     upProbability, downProbability, waitCondition, decision,
+    balance
   } = analysis;
 
   const slPct   = entry && stopLoss?.value ? ((Math.abs(entry - stopLoss.value) / entry) * 100).toFixed(2) : '?';
@@ -47,20 +48,26 @@ export async function sendTradeAlert(analysis) {
     ? `\n⏳ _${waitCondition}_\n`
     : '';
 
+  // TP Lines from tpDetails
+  let tpLines = '';
+  if (tpDetails && Array.isArray(tpDetails)) {
+    tpDetails.forEach((tp, i) => {
+      tpLines += `🎯 TP${i + 1}       : $${tp.level?.toFixed(2)} → RRR 1:${tp.rrr?.toFixed(1)}\n`;
+    });
+  }
+
   const msg = `${header}
 ${waitNote}
 ${dirEmoji} | Confluence ${confEmoji} ${confluenceScore.total}/10 (${confluenceScore.tier})
-Session   : ${session.name}
+Session   : ${session?.name || 'N/A'}
 Probability: ↑${upProbability}% ↓${downProbability}%
 
 📍 Entry     : $${entry?.toFixed(2)}
 🛑 Stop Loss : $${stopLoss?.value?.toFixed(2)} (${slPct}% risk)
-🎯 TP1       : $${tp1?.toFixed(2) || '—'} → RRR 1:${rrr.tp1?.toFixed(1) || '—'}
-🎯 TP2       : $${tp2?.toFixed(2) || '—'} → RRR 1:${rrr.tp2?.toFixed(1) || '—'}
-🎯 TP3       : $${tp3?.toFixed(2) || '—'} → RRR 1:${rrr.tp3?.toFixed(1) || '—'}
+${tpLines}
 ${aiSection}
 📦 Size      : ${positionSize?.toFixed(4)} units
-💰 Max Risk  : $5.00
+💰 Max Risk  : 1% ($${((balance || 10000) * 0.01).toFixed(2)})
 ⚡ Breakeven : $${breakevenMove?.toFixed(2)}
 
 ⚠️ Key Risk  : ${keyRisk}

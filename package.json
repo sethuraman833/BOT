@@ -12,6 +12,8 @@
     "@google/generative-ai": "^0.24.1",
     "lightweight-charts": "^4.1.3",
     "node-telegram-bot-api": "^0.67.0",
+    "node-cron": "^3.0.3",
+    "node-fetch": "^3.3.2",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },

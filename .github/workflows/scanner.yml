@@ -1,34 +1,39 @@
 name: SMC Scanner — 24/7 Background Scanner
-# Last updated: 2026-04-21 18:55 IST — Nudging scheduler
 
 on:
-  # Triggered by cron-job.org via GitHub API every 15 minutes (reliable!)
+  # Triggered by cron-job.org via GitHub API every 15 minutes
   repository_dispatch:
     types: [smc_scan]
 
-  # Keep manual trigger for testing
+  # Allow manual trigger for testing
   workflow_dispatch:
 
-  # Backup schedule in case cron-job.org is down
+  # Automatic trigger on push to main to verify syntax/logic
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/engine/**'
+      - 'worker/**'
+      - '.github/workflows/scanner.yml'
+
+  # Backup schedule (UTC)
   schedule:
-    - cron: '2,17,32,47 * * * *'
+    - cron: '10,25,40,55 * * * *'
 
 jobs:
   scan:
     name: Run SMC Analysis Scan
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 24
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '20' # Stable LTS
 
       - name: Install Dependencies
         run: npm install
