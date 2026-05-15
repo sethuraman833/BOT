@@ -17,14 +17,20 @@ const initialState = {
   analysis: null,
   isAnalyzing: false,
   error: null,
+  backtestMode: false,
+  backtestTime: null, // Selected time for historical analysis
 };
 
 function reducer(state, action) {
   switch (action.type) {
     case 'SET_ASSET':
-      return { ...state, asset: action.payload, analysis: null, error: null };
+      return { ...state, asset: action.payload, analysis: null, error: null, backtestTime: null };
     case 'SET_TIMEFRAME':
-      return { ...state, timeframe: action.payload };
+      return { ...state, timeframe: action.payload, backtestTime: null };
+    case 'TOGGLE_BACKTEST':
+      return { ...state, backtestMode: !state.backtestMode, backtestTime: null, analysis: null };
+    case 'SET_BACKTEST_TIME':
+      return { ...state, backtestTime: action.payload };
     case 'SET_CANDLES':
       return { ...state, candles: { ...state.candles, [action.key]: action.payload } };
     case 'SET_LIVE_PRICE':

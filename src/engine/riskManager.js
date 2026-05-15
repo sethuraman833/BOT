@@ -27,12 +27,15 @@ export function calculateRRR(entry, stopLoss, takeProfit) {
 
 /**
  * Calculate position size from entry and stop loss.
- * Formula: Max Risk ($5) / SL Distance in price
+ * Formula: (Balance * 1%) / SL Distance
  */
-export function calculatePositionSize(entry, stopLoss) {
-  const slDistance = Math.abs(entry - stopLoss);
+export function calculatePositionSize(entry, stopLoss, balance = 10000) {
+  const RISK_PERCENT = 0.01; // 1% risk per trade
+  const riskAmount   = balance * RISK_PERCENT;
+  const slDistance   = Math.abs(entry - stopLoss);
+  
   if (slDistance === 0) return 0;
-  return parseFloat((RISK_AMOUNT / slDistance).toFixed(6));
+  return parseFloat((riskAmount / slDistance).toFixed(6));
 }
 
 /**

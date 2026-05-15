@@ -21,14 +21,26 @@ const MIN_CONFLUENCE = 6;     // minimum score to trade
 const MIN_PILLARS    = 3;     // minimum pillars out of 5 to trade
 const MIN_RRR        = 2.5;   // minimum RRR (was 3.0, lowered for more opportunities)
 
-export function runAnalysis(data, config = {}) {
-  const { symbol = 'BTCUSDT' } = config;
+export function runAnalysis(allData, config = {}) {
+  const { symbol = 'BTCUSDT', balance = 10000, newsStatus = { veto: false } } = config;
+  
   const steps = [];
+  steps.push(`Initializing v6.2 Engine for ${symbol}`);
+  steps.push(`Account Balance: $${balance.toLocaleString()}`);
 
-  const candles15m = data['15m'] || [];
-  const candles1h  = data['1h']  || [];
-  const candles4h  = data['4h']  || [];
-  const candles1d  = data['1d']  || [];
+  if (newsStatus.veto) {
+    return {
+      decision: 'NO_TRADE',
+      rejectionReason: `ECONOMIC VETO: ${newsStatus.reason}`,
+      confluenceScore: { total: 0, max: 10, checks: [], tier: 'REJECT' },
+      analysisSteps: [`Vetoed by Economic Calendar: ${newsStatus.reason}`]
+    };
+  }
+
+  const candles15m = allData['15m'] || [];
+  const candles1h  = allData['1h']  || [];
+  const candles4h  = allData['4h']  || [];
+  const candles1d  = allData['1d']  || [];
 
   if (candles15m.length < 50 || candles4h.length < 50) {
     return {
@@ -209,7 +221,7 @@ export function runAnalysis(data, config = {}) {
     )];
     tpData = calculateTPs(entry, slData.value, allSwings, fvgs4h, direction);
 
-    positionSize  = calculatePositionSize(entry, slData.value);
+    positionSize  = calculatePositionSize(entry, slData.value, balance);
     breakevenMove = calculateBreakevenMove(entry, slData.value);
   }
 

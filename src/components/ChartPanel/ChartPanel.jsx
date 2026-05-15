@@ -11,6 +11,7 @@ export default function ChartPanel() {
   const seriesRef     = useRef(null);  // candlestick series
   const emaRefs       = useRef({});
   const priceLinesRef = useRef([]);
+  const backtestLineRef = useRef(null);
 
   // The key we've currently rendered (asset_timeframe)
   const renderedKeyRef  = useRef(null);
@@ -107,7 +108,7 @@ export default function ChartPanel() {
 
   // ── 3. Live tick — cheaply update ONLY the last candle ──
   useEffect(() => {
-    if (!seriesRef.current || !livePrice) return;
+    if (!seriesRef.current || !livePrice || backtestMode) return;
 
     const data = renderedDataRef.current;
     if (!data || data.length === 0) return;
@@ -122,7 +123,20 @@ export default function ChartPanel() {
         close: livePrice,
       });
     } catch (_) { /* chart may not be ready yet */ }
-  }, [livePrice]);
+  }, [livePrice, backtestMode]);
+
+  // ── 4. Chart Clicks for Backtest ────────────────────────
+  useEffect(() => {
+    if (!chartRef.current) return;
+    
+    const clickHandler = (param) => {
+      if (!backtestMode || !param.time) return;
+      dispatch({ type: 'SET_BACKTEST_TIME', payload: param.time });
+    };
+
+    chartRef.current.subscribeClick(clickHandler);
+    return () => chartRef.current?.unsubscribeClick(clickHandler);
+  }, [backtestMode, dispatch]);
 
   // ── 4. Draw analysis price lines ────────────────────────
   useEffect(() => {
@@ -130,9 +144,21 @@ export default function ChartPanel() {
       try { seriesRef.current?.removePriceLine(pl); } catch (_) {}
     });
     priceLinesRef.current = [];
+    
+    if (backtestLineRef.current) {
+      try { seriesRef.current?.removePriceLine(backtestLineRef.current); } catch (_) {}
+      backtestLineRef.current = null;
+    }
 
-    if (!analysis || !seriesRef.current) return;
-    if (analysis.decision === 'NO_TRADE') return;
+    if (!seriesRef.current) return;
+
+    // Draw Backtest Vertical Line (as a high price line for now, 
+    // lightweight-charts doesn't have vertical lines easily, 
+    // so we'll use a marker or custom series, 
+    // but for simplicity we'll just use the time in the Ribbon)
+    
+    if (!analysis) return;
+    if (analysis.decision === 'NO_TRADE' && !backtestMode) return;
 
     const add = (price, color, title, style = 2) => {
       if (!price || isNaN(price)) return;
@@ -165,6 +191,22 @@ export default function ChartPanel() {
 
       {showRibbon && (
         <div className={`trade-ribbon fade-in ${analysis.direction}`}>
+          {backtestMode && (
+            <div className="ribbon-sec backtest">
+              <span className="ribbon-label">BACKTEST POINT</span>
+              <span className="ribbon-val mono text-yellow">
+                {new Date(backtestTime * 1000).toLocaleString()}
+              </span>
+            </div>
+          )}
+          
+          {analysis.newsCaution && (
+            <div className="ribbon-sec news">
+              <span className="ribbon-label">ECON CAUTION</span>
+              <span className="ribbon-val mono text-yellow">{analysis.newsCaution}</span>
+            </div>
+          )}
+
           <div className="ribbon-sec">
             <span className="ribbon-label">ENTRY</span>
             <span className="ribbon-val mono">{analysis.entry.toLocaleString()}</span>

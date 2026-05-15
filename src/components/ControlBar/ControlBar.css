@@ -1,89 +1,86 @@
 .control-bar {
   grid-area: controls;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 20px;
+  height: var(--control-height);
   background: var(--bg-panel);
   border-top: 1px solid var(--bg-border);
-  z-index: 10;
-  min-width: 0;
-  overflow: hidden;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 20px;
 }
 
-/* Timeframe buttons */
-.control-left { display: flex; gap: 4px; flex-shrink: 0; }
-.tf-btn {
-  padding: 6px 13px;
-  border: 1px solid var(--bg-border);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-secondary);
-  font-family: var(--font-body);
-  font-weight: 500;
-  font-size: 0.77rem;
-  cursor: pointer;
-  transition: var(--transition);
-  white-space: nowrap;
-}
-.tf-btn:hover { color: var(--text-primary); border-color: var(--text-dim); }
-.tf-btn.active {
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-  border-color: var(--text-dim);
-}
-
-/* Main CTA */
-.analyze-btn {
-  padding: 10px 36px;
-  border: none;
-  border-radius: var(--radius-md);
-  background: var(--accent-green);
-  color: #080b10;
-  font-family: var(--font-heading);
-  font-weight: 700;
-  font-size: 0.82rem;
-  letter-spacing: 0.05em;
-  cursor: pointer;
-  transition: var(--transition);
+.control-left, .control-right {
+  flex: 1;
   display: flex;
   align-items: center;
   gap: 8px;
-  white-space: nowrap;
-  flex-shrink: 0;
 }
-.analyze-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 20px rgba(0, 212, 170, 0.35);
+.control-right { justify-content: flex-end; }
+
+.control-divider {
+  width: 1px;
+  height: 24px;
+  background: var(--bg-border);
+  margin: 0 8px;
 }
-.analyze-btn:disabled { opacity: 0.55; cursor: not-allowed; }
-.analyze-btn.running {
-  background: var(--bg-elevated);
-  color: var(--text-secondary);
+
+/* ── TF Buttons ─────────────────────────────────────────── */
+.tf-btn {
+  background: transparent;
   border: 1px solid var(--bg-border);
+  color: var(--text-secondary);
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.tf-btn:hover { background: var(--bg-elevated); border-color: var(--text-dim); }
+.tf-btn.active { background: var(--bg-elevated); border-color: var(--accent-green); color: var(--accent-green); }
+
+/* ── Backtest Toggle ────────────────────────────────────── */
+.backtest-toggle {
+  background: transparent;
+  border: 1px solid var(--bg-border);
+  color: var(--text-dim);
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-heading);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.backtest-toggle.active {
+  border-color: var(--accent-yellow);
+  color: var(--accent-yellow);
+  background: rgba(245, 200, 66, 0.05);
 }
 
-/* Right info */
-.control-right { min-width: 140px; text-align: right; flex-shrink: 0; }
-.last-run { font-size: 0.68rem; color: var(--text-dim); }
-
-@media (max-width: 768px) {
-  .control-bar {
-    flex-wrap: wrap;
-    height: auto;
-    padding: 10px;
-    gap: 12px;
-  }
-  .control-left {
-    width: 100%;
-    overflow-x: auto;
-    padding-bottom: 4px;
-  }
-  .analyze-btn {
-    flex: 1;
-    justify-content: center;
-  }
-  .control-right {
-    min-width: auto;
-  }
+/* ── Analyze Button ─────────────────────────────────────── */
+.analyze-btn {
+  background: var(--accent-green);
+  color: var(--bg-base);
+  border: none;
+  padding: 10px 24px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-heading);
+  font-weight: 800;
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: var(--transition);
+  min-width: 180px;
+  justify-content: center;
 }
+.analyze-btn:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.1); box-shadow: 0 4px 15px rgba(0, 212, 170, 0.3); }
+.analyze-btn:disabled { opacity: 0.6; cursor: wait; background: var(--text-dim); }
+.analyze-btn.running { background: var(--text-dim); }
+
+.last-run { font-size: 0.72rem; color: var(--text-dim); }
