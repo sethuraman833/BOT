@@ -35,13 +35,10 @@ export default function App() {
     <div className={`app-shell tab-${mobileTab}`}>
       <Header />
       
-      <main className="main-content">
-        <ChartPanel visible={mobileTab === 'chart'} />
-        <AnalysisSidebar visible={mobileTab === 'analysis'} />
-      </main>
+      <ChartPanel />
+      <AnalysisSidebar />
 
-      {/* Hide controls in Analysis tab on mobile to save space */}
-      {mobileTab === 'chart' && <ControlBar />}
+      <ControlBar />
 
       {/* ── Mobile Tab Navigation ── */}
       <nav className="mobile-nav">

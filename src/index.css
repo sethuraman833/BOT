@@ -49,7 +49,7 @@ body { color: var(--text-primary); font-family: var(--font-body); font-size: 14p
   grid-template-rows: var(--header-height) 1fr var(--control-height);
   grid-template-areas:
     "header   header"
-    "main     sidebar"
+    "chart    sidebar"
     "controls controls";
   height: 100vh;
   width: 100vw;
