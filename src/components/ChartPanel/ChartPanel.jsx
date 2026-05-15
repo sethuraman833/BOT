@@ -1,11 +1,12 @@
 import { useEffect, useRef } from 'react';
 import { createChart } from 'lightweight-charts';
-import { useMarket } from '../../context/MarketContext.jsx';
+import { useMarket, useMarketDispatch } from '../../context/MarketContext.jsx';
 import { calculateEMA } from '../../engine/smcDetector.js';
 import './ChartPanel.css';
 
 export default function ChartPanel() {
-  const { asset, timeframe, candles, livePrice, analysis } = useMarket();
+  const { asset, timeframe, candles, livePrice, analysis, backtestMode, backtestTime } = useMarket();
+  const dispatch = useMarketDispatch();
   const containerRef  = useRef(null);
   const chartRef      = useRef(null);
   const seriesRef     = useRef(null);  // candlestick series
@@ -177,7 +178,7 @@ export default function ChartPanel() {
         add(tp.level, '#00d4aa', `TP${i + 1}`);
       });
     }
-  }, [analysis]);
+  }, [analysis, backtestMode]);
 
   const showRibbon = analysis && analysis.decision !== 'NO_TRADE' && analysis.entry;
 
