@@ -52,7 +52,7 @@ export async function sendTradeAlert(analysis) {
   let tpLines = '';
   if (tpDetails && Array.isArray(tpDetails)) {
     tpDetails.forEach((tp, i) => {
-      tpLines += `🎯 TP${i + 1}       : $${tp.level?.toFixed(2)} → RRR 1:${tp.rrr?.toFixed(1)}\n`;
+      tpLines += `🎯 TP${i + 1}       : $${tp.level?.toFixed(2)} (Close ${tp.closePercent}%) → RRR 1:${tp.rrr?.toFixed(1)}\n`;
     });
   }
 
@@ -67,7 +67,7 @@ Probability: ↑${upProbability}% ↓${downProbability}%
 ${tpLines}
 ${aiSection}
 📦 Size      : ${positionSize?.toFixed(4)} units
-💰 Max Risk  : 1% ($${((balance || 10000) * 0.01).toFixed(2)})
+💰 Max Risk  : $5.00 USDT
 ⚡ Breakeven : $${breakevenMove?.toFixed(2)}
 
 ⚠️ Key Risk  : ${keyRisk}

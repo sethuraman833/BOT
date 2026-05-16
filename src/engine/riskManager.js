@@ -27,11 +27,10 @@ export function calculateRRR(entry, stopLoss, takeProfit) {
 
 /**
  * Calculate position size from entry and stop loss.
- * Formula: (Balance * 1%) / SL Distance
+ * Formula: $5 Fixed Risk / SL Distance
  */
-export function calculatePositionSize(entry, stopLoss, balance = 10000) {
-  const RISK_PERCENT = 0.01; // 1% risk per trade
-  const riskAmount   = balance * RISK_PERCENT;
+export function calculatePositionSize(entry, stopLoss) {
+  const riskAmount   = 5.0; // Fixed $5 risk
   const slDistance   = Math.abs(entry - stopLoss);
   
   if (slDistance === 0) return 0;
