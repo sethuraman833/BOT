@@ -155,12 +155,19 @@ export function runAnalysis(allData, config = {}) {
   if (direction && slData) {
     const allSwings = swings4h.filter(s => direction === 'long' ? s.type === 'high' && s.price > entry : s.type === 'low' && s.price < entry);
     tpData = calculateTPs(entry, slData.value, allSwings, fvgs4h, direction, tier, session.name);
+    
+    // Add projected USDT profits to TP details
+    tpData.tps.forEach(tp => {
+      const pnl = Math.abs(tp.level - entry) * (calculatePositionSize(entry, slData.value, balance));
+      tp.projectedProfit = pnl.toFixed(2);
+    });
   }
 
   // Position Size
   const positionSize = (direction && slData) ? calculatePositionSize(entry, slData.value, balance) : 0;
   const breakevenMove = (direction && slData) ? calculateBreakevenMove(entry, slData.value) : null;
   const slPct = slData ? Math.abs(entry - slData.value) / entry : 0;
+  const projectedLoss = direction ? '5.00' : '0.00'; // Fixed $5 risk
 
   // Decision
   let decision = 'NO_TRADE';
@@ -180,6 +187,7 @@ export function runAnalysis(allData, config = {}) {
     stopLoss: slData,
     tpDetails: tpData?.tps || [],
     positionSize,
+    projectedLoss,
     breakevenMove,
     confluenceScore: { total: normalizedTotal, max: 10, tier, checks, pillarsMet, pillarsTotal: 4 },
     session,
