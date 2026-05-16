@@ -156,10 +156,11 @@ export function runAnalysis(allData, config = {}) {
     const allSwings = swings4h.filter(s => direction === 'long' ? s.type === 'high' && s.price > entry : s.type === 'low' && s.price < entry);
     tpData = calculateTPs(entry, slData.value, allSwings, fvgs4h, direction, tier, session.name);
     
-    // Add projected USDT profits to TP details
+    // Add projected USDT profits to TP details (only for the amount being closed)
     tpData.tps.forEach(tp => {
-      const pnl = Math.abs(tp.level - entry) * (calculatePositionSize(entry, slData.value, balance));
-      tp.projectedProfit = pnl.toFixed(2);
+      const fullPnl = Math.abs(tp.level - entry) * (calculatePositionSize(entry, slData.value, balance));
+      const partialPnl = fullPnl * (tp.closePercent / 100);
+      tp.projectedProfit = partialPnl.toFixed(2);
     });
   }
 
