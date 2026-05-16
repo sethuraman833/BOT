@@ -218,7 +218,7 @@ export default function ChartPanel() {
           </div>
           {analysis.tpDetails?.map((tp, i) => (
             <div className="ribbon-sec" key={i}>
-              <span className="ribbon-label">TP{i + 1}</span>
+              <span className="ribbon-label">TP{i + 1} ({tp.closePercent}%)</span>
               <span className="ribbon-val mono text-green">{tp.level?.toLocaleString()}</span>
             </div>
           ))}

@@ -151,7 +151,7 @@ export default function AnalysisSidebar() {
             <span className="ts-val mono text-red">{analysis.stopLoss?.value?.toLocaleString()}</span>
           </div>
           <div className="ts-item">
-            <span className="ts-label">TP1</span>
+            <span className="ts-label">TP1 ({analysis.tpDetails?.[0]?.closePercent}%)</span>
             <span className="ts-val mono text-green">{analysis.tpDetails?.[0]?.level?.toLocaleString()}</span>
           </div>
           <div className="ts-item">

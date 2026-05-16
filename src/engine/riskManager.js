@@ -75,107 +75,98 @@ export function calculateSmartSL(invalidationLevel, direction, fvgs) {
 }
 
 /**
- * Calculate TPs using structural levels with minimum RRR validation.
- *
- * Priority order:
- *   TP1 → Nearest unfilled FVG midpoint or swing (must be ≥ 1:1.5 RRR)
- *   TP2 → Second swing / FVG boundary    (must be ≥ 1:2.5 RRR)
- *   TP3 → Fib extension 1.272 or 1.618   (must be ≥ 1:4.0 RRR)
- *
- * Each TP is spaced at least 0.5% apart.
- * RRR is calculated against the ACTUAL exit level (post-offset).
+ * Calculate dynamic scaling percentages based on conviction tier and session.
+ * Profile: [TP1, TP2, TP3]
  */
-export function calculateTPs(entry, stopLoss, swings, fvgs, direction) {
+export function getDynamicScaling(tier, sessionName, tpCount) {
+  // Base profiles
+  let [p1, p2, p3] = { 
+    EXCEPTIONAL: [25, 35, 40], 
+    HIGH:        [35, 40, 25], 
+    MEDIUM:      [50, 35, 15], 
+    REJECT:      [80, 15, 5] 
+  }[tier] || [40, 35, 25];
+
+  // Session Modifiers
+  const isActivePower = sessionName?.includes('London') || sessionName?.includes('NY');
+  const isAsian = sessionName?.includes('Asian') || !sessionName;
+
+  if (isActivePower) { p1 -= 5; p3 += 5; } // Trend potential
+  if (isAsian)       { p1 += 10; p3 -= 10; } // Mean reverting
+
+  // Distribution for fewer TPs
+  if (tpCount === 2) return [55, 45, 0];
+  if (tpCount === 1) return [100, 0, 0];
+
+  return [p1, p2, p3];
+}
+
+/**
+ * Calculate TPs using structural levels with minimum RRR validation.
+ */
+export function calculateTPs(entry, stopLoss, swings, fvgs, direction, tier = 'HIGH', sessionName = '') {
   const tps = [];
   const risk = Math.abs(entry - stopLoss);
 
-  // Helper: apply a small buffer before structural level (so we exit before the crowd)
   const applyOffset = (price) =>
-    direction === 'long'
-      ? price * (1 - ENTRY_OFFSET)
-      : price * (1 + ENTRY_OFFSET);
+    direction === 'long' ? price * (1 - ENTRY_OFFSET) : price * (1 + ENTRY_OFFSET);
 
-  // Collect candidate targets: swings + FVG midpoints + FVG boundaries
   const candidates = [];
-
-  // From swings
   for (const s of swings) {
-    if (direction === 'long' && s.price > entry)  candidates.push({ price: s.price,    reason: `Swing High @ ${s.price.toFixed(0)}` });
-    if (direction === 'short' && s.price < entry) candidates.push({ price: s.price,    reason: `Swing Low @ ${s.price.toFixed(0)}` });
+    if (direction === 'long' && s.price > entry)  candidates.push({ price: s.price, reason: `Swing High @ ${s.price.toFixed(0)}` });
+    if (direction === 'short' && s.price < entry) candidates.push({ price: s.price, reason: `Swing Low @ ${s.price.toFixed(0)}` });
   }
 
-  // From FVGs — use midpoint (most conservative) and far boundary
   for (const f of fvgs) {
     if (direction === 'long' && f.type === 'bearish' && f.lower > entry) {
-      candidates.push({ price: f.midpoint, reason: `Bearish FVG mid @ ${f.midpoint?.toFixed(0) || '?'}` });
+      candidates.push({ price: f.midpoint, reason: `Bearish FVG mid @ ${f.midpoint?.toFixed(0)}` });
       candidates.push({ price: f.upper,    reason: `Bearish FVG boundary @ ${f.upper.toFixed(0)}` });
     }
     if (direction === 'short' && f.type === 'bullish' && f.upper < entry) {
-      candidates.push({ price: f.midpoint, reason: `Bullish FVG mid @ ${f.midpoint?.toFixed(0) || '?'}` });
+      candidates.push({ price: f.midpoint, reason: `Bullish FVG mid @ ${f.midpoint?.toFixed(0)}` });
       candidates.push({ price: f.lower,    reason: `Bullish FVG boundary @ ${f.lower.toFixed(0)}` });
     }
   }
 
-  // Sort by proximity to entry
-  candidates.sort((a, b) =>
-    direction === 'long'
-      ? a.price - b.price   // ascending: nearest first for longs
-      : b.price - a.price   // descending: nearest first for shorts
-  );
+  candidates.sort((a, b) => direction === 'long' ? a.price - b.price : b.price - a.price);
 
-  // Add Fibonacci extensions as additional candidates
   const fib1272level = direction === 'long' ? entry + risk * 3.272 : entry - risk * 3.272;
   const fib1618level = direction === 'long' ? entry + risk * 4.236 : entry - risk * 4.236;
   candidates.push({ price: fib1272level, reason: 'Fibonacci 1.272 Extension' });
   candidates.push({ price: fib1618level, reason: 'Fibonacci 1.618 Extension' });
 
-  // ── Build TP1 (min 1:1.5) ──────────────────────────────
+  // ── First, find how many structural TPs we can hit ────────────────
   const minRRRs  = [MIN_TP1_RRR, MIN_TP2_RRR, MIN_TP3_RRR];
-  const closeAmt = [40, 35, 25];
-
   for (const minRRR of minRRRs) {
-    const tpIndex = tps.length;
-    if (tpIndex >= 3) break;
-
+    if (tps.length >= 3) break;
     for (const candidate of candidates) {
-      if (!candidate.price || isNaN(candidate.price)) continue;
-
       const exitLevel = applyOffset(candidate.price);
       const rrr = calculateRRR(entry, stopLoss, exitLevel);
-
-      // Must meet minimum RRR for this TP tier
       if (rrr < minRRR) continue;
 
-      // Must be spaced at least 0.5% from last TP
       if (tps.length > 0) {
-        const lastTP  = tps[tps.length - 1].level;
-        const spacing = Math.abs(exitLevel - lastTP) / lastTP;
+        const spacing = Math.abs(exitLevel - tps[tps.length - 1].level) / tps[tps.length - 1].level;
         if (spacing < MIN_TP_SPACING_PCT) continue;
       }
 
-      tps.push({
-        level:        parseFloat(exitLevel.toFixed(2)),
-        reason:       candidate.reason,
-        rrr,
-        closePercent: closeAmt[tpIndex],
-      });
-      break; // move on to next TP tier
+      tps.push({ level: parseFloat(exitLevel.toFixed(2)), reason: candidate.reason, rrr });
+      break;
     }
   }
 
-  // If no structural TP was found at all, use a pure fib extension as fallback
+  // Fallback
   if (tps.length === 0) {
     const fallback = direction === 'long' ? entry + risk * 2.5 : entry - risk * 2.5;
-    tps.push({
-      level:        parseFloat(applyOffset(fallback).toFixed(2)),
-      reason:       'Minimum 1:2.5 Fallback',
-      rrr:          2.5,
-      closePercent: 100,
-    });
+    tps.push({ level: parseFloat(applyOffset(fallback).toFixed(2)), reason: 'Min 1:2.5 Fallback', rrr: 2.5 });
   }
 
-  const tpStructure = tps.length >= 3 ? 'multiple' : 'single';
-  return { tps, tpStructure };
+  // ── Apply Dynamic Scaling ─────────────────────────────────────────
+  const closePercents = getDynamicScaling(tier, sessionName, tps.length);
+  tps.forEach((tp, i) => {
+    tp.closePercent = closePercents[i];
+  });
+
+  return { tps, tpStructure: tps.length >= 3 ? 'multiple' : 'single' };
 }
 
 /**
