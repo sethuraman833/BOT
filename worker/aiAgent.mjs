@@ -28,9 +28,9 @@ export async function getAiSecondOpinion(analysis) {
     - Decision: ${analysis.decision}
     - Entry: $${analysis.entry}
     - Stop Loss: $${analysis.stopLoss.value}
-    - Take Profit 1: $${analysis.tp1}
-    - RRR (TP1): ${analysis.rrr.tp1}
-    - Session: ${analysis.session.name}
+    - Take Profit 1: $${analysis.tpDetails?.[0]?.level ?? 'N/A'}
+    - RRR (TP1): ${analysis.tpDetails?.[0]?.rrr ?? 'N/A'}
+    - Session: ${analysis.session?.name ?? 'N/A'}
     - Key Risk: ${analysis.keyRisk}
     - Invalidation: ${analysis.invalidationLevel}
 

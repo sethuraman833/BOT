@@ -22,8 +22,8 @@ export async function getFrontendAiOpinion(analysis) {
     - Decision: ${analysis.decision}
     - Entry: $${analysis.entry}
     - Stop Loss: $${analysis.stopLoss ? analysis.stopLoss.value : 'N/A'}
-    - Take Profit 1: $${analysis.tp1}
-    - RRR (TP1): ${analysis.rrr ? analysis.rrr.tp1 : 'N/A'}
+    - Take Profit 1: $${analysis.tpDetails?.[0]?.level ?? 'N/A'}
+    - RRR (TP1): ${analysis.tpDetails?.[0]?.rrr ?? 'N/A'}
     - Session: ${analysis.session ? analysis.session.name : 'N/A'}
     - Key Risk: ${analysis.keyRisk}
     - Invalidation: ${analysis.invalidationLevel}

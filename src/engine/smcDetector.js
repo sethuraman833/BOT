@@ -1,6 +1,6 @@
 // ─────────────────────────────────────────────────────────
-//  SMC Detector v6.0 — High-Conviction Institutional Engine
-//  Pure functions — no React dependencies
+//  SMC Detector v7.0 — Corrected Sweep Validation
+//  FIXES: 0.15% sweep threshold, displacement candle check
 // ─────────────────────────────────────────────────────────
 
 /**
@@ -118,8 +118,31 @@ export function detectFVGs(candles, currentPrice) {
 }
 
 /**
+ * Check if a candle qualifies as a displacement candle (strong directional body).
+ * Used as confirmation after a liquidity sweep.
+ * @param {object} candle - The OHLCV candle to check
+ * @param {string} direction - 'bullish' or 'bearish' expected displacement direction
+ * @returns {boolean}
+ */
+function isDisplacementCandle(candle, direction) {
+  if (!candle) return false;
+  const body = Math.abs(candle.close - candle.open);
+  const range = candle.high - candle.low;
+  if (range === 0) return false;
+  const bodyRatio = body / range;
+  // Body must be at least 50% of candle range
+  if (bodyRatio < 0.50) return false;
+  // Must close in the expected direction
+  if (direction === 'bullish' && candle.close <= candle.open) return false;
+  if (direction === 'bearish' && candle.close >= candle.open) return false;
+  return true;
+}
+
+/**
  * Detect Liquidity Sweeps — wick extends beyond a prior swing, then closes back inside.
- * This is the core institutional manipulation signal.
+ * 
+ * FIX BUG 6: Added 0.15% minimum threshold beyond swing level (not just 1-tick wicks).
+ * FIX BUG 7: Added displacement candle check within next 1-2 candles.
  */
 export function detectSweeps(candles) {
   const sweeps = [];
@@ -127,39 +150,69 @@ export function detectSweeps(candles) {
   const recentHighs = swings.filter(s => s.type === 'high').slice(-6);
   const recentLows  = swings.filter(s => s.type === 'low').slice(-6);
 
+  const MIN_SWEEP_PCT = 0.0015; // 0.15% minimum breach beyond level
+
   // Check last 10 candles for sweep events
-  const lookback = Math.min(10, candles.length - 1);
-  for (let i = candles.length - lookback; i < candles.length; i++) {
+  const lookback = Math.min(10, candles.length - 2); // -2 to leave room for displacement candle check
+  for (let i = candles.length - lookback; i < candles.length - 1; i++) {
     const c = candles[i];
 
     // Bearish sweep: wick above a prior high, then closes below it (bull trap)
     for (const swing of recentHighs) {
       if (swing.index >= i) continue;
-      if (c.high > swing.price && c.close < swing.price) {
-        sweeps.push({
-          type: 'bearish',
-          sweptLevel: swing.price,
-          candleIndex: i,
-          time: c.time,
-          direction: 'short',
-        });
-        break;
-      }
+
+      // FIX BUG 6: Must exceed the high by at least 0.15%
+      const breachPct = (c.high - swing.price) / swing.price;
+      if (breachPct < MIN_SWEEP_PCT) continue;
+
+      // Sweep candle close must be back below the swept level
+      if (c.close >= swing.price) continue;
+
+      // FIX BUG 7: Must have displacement candle within next 1-2 candles
+      const next1 = candles[i + 1];
+      const hasDisplacement = isDisplacementCandle(next1, 'bearish') ||
+                              (candles[i + 2] && isDisplacementCandle(candles[i + 2], 'bearish'));
+
+      if (!hasDisplacement) continue;
+
+      sweeps.push({
+        type: 'bearish',
+        sweptLevel: swing.price,
+        breachPct: (breachPct * 100).toFixed(3) + '%',
+        candleIndex: i,
+        time: c.time,
+        direction: 'short',
+      });
+      break;
     }
 
     // Bullish sweep: wick below a prior low, then closes above it (bear trap)
     for (const swing of recentLows) {
       if (swing.index >= i) continue;
-      if (c.low < swing.price && c.close > swing.price) {
-        sweeps.push({
-          type: 'bullish',
-          sweptLevel: swing.price,
-          candleIndex: i,
-          time: c.time,
-          direction: 'long',
-        });
-        break;
-      }
+
+      // FIX BUG 6: Must exceed the low by at least 0.15%
+      const breachPct = (swing.price - c.low) / swing.price;
+      if (breachPct < MIN_SWEEP_PCT) continue;
+
+      // Sweep candle close must be back above the swept level
+      if (c.close <= swing.price) continue;
+
+      // FIX BUG 7: Must have displacement candle within next 1-2 candles
+      const next1 = candles[i + 1];
+      const hasDisplacement = isDisplacementCandle(next1, 'bullish') ||
+                              (candles[i + 2] && isDisplacementCandle(candles[i + 2], 'bullish'));
+
+      if (!hasDisplacement) continue;
+
+      sweeps.push({
+        type: 'bullish',
+        sweptLevel: swing.price,
+        breachPct: (breachPct * 100).toFixed(3) + '%',
+        candleIndex: i,
+        time: c.time,
+        direction: 'long',
+      });
+      break;
     }
   }
 

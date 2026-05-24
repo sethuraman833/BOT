@@ -1,6 +1,7 @@
 // ─────────────────────────────────────────────────────────
-//  Risk Manager v6.1 — Structurally-Grounded RRR Engine
-//  Fixed: TP offset before RRR, minimum RRR per TP, fib extension
+//  Risk Manager v7.0 — Corrected RRR Thresholds
+//  FIX: MIN_TP1_RRR 1.5→3.0 (prompt requires ≥1:3 minimum)
+//  FIX: Fallback TP uses risk*3.0 not risk*2.5
 // ─────────────────────────────────────────────────────────
 
 import { RISK_AMOUNT } from '../utils/constants.js';
@@ -8,15 +9,14 @@ import { RISK_AMOUNT } from '../utils/constants.js';
 // ── Constants ─────────────────────────────────────────────
 const ENTRY_OFFSET  = 0.0008; // 0.08% buffer before structural level (tighter)
 const SL_BUFFER     = 0.003;  // 0.3% beyond invalidation
-const MIN_TP1_RRR   = 1.5;    // TP1 must be at least 1:1.5
-const MIN_TP2_RRR   = 2.5;    // TP2 must be at least 1:2.5
-const MIN_TP3_RRR   = 4.0;    // TP3 must be at least 1:4.0
+const MIN_TP1_RRR   = 3.0;    // FIX: TP1 must be at least 1:3 (was 1.5 — too low)
+const MIN_TP2_RRR   = 4.0;    // TP2 must be at least 1:4
+const MIN_TP3_RRR   = 5.0;    // TP3 must be at least 1:5
 const MIN_TP_SPACING_PCT = 0.005; // TPs must be at least 0.5% apart
 
 /**
  * Calculate Risk-to-Reward Ratio.
  * Formula: |TP - Entry| / |Entry - SL|
- * FIXED: RRR is now always calculated against the ACTUAL exit level (with offset applied).
  */
 export function calculateRRR(entry, stopLoss, takeProfit) {
   const risk   = Math.abs(entry - stopLoss);
@@ -103,6 +103,7 @@ export function getDynamicScaling(tier, sessionName, tpCount) {
 
 /**
  * Calculate TPs using structural levels with minimum RRR validation.
+ * FIX: MIN_TP1_RRR is now 3.0, fallback uses risk*3.0
  */
 export function calculateTPs(entry, stopLoss, swings, fvgs, direction, tier = 'HIGH', sessionName = '') {
   const tps = [];
@@ -130,12 +131,15 @@ export function calculateTPs(entry, stopLoss, swings, fvgs, direction, tier = 'H
 
   candidates.sort((a, b) => direction === 'long' ? a.price - b.price : b.price - a.price);
 
+  // FIX: Fibonacci extensions use risk × 3/4/5 multiples for cleaner RRR levels
   const fib1272level = direction === 'long' ? entry + risk * 3.272 : entry - risk * 3.272;
   const fib1618level = direction === 'long' ? entry + risk * 4.236 : entry - risk * 4.236;
+  const fib2000level = direction === 'long' ? entry + risk * 5.0   : entry - risk * 5.0;
   candidates.push({ price: fib1272level, reason: 'Fibonacci 1.272 Extension' });
   candidates.push({ price: fib1618level, reason: 'Fibonacci 1.618 Extension' });
+  candidates.push({ price: fib2000level, reason: 'Fibonacci 2.000 Extension' });
 
-  // ── First, find how many structural TPs we can hit ────────────────
+  // ── Find structural TPs with minimum RRR ────────────────────────
   const minRRRs  = [MIN_TP1_RRR, MIN_TP2_RRR, MIN_TP3_RRR];
   for (const minRRR of minRRRs) {
     if (tps.length >= 3) break;
@@ -154,10 +158,10 @@ export function calculateTPs(entry, stopLoss, swings, fvgs, direction, tier = 'H
     }
   }
 
-  // Fallback
+  // FIX BUG 5 — Fallback uses risk*3.0 minimum RRR (was 2.5)
   if (tps.length === 0) {
-    const fallback = direction === 'long' ? entry + risk * 2.5 : entry - risk * 2.5;
-    tps.push({ level: parseFloat(applyOffset(fallback).toFixed(2)), reason: 'Min 1:2.5 Fallback', rrr: 2.5 });
+    const fallback = direction === 'long' ? entry + risk * 3.0 : entry - risk * 3.0;
+    tps.push({ level: parseFloat(applyOffset(fallback).toFixed(2)), reason: 'Min 1:3 Fallback', rrr: 3.0 });
   }
 
   // ── Apply Dynamic Scaling ─────────────────────────────────────────

@@ -46,6 +46,16 @@ export default function ControlBar() {
         newsStatus: newsStatus 
       });
       
+      // FIX BUG 12 — Propagate news caution into result for UI display
+      if (newsStatus.caution) {
+        result.newsCaution = true;
+        result.newsCautionReason = newsStatus.reason;
+        result.analysisSteps = [
+          ...(result.analysisSteps || []),
+          `⚠️ NEWS CAUTION: ${newsStatus.reason} — Wait for post-event BOS confirmation`
+        ];
+      }
+      
       // Update state with algorithmic result first
       dispatch({ type: 'SET_ANALYSIS', payload: result });
       

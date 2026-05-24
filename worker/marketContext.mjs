@@ -1,5 +1,6 @@
 // ─────────────────────────────────────────────────────────
 //  Market Context — PDH/PDL, Asian Range, Weekly Open
+//  FIX BUG 14: calcEMA now uses proper SMA seed for first N periods
 // ─────────────────────────────────────────────────────────
 
 import fetch from 'node-fetch';
@@ -19,10 +20,17 @@ async function getKlines(symbol, interval, limit) {
   }));
 }
 
+/**
+ * FIX BUG 14: Proper EMA calculation with SMA seed for first N periods.
+ * The previous version used candles[0].close as seed — which produces
+ * wildly inaccurate EMA200 values when the first candle is far from average.
+ */
 function calcEMA(candles, period) {
+  if (candles.length < period) return null;
   const k = 2 / (period + 1);
-  let ema = candles[0].close;
-  for (let i = 1; i < candles.length; i++) {
+  // Seed: SMA of first `period` candles
+  let ema = candles.slice(0, period).reduce((sum, c) => sum + c.close, 0) / period;
+  for (let i = period; i < candles.length; i++) {
     ema = candles[i].close * k + ema * (1 - k);
   }
   return ema;
@@ -59,7 +67,9 @@ export async function sendDailyReport() {
       });
       const weeklyOpen = weekStart?.open?.toFixed(2) || daily[0]?.open?.toFixed(2) || '—';
 
-      const ema200 = calcEMA(h4, Math.min(200, h4.length)).toFixed(2);
+      // FIX: Use corrected calcEMA with SMA seed
+      const ema200val = calcEMA(h4, Math.min(200, h4.length));
+      const ema200 = ema200val ? ema200val.toFixed(2) : '—';
 
       const icon = symbol === 'BTCUSDT' ? '₿' : 'Ξ';
       report += `\n${icon} *${symbol}*\n`;

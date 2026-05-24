@@ -167,6 +167,17 @@ export default function AnalysisSidebar() {
           <div className="sidebar-section"><div className="rejection-banner">✗ {String(analysis.rejectionReason)}</div></div>
         )}
 
+        {/* FIX BUG 12 — News caution warning banner */}
+        {analysis.newsCaution && (
+          <div className="sidebar-section">
+            <div style={{ background: 'rgba(255,200,0,0.12)', border: '1px solid var(--accent-yellow)', borderRadius: '6px', padding: '10px 14px', fontSize: '0.78rem', color: 'var(--accent-yellow)', lineHeight: '1.5' }}>
+              ⚠️ <strong>NEWS CAUTION</strong><br />
+              {analysis.newsCautionReason}<br />
+              <span style={{ opacity: 0.8 }}>Wait for post-event 15m BOS confirmation before entry.</span>
+            </div>
+          </div>
+        )}
+
         <ConfluenceSection score={analysis.confluenceScore} />
         
         {/* Optional AI */}
