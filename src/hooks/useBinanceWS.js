@@ -32,7 +32,7 @@ export function useBinanceWS(symbol, chartTimeframe) {
       intentionalCloseRef.current = false;
 
       const sym = symbol.toLowerCase();
-      const tfMap = { '15m': '15m', '1h': '1h', '4h': '4h', '1d': '1d' };
+      const tfMap = { '5m': '5m', '15m': '15m', '1h': '1h', '4h': '4h', '1d': '1d' };
       const wsInterval = tfMap[chartTimeframe] || '15m';
 
       const url = `${BINANCE_WSS}?streams=${sym}@miniTicker/${sym}@kline_${wsInterval}`;

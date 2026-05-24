@@ -1,4 +1,4 @@
-/* ── TradeBox v2 — Institutional Trade Card ─────────────── */
+/* ── TradeBox v8 — Premium Institutional Trade Card ─────── */
 
 .trade-box {
   border-radius: var(--radius-md);
@@ -6,7 +6,19 @@
   background: var(--bg-panel);
   overflow: hidden;
   font-size: 0.78rem;
+  position: relative;
 }
+
+/* Direction accent stripe at top */
+.trade-box::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+}
+.trade-box.long::before  { background: linear-gradient(90deg, var(--accent-green), transparent); }
+.trade-box.short::before { background: linear-gradient(90deg, var(--accent-red),   transparent); }
+
 .trade-box.long  { border-left: 3px solid var(--accent-green); }
 .trade-box.short { border-left: 3px solid var(--accent-red); }
 
@@ -16,77 +28,94 @@
   align-items: center;
   justify-content: space-between;
   padding: 10px 14px;
-  background: var(--bg-elevated);
+  background: rgba(255,255,255,0.02);
   font-family: var(--font-heading);
   font-weight: 700;
-  font-size: 0.68rem;
-  letter-spacing: 0.1em;
-  color: var(--text-secondary);
-  border-bottom: 1px solid var(--bg-border);
+  font-size: 0.65rem;
+  letter-spacing: 0.12em;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--bg-border-dim);
 }
 .trade-dir-badge {
-  padding: 2px 10px;
-  border-radius: var(--radius-sm);
+  padding: 3px 11px;
+  border-radius: var(--radius-xs);
   font-size: 0.68rem;
   font-weight: 800;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.07em;
 }
-.trade-dir-badge.long  { background: rgba(0,212,170,0.15); color: var(--accent-green); }
-.trade-dir-badge.short { background: rgba(255,77,106,0.15); color: var(--accent-red); }
+.trade-dir-badge.long  {
+  background: rgba(0,229,180,0.12);
+  color: var(--accent-green);
+  box-shadow: 0 0 10px rgba(0,229,180,0.15);
+}
+.trade-dir-badge.short {
+  background: rgba(255,63,94,0.12);
+  color: var(--accent-red);
+  box-shadow: 0 0 10px rgba(255,63,94,0.15);
+}
 
-/* ── Meta row ────────────────────────────────────────────── */
+/* ── Meta row ─────────────────────────────────────────────── */
 .trade-meta-row {
   display: flex;
   padding: 8px 14px;
-  gap: 8px;
+  gap: 6px;
+  border-bottom: 1px solid var(--bg-border-dim);
 }
 .trade-meta-cell {
   flex: 1;
   display: flex;
   flex-direction: column;
   gap: 2px;
+  padding: 4px 6px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-elevated);
 }
-.tm-label { font-size: 0.62rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.06em; }
-.tm-value { font-size: 0.76rem; color: var(--text-primary); }
+.tm-label { font-size: 0.56rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; }
+.tm-value { font-size: 0.72rem; color: var(--text-primary); font-weight: 600; }
 
 /* ── Big Entry Block ─────────────────────────────────────── */
 .trade-entry-block {
-  padding: 14px 14px 12px;
-  background: linear-gradient(135deg, rgba(0,212,170,0.05), transparent);
+  padding: 16px 14px 13px;
+  background: linear-gradient(135deg, rgba(0,229,180,0.04) 0%, transparent 60%);
+  position: relative;
 }
 .teb-label {
   font-family: var(--font-heading);
-  font-size: 0.6rem;
-  letter-spacing: 0.12em;
+  font-size: 0.56rem;
+  letter-spacing: 0.14em;
   color: var(--text-dim);
-  margin-bottom: 4px;
+  margin-bottom: 5px;
+  text-transform: uppercase;
 }
 .teb-price {
   font-family: var(--font-mono);
-  font-size: 1.6rem;
+  font-size: 1.7rem;
   font-weight: 700;
   color: var(--text-primary);
   line-height: 1;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
+  letter-spacing: -0.02em;
 }
 .teb-sub {
+  display: flex;
+  gap: 18px;
   font-size: 0.72rem;
-  color: var(--text-secondary);
 }
-.teb-sub strong { color: var(--text-primary); }
+.teb-sub-item { display: flex; gap: 5px; align-items: baseline; }
 
-/* ── Level Rows (SL and TPs) ────────────────────────────── */
+/* ── Level Rows (SL / TPs) ───────────────────────────────── */
 .trade-level-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 9px 14px;
   gap: 8px;
-  border-bottom: 1px solid rgba(255,255,255,0.03);
+  border-bottom: 1px solid rgba(255,255,255,0.025);
+  transition: background 0.15s;
 }
-.trade-level-row:last-of-type { border-bottom: none; }
-.trade-level-row.sl { background: rgba(255,77,106,0.04); }
-.trade-level-row.tp { background: rgba(0,212,170,0.03); }
+.trade-level-row:hover { background: var(--bg-hover); }
+.trade-level-row.sl    { background: rgba(255,63,94,0.03); }
+.trade-level-row.tp    { background: rgba(0,229,180,0.025); }
 
 .tlr-left {
   display: flex;
@@ -96,20 +125,20 @@
   min-width: 0;
 }
 .tlr-badge {
-  padding: 2px 7px;
+  padding: 2px 8px;
   border-radius: 3px;
-  font-size: 0.6rem;
+  font-size: 0.58rem;
   font-weight: 800;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.07em;
   flex-shrink: 0;
 }
-.sl-badge  { background: rgba(255,77,106,0.2); color: var(--accent-red); }
-.tp-badge  { background: rgba(0,212,170,0.15); color: var(--accent-green); }
-.tp2-badge { background: rgba(61,156,240,0.15); color: var(--accent-blue); }
-.tp3-badge { background: rgba(155,109,255,0.15); color: var(--accent-purple); }
+.sl-badge  { background: rgba(255,63,94,0.18);  color: var(--accent-red);    border: 1px solid rgba(255,63,94,0.3); }
+.tp-badge  { background: rgba(0,229,180,0.12);  color: var(--accent-green);  border: 1px solid rgba(0,229,180,0.25); }
+.tp2-badge { background: rgba(59,142,240,0.12); color: var(--accent-blue);   border: 1px solid rgba(59,142,240,0.25); }
+.tp3-badge { background: rgba(157,111,255,0.12);color: var(--accent-purple); border: 1px solid rgba(157,111,255,0.25); }
 
 .tlr-label {
-  font-size: 0.68rem;
+  font-size: 0.64rem;
   color: var(--text-dim);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -121,30 +150,54 @@
   gap: 6px;
   flex-shrink: 0;
 }
-.tlr-price { font-family: var(--font-mono); font-size: 0.84rem; font-weight: 600; }
-.tlr-rrr   { font-family: var(--font-mono); font-size: 0.72rem; font-weight: 700; padding: 1px 5px; border-radius: 3px; background: rgba(0,212,170,0.1); color: var(--accent-green); }
-.tlr-pct   { font-size: 0.68rem; }
-.tlr-close { font-size: 0.66rem; }
+.tlr-price {
+  font-family: var(--font-mono);
+  font-size: 0.83rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.tlr-rrr {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: rgba(0,229,180,0.08);
+  color: var(--accent-green);
+  border: 1px solid rgba(0,229,180,0.15);
+}
+.tlr-pct   { font-size: 0.62rem; }
+.tlr-close { font-size: 0.6rem; color: var(--text-muted); }
 
-/* ── Breakeven row ───────────────────────────────────────── */
+/* ── Breakeven ───────────────────────────────────────────── */
 .trade-be-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 8px 14px;
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   color: var(--text-secondary);
-  background: rgba(245,200,66,0.04);
+  background: rgba(247,201,72,0.03);
+  border-top: 1px solid var(--bg-border-dim);
 }
 
 /* ── Warnings ────────────────────────────────────────────── */
 .trade-warnings {
   padding: 10px 14px;
-  font-size: 0.71rem;
+  font-size: 0.69rem;
   color: var(--text-secondary);
-  line-height: 1.7;
-  border-top: 1px solid var(--bg-border);
+  line-height: 1.8;
+  border-top: 1px solid var(--bg-border-dim);
+  background: rgba(255,255,255,0.01);
 }
 
 /* ── Divider ─────────────────────────────────────────────── */
-.trade-divider { height: 1px; background: var(--bg-border); }
+.trade-divider { height: 1px; background: var(--bg-border-dim); }
+
+/* ── Empty state ─────────────────────────────────────────── */
+.trade-box-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}

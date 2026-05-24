@@ -13,8 +13,11 @@ export default function Header() {
     <header className="header">
       <div className="header-left">
         <div className="header-brand">
-          <div className="live-dot" />
-          <h1 className="header-title heading">TERMINUS</h1>
+          <div className="brand-icon">T</div>
+          <div>
+            <h1 className="header-title">TERMINUS</h1>
+            <span className="header-subtitle">SMC INTELLIGENCE v8</span>
+          </div>
         </div>
       </div>
 
@@ -35,11 +38,12 @@ export default function Header() {
           <div className="live-price-group">
             <span className="live-price mono">{formatPrice(livePrice)}</span>
             <span className={`live-change mono ${isPositive ? 'positive' : 'negative'}`}>
-              {formatPercent(liveChange)}
+              {isPositive ? '+' : ''}{formatPercent(liveChange)}
             </span>
           </div>
         )}
         <SessionBadge />
+        <div className="live-dot" title="Live Data Feed" />
       </div>
     </header>
   );

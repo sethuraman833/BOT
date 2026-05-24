@@ -1,96 +1,179 @@
+/* ── ControlBar v8 — Premium Command Strip ──────────────── */
+
 .control-bar {
   grid-area: controls;
   height: var(--control-height);
-  background: var(--bg-panel);
+  background: rgba(9, 14, 22, 0.97);
   border-top: 1px solid var(--bg-border);
   display: flex;
   align-items: center;
-  padding: 0 16px;
-  gap: 20px;
+  padding: 0 20px;
+  gap: 16px;
+  position: relative;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.control-bar::before {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--bg-border), transparent);
 }
 
 .control-left, .control-right {
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 .control-right { justify-content: flex-end; }
 
 .control-divider {
   width: 1px;
-  height: 24px;
+  height: 22px;
   background: var(--bg-border);
-  margin: 0 8px;
+  margin: 0 6px;
 }
 
-/* ── TF Buttons ─────────────────────────────────────────── */
+/* ── TF Buttons ───────────────────────────────────────────── */
 .tf-btn {
+  position: relative;
   background: transparent;
   border: 1px solid var(--bg-border);
-  color: var(--text-secondary);
-  padding: 6px 12px;
-  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  padding: 5px 11px;
+  border-radius: var(--radius-xs);
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: 0.70rem;
   font-weight: 600;
   cursor: pointer;
   transition: var(--transition);
+  letter-spacing: 0.04em;
 }
-.tf-btn:hover { background: var(--bg-elevated); border-color: var(--text-dim); }
-.tf-btn.active { background: var(--bg-elevated); border-color: var(--accent-green); color: var(--accent-green); }
+.tf-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--text-muted);
+  color: var(--text-secondary);
+}
+.tf-btn.active {
+  background: var(--bg-elevated);
+  border-color: var(--accent-green);
+  color: var(--accent-green);
+  box-shadow: 0 0 10px rgba(0, 229, 180, 0.18);
+}
+/* Highlight 5m as "scalp" with cyan accent */
+.tf-btn[data-tf="5m"].active {
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+  box-shadow: 0 0 10px rgba(0, 212, 255, 0.2);
+}
 
-/* ── Backtest Toggle ────────────────────────────────────── */
+/* ── Backtest Toggle ──────────────────────────────────────── */
 .backtest-toggle {
   background: transparent;
   border: 1px solid var(--bg-border);
-  color: var(--text-dim);
-  padding: 6px 12px;
-  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  padding: 5px 11px;
+  border-radius: var(--radius-xs);
   font-family: var(--font-heading);
-  font-size: 0.68rem;
-  font-weight: 800;
-  letter-spacing: 0.05em;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
   cursor: pointer;
   transition: var(--transition);
 }
+.backtest-toggle:hover { background: var(--bg-hover); color: var(--text-secondary); }
 .backtest-toggle.active {
   border-color: var(--accent-yellow);
   color: var(--accent-yellow);
-  background: rgba(245, 200, 66, 0.05);
+  background: var(--accent-yellow-dim);
+  box-shadow: var(--glow-yellow);
 }
 
-/* ── Analyze Button ─────────────────────────────────────── */
+/* ── Analyze Button ───────────────────────────────────────── */
 .analyze-btn {
-  background: var(--accent-green);
-  color: var(--bg-base);
+  position: relative;
+  background: linear-gradient(135deg, var(--accent-green) 0%, #00c4a3 100%);
+  color: #05080e;
   border: none;
-  padding: 10px 24px;
+  padding: 11px 28px;
   border-radius: var(--radius-sm);
   font-family: var(--font-heading);
   font-weight: 800;
-  font-size: 0.82rem;
-  letter-spacing: 0.08em;
+  font-size: 0.8rem;
+  letter-spacing: 0.1em;
   cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
   transition: var(--transition);
-  min-width: 180px;
+  min-width: 188px;
   justify-content: center;
+  overflow: hidden;
 }
-.analyze-btn:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.1); box-shadow: 0 4px 15px rgba(0, 212, 170, 0.3); }
-.analyze-btn:disabled { opacity: 0.6; cursor: wait; background: var(--text-dim); }
-.analyze-btn.running { background: var(--text-dim); }
 
-.last-run { font-size: 0.72rem; color: var(--text-dim); }
+/* Shimmer effect on hover */
+.analyze-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 40%, rgba(255,255,255,0.25) 50%, transparent 60%);
+  background-size: 200% 100%;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.analyze-btn:hover::before { opacity: 1; animation: shimmer 0.7s ease-out; }
+.analyze-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 22px rgba(0, 229, 180, 0.4), 0 2px 8px rgba(0,0,0,0.3);
+}
+.analyze-btn:active:not(:disabled) { transform: translateY(0); }
+.analyze-btn:disabled { opacity: 0.5; cursor: wait; filter: grayscale(0.4); }
+.analyze-btn.running {
+  background: linear-gradient(135deg, var(--bg-elevated) 0%, var(--bg-card) 100%);
+  color: var(--text-secondary);
+  border: 1px solid var(--bg-border);
+  box-shadow: none;
+}
 
+/* ── Mode Badge (shows current analysis mode) ────────────── */
+.mode-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--bg-border);
+  background: var(--bg-elevated);
+}
+.mode-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.mode-text {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.last-run {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: var(--text-dim);
+}
+
+/* ── Mobile ───────────────────────────────────────────────── */
 @media (max-width: 1024px) {
   .control-bar {
     height: auto;
-    padding: 12px;
+    padding: 10px 14px;
     flex-direction: column;
-    gap: 12px;
+    gap: 10px;
   }
   .control-left, .control-right {
     width: 100%;
@@ -99,8 +182,9 @@
   }
   .analyze-btn {
     width: 100%;
-    padding: 10px;
-    font-size: 0.75rem;
+    padding: 12px;
+    font-size: 0.76rem;
   }
-  .control-divider { display: none; }
+  .control-divider  { display: none; }
+  .mode-indicator   { display: none; }
 }

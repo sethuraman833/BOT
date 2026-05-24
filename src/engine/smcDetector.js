@@ -141,16 +141,17 @@ function isDisplacementCandle(candle, direction) {
 /**
  * Detect Liquidity Sweeps — wick extends beyond a prior swing, then closes back inside.
  * 
- * FIX BUG 6: Added 0.15% minimum threshold beyond swing level (not just 1-tick wicks).
- * FIX BUG 7: Added displacement candle check within next 1-2 candles.
+ * sweepThreshold: minimum breach % beyond the swing level (default 0.15%).
+ * FIX BUG 6: 0.15% minimum threshold (not just any 1-tick wick).
+ * FIX BUG 7: Displacement candle confirmation required.
  */
-export function detectSweeps(candles) {
+export function detectSweeps(candles, sweepThreshold = 0.0015) {
   const sweeps = [];
   const swings = findSwingPoints(candles, 3);
   const recentHighs = swings.filter(s => s.type === 'high').slice(-6);
   const recentLows  = swings.filter(s => s.type === 'low').slice(-6);
 
-  const MIN_SWEEP_PCT = 0.0015; // 0.15% minimum breach beyond level
+  const MIN_SWEEP_PCT = sweepThreshold;
 
   // Check last 10 candles for sweep events
   const lookback = Math.min(10, candles.length - 2); // -2 to leave room for displacement candle check

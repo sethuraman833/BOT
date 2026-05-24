@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────
-//  Scanner v6.0 — 15-min Scan Loop with AI Reasoning
+//  Scanner v8.0 — Dual-TF Scan (5m Scalp + 15m Intraday)
 // ─────────────────────────────────────────────────────────
 
 import { sendTradeAlert } from './telegramBot.mjs';
@@ -7,7 +7,7 @@ import { getAiSecondOpinion } from './aiAgent.mjs';
 
 const REST   = 'https://fapi.binance.com/fapi/v1';
 const ASSETS = ['BTCUSDT', 'ETHUSDT'];
-const TFS    = ['1d', '4h', '1h', '15m'];
+const TFS    = ['1d', '4h', '1h', '15m', '5m'];  // 5m added for scalp scanning
 
 // Track last alert per symbol to avoid duplicate notifications
 const lastAlertTime = {};
@@ -43,10 +43,18 @@ export async function runScan() {
         data[tf] = await getKlines(symbol, tf, 200);
       }
 
-      const result = runAnalysis(data, { symbol });
-      const { decision, confluenceScore, direction, entry, waitCondition } = result;
+      // Run dual-TF analysis: 15m intraday + 5m scalping
+      const result15m = runAnalysis(data, { symbol, activeTimeframe: '15m' });
+      const result5m  = runAnalysis(data, { symbol, activeTimeframe: '5m' });
 
-      console.log(`[SCANNER] ${symbol}: ${decision} | Score: ${confluenceScore.total}/10 | Pillars: ${confluenceScore.pillarsMet}/${confluenceScore.pillarsTotal} | Dir: ${direction || 'N/A'}`);
+      // Pick whichever has a valid signal with higher confluence
+      const result = (
+        result5m.decision !== 'NO_TRADE' &&
+        result5m.confluenceScore.total >= result15m.confluenceScore.total
+      ) ? result5m : result15m;
+
+      const { decision, confluenceScore, direction, entry, analysisMode } = result;
+      console.log(`[SCANNER] ${symbol}: ${decision} (${analysisMode}) | Score: ${confluenceScore.total}/${confluenceScore.max} | Pillars: ${confluenceScore.pillarsMet}/${confluenceScore.pillarsTotal} | Dir: ${direction || 'N/A'}`);
 
       // TAKE_NOW: Send alert if score >= 6 and not sent recently
       const shouldAlertTakeNow = decision === 'TAKE_NOW' && confluenceScore.total >= 6;
