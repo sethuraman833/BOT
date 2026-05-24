@@ -93,13 +93,21 @@ export default function ChartPanel() {
     renderedDataRef.current = clean;
     renderedKeyRef.current  = key;
 
-    // EMAs
+    // EMAs — FIX: calculateEMA() result[j] corresponds to clean[j + period - 1],
+    // NOT clean[j]. The old code shifted every EMA left by (period-1) bars.
     const e20  = calculateEMA(clean, 20);
     const e50  = calculateEMA(clean, 50);
     const e200 = calculateEMA(clean, 200);
-    emaRefs.current.ema20.setData( clean.map((c, i) => e20[i]  != null ? { time: c.time, value: e20[i]  } : null).filter(Boolean));
-    emaRefs.current.ema50.setData( clean.map((c, i) => e50[i]  != null ? { time: c.time, value: e50[i]  } : null).filter(Boolean));
-    emaRefs.current.ema200.setData(clean.map((c, i) => e200[i] != null ? { time: c.time, value: e200[i] } : null).filter(Boolean));
+
+    const mapEMA = (values, period) =>
+      values.map((val, j) => {
+        const candle = clean[j + period - 1];
+        return candle ? { time: candle.time, value: val } : null;
+      }).filter(Boolean);
+
+    emaRefs.current.ema20.setData(mapEMA(e20,  20));
+    emaRefs.current.ema50.setData(mapEMA(e50,  50));
+    emaRefs.current.ema200.setData(mapEMA(e200, 200));
 
     chartRef.current?.timeScale().fitContent();
   // eslint-disable-next-line react-hooks/exhaustive-deps
