@@ -1,21 +1,27 @@
 // ─────────────────────────────────────────────────────────
-//  Risk Manager v9.1 — Risk-Scaled SL/TP Math Fixes
-//  Fix: Removed absolute % buffers that ruined scalping RRR
-//  Fix: Spacing and offsets now scale with the trade's Risk
+//  Risk Manager v10.0 — Risk-Scaled Progressive Engine
+//  - Progressive RRR targets (3R, 4R, 5R)
+//  - Pure risk-scaled buffers (no fixed percentages)
+//  - One-directional anchor logic
+//  - Risk-based deduplication
 // ─────────────────────────────────────────────────────────
 
 import { RISK_AMOUNT } from '../utils/constants.js';
 
-// ── Constants ─────────────────────────────────────────────
-const MIN_TP1_RRR        = 3.0;    // TP1 must reach at least 1:3
-const MIN_TP2_RRR        = 3.0;    // TP2 also needs 1:3 but spacing forces it higher
-const MIN_TP3_RRR        = 3.0;    // TP3 also 1:3 minimum
-const MIN_TP_SPACING_RRR = 1.0;    // TPs must be separated by at least 1.0 Risk (e.g., 3R, 4R, 5R)
-const MAX_TP_RISK_MULT   = 7.0;    // Hard cap: never beyond 7x risk from entry
+// ── 🎯 Tunable Constants ──────────────────────────────────
+const MIN_TP1_RRR        = 3.0;   // TP1 must be at least 3R
+const MIN_TP2_RRR        = 4.0;   // TP2 must be at least 4R
+const MIN_TP3_RRR        = 5.0;   // TP3 must be at least 5R
+const MIN_TP_SPACING_RRR = 1.0;   // Minimum 1R between TPs
+const MAX_TP_RISK_MULT   = 7.0;   // Hard cap on TP distance
+const STRUCT_DEDUP_PCT   = 0.003; // Collapse structural levels within 0.3%
+const DEDUP_THRESHOLD_R  = 0.2;   // Drop TPs within 0.2R of each other
+const ENTRY_OFFSET_MULT  = 0.05;  // Front-run by 5% of risk
+const SL_BUFFER_MULT     = 0.15;  // Buffer SL by 15% of risk
 
 /**
  * Calculate Risk-to-Reward Ratio.
- * Formula: |TP - Entry| / |Entry - SL|
+ * @returns {number} RRR rounded to 2 decimals
  */
 export function calculateRRR(entry, stopLoss, takeProfit) {
   const risk   = Math.abs(entry - stopLoss);
@@ -25,29 +31,41 @@ export function calculateRRR(entry, stopLoss, takeProfit) {
 }
 
 /**
- * Calculate position size from entry and stop loss.
- * Formula: $5 Fixed Risk / SL Distance
+ * Calculate position size based on $5 fixed risk.
  */
 export function calculatePositionSize(entry, stopLoss) {
-  const riskAmount = 5.0; // Fixed $5 risk
+  const riskAmount = 5.0;
   const slDistance = Math.abs(entry - stopLoss);
   if (slDistance === 0) return 0;
   return parseFloat((riskAmount / slDistance).toFixed(6));
 }
 
 /**
- * Calculate smart stop loss with 3-layer defense.
- * Layer 1: Structural invalidation (Order Block / Swing boundary)
- * Layer 2: 15% risk buffer beyond structure (scales with volatility, not fixed price %)
- * Layer 3: Expand to clear any FVG void sitting directly behind SL
+ * Apply risk-scaled front-run offset to a target price.
+ */
+function applyFrontRunOffset(price, direction, risk) {
+  const offset = risk * ENTRY_OFFSET_MULT;
+  return direction === 'long' ? price - offset : price + offset;
+}
+
+/**
+ * Check if a level is too close to already selected TPs (Risk-based).
+ */
+function isDuplicate(level, existingTPs, risk) {
+  return existingTPs.some(tp => {
+    const distanceInRisk = Math.abs(tp.level - level) / risk;
+    return distanceInRisk < DEDUP_THRESHOLD_R;
+  });
+}
+
+/**
+ * Calculate smart stop loss with 3-layer defense using Risk scaling.
  */
 export function calculateSmartSL(invalidationLevel, direction, fvgs, currentPrice = null) {
   const layer1 = invalidationLevel;
   
-  // Calculate raw risk distance to invalidation
-  // If currentPrice is provided, use it; otherwise fallback to an estimated risk
   const estRisk = currentPrice ? Math.abs(currentPrice - layer1) : layer1 * 0.001; 
-  const bufferDistance = estRisk * 0.15; // 15% of the risk as buffer
+  const bufferDistance = estRisk * SL_BUFFER_MULT;
 
   const layer2 = direction === 'long'
     ? layer1 - bufferDistance
@@ -70,7 +88,7 @@ export function calculateSmartSL(invalidationLevel, direction, fvgs, currentPric
   return {
     value: layer3,
     rawInvalidation: invalidationLevel,
-    buffer: `+15% risk buffer`,
+    buffer: `+${(SL_BUFFER_MULT * 100).toFixed(0)}% risk buffer`,
     layer1,
     layer2,
     layer3,
@@ -79,7 +97,6 @@ export function calculateSmartSL(invalidationLevel, direction, fvgs, currentPric
 
 /**
  * Calculate dynamic position scaling percentages.
- * Returns [tp1%, tp2%, tp3%] that sum to 100.
  */
 export function getDynamicScaling(tier, sessionName, tpCount) {
   const isPower = sessionName?.includes('London') || sessionName?.includes('NY');
@@ -102,7 +119,7 @@ export function getDynamicScaling(tier, sessionName, tpCount) {
 }
 
 /**
- * Build a deduplicated list of structural swing levels near entry.
+ * Build and deduplicate structural swing levels near entry.
  */
 function buildStructuralLevels(entry, direction, allSwings, fvgs, maxDist) {
   const raw = [];
@@ -133,7 +150,7 @@ function buildStructuralLevels(entry, direction, allSwings, fvgs, maxDist) {
   for (const lvl of raw) {
     if (deduped.length === 0) { deduped.push(lvl); continue; }
     const prev = deduped[deduped.length - 1];
-    if (Math.abs(lvl.price - prev.price) / prev.price < 0.003) continue;
+    if (Math.abs(lvl.price - prev.price) / prev.price < STRUCT_DEDUP_PCT) continue;
     deduped.push(lvl);
   }
 
@@ -141,7 +158,7 @@ function buildStructuralLevels(entry, direction, allSwings, fvgs, maxDist) {
 }
 
 /**
- * Calculate TPs using multi-TF structural levels as primary candidates.
+ * Primary TP engine combining progressive RRR, risk scaling, and structural logic.
  */
 export function calculateTPs(
   entry, stopLoss, allSwings, fvgs,
@@ -155,24 +172,16 @@ export function calculateTPs(
   const hardCap = risk * MAX_TP_RISK_MULT;
   const maxTpDistance = Math.min(hardCap, Math.max(pctCap, riskCap));
 
-  // Front-run the TP by 5% of the risk distance (e.g. if risk is 100, front-run by 5 pts)
-  // This scales perfectly with tight scalping SLs, unlike the old fixed 0.08% price offset.
-  const applyOffset = (price) =>
-    direction === 'long' ? price - (risk * 0.05) : price + (risk * 0.05);
-
   const structural = buildStructuralLevels(entry, direction, allSwings, fvgs, maxTpDistance);
 
+  // Clean one-directional anchor placement
   const anchors = [
-    { mult: 3.0, label: '1:3 RRR Anchor'  },
-    { mult: 5.0, label: '1:5 RRR Anchor'  },
-    { mult: 7.0, label: '1:7 RRR Anchor'  },
+    { mult: MIN_TP1_RRR, label: `1:${MIN_TP1_RRR} Anchor` },
+    { mult: MIN_TP2_RRR, label: `1:${MIN_TP2_RRR} Anchor` },
+    { mult: MIN_TP3_RRR, label: `1:${MIN_TP3_RRR} Anchor` },
   ]
     .map(a => ({
-      // We ADD the offset back to the anchor so that when applyOffset() runs below,
-      // the anchor lands precisely at exactly 3.0 / 5.0 / 7.0 RRR.
-      price:  direction === 'long' 
-        ? (entry + risk * a.mult) + (risk * 0.05) 
-        : (entry - risk * a.mult) - (risk * 0.05),
+      price:  direction === 'long' ? entry + (risk * a.mult) : entry - (risk * a.mult),
       reason: a.label,
       isStructural: false,
     }))
@@ -181,21 +190,27 @@ export function calculateTPs(
   const allCandidates = [...structural, ...anchors];
   allCandidates.sort((a, b) => direction === 'long' ? a.price - b.price : b.price - a.price);
 
+  const minReqs = [MIN_TP1_RRR, MIN_TP2_RRR, MIN_TP3_RRR];
+
   for (const candidate of allCandidates) {
     if (tps.length >= 3) break;
 
-    const exitLevel = applyOffset(candidate.price);
+    const exitLevel = applyFrontRunOffset(candidate.price, direction, risk);
     const rrr = calculateRRR(entry, stopLoss, exitLevel);
-    if (rrr < MIN_TP1_RRR) continue;
+    
+    // Progressive minimum requirement
+    const minRequiredRrr = minReqs[tps.length];
+    if (rrr < minRequiredRrr) continue;
 
-    // Enforce spacing using RISK MULTIPLES instead of fixed price percentages
+    // Minimum 1R spacing enforcement
     if (tps.length > 0) {
       const prev = tps[tps.length - 1];
       const spacingRrr = Math.abs(exitLevel - prev.level) / risk;
-      if (spacingRrr < MIN_TP_SPACING_RRR) continue; // Must be at least 1R away from previous TP
+      if (spacingRrr < MIN_TP_SPACING_RRR) continue; 
     }
 
-    if (tps.some(t => Math.abs(t.level - exitLevel) / risk < 0.2)) continue;
+    // Risk-scaled deduplication
+    if (isDuplicate(exitLevel, tps, risk)) continue;
 
     tps.push({
       level:       parseFloat(exitLevel.toFixed(2)),
@@ -205,10 +220,11 @@ export function calculateTPs(
     });
   }
 
+  // Exact 3.0R Fallback placement
   if (tps.length === 0) {
-    const fallback = direction === 'long' ? entry + risk * 3.0 : entry - risk * 3.0;
+    const fallbackPrice = direction === 'long' ? entry + (risk * 3.0) : entry - (risk * 3.0);
     tps.push({
-      level: parseFloat(fallback.toFixed(2)),
+      level: parseFloat(fallbackPrice.toFixed(2)),
       reason: '1:3 Fallback',
       rrr: 3.0,
       isStructural: false,
@@ -221,8 +237,11 @@ export function calculateTPs(
   return { tps, tpStructure: tps.length >= 3 ? 'multiple' : tps.length === 2 ? 'dual' : 'single' };
 }
 
+/**
+ * Breakeven price calculation (move SL to entry when 1.5R reached).
+ */
 export function calculateBreakevenMove(entry, stopLoss) {
-  const slDistance = Math.abs(entry - stopLoss);
+  const risk = Math.abs(entry - stopLoss);
   const dir = entry > stopLoss ? 1 : -1;
-  return parseFloat((entry + dir * slDistance * 1.5).toFixed(2));
+  return parseFloat((entry + dir * risk * 1.5).toFixed(2));
 }
