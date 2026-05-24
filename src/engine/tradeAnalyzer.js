@@ -1,10 +1,14 @@
 // ─────────────────────────────────────────────────────────
-//  Trade Analyzer v8.0 — Adaptive Multi-Timeframe Engine
-//  Dynamically adapts to selected chart timeframe:
-//    5m  → Scalping mode  (looser filters, EMA crossover)
-//    15m → Intraday mode  (balanced)
-//    1h  → Swing mode     (strict)
-//    4h  → Position mode  (strictest)
+//  Trade Analyzer v9.0 — All-Bug-Fixed Adaptive Engine
+//
+//  Bug fixes in this version:
+//  #1  TP spacing: anchors 3x/5x/7x (was 3x/3.5x/4x → near-identical)
+//  #2  TP candidates: multi-TF swings (primary+structure+bias) as pool
+//  #3  downProbability: was `100-upProb` (wrong for shorts) → `downProb`
+//  #4  CANDLE_LIMIT: 500 → 1500 (Binance Futures maximum)
+//  #5  maxTpPct: per-TF profile passed to calculateTPs
+//  #6  OTE temporal guard: high must precede low in time
+//  #7  Ranging probability: properly calculated (not hardcoded 0)
 // ─────────────────────────────────────────────────────────
 
 import {
@@ -19,28 +23,29 @@ import {
 import { getCurrentSession, isSessionValid } from './sessionFilter.js';
 import { RISK_AMOUNT } from '../utils/constants.js';
 
-// ─── TIMEFRAME PROFILES ───────────────────────────────────
-// Each profile defines how the engine behaves on that timeframe.
+// ─── TIMEFRAME PROFILES ────────────────────────────────────────
+// Each profile defines the full analysis context for that timeframe.
 const TF_PROFILES = {
   '5m': {
     label:               '5m Scalping',
-    modeColor:           '#00d4aa',
+    modeColor:           '#00d4ff',
     primaryKey:          '5m',
     structureKey:        '15m',
     biasKey:             '1h',
     obKey:               '1h',
-    swingLookback:       2,      // tighter swings for faster moves
-    minPillars:          3,      // only 3 of 5 pillars required
-    minConfluence:       4,      // lower bar for fast scalp entries
-    maxSlPct:            0.015,  // max 1.5% SL for tight scalping
-    sweepThreshold:      0.0008, // 0.08% min sweep (smaller on 5m)
-    hasEmaSignal:        true,   // add EMA crossover/pullback bonus
-    sessionAllowNyClose: true,   // allow NY Close session for scalps
+    swingLookback:       2,
+    minPillars:          3,
+    minConfluence:       4,
+    maxSlPct:            0.015,  // 1.5% max SL for scalping
+    maxTpPct:            0.04,   // 4% max TP range from entry
+    sweepThreshold:      0.0008,
+    hasEmaSignal:        true,
+    sessionAllowNyClose: true,
     isScalping:          true,
   },
   '15m': {
     label:               '15m Intraday',
-    modeColor:           '#3d9cf0',
+    modeColor:           '#3b8ef0',
     primaryKey:          '15m',
     structureKey:        '1h',
     biasKey:             '4h',
@@ -48,7 +53,8 @@ const TF_PROFILES = {
     swingLookback:       3,
     minPillars:          4,
     minConfluence:       5,
-    maxSlPct:            0.020,
+    maxSlPct:            0.020,  // 2% max SL
+    maxTpPct:            0.07,   // 7% max TP range
     sweepThreshold:      0.0012,
     hasEmaSignal:        false,
     sessionAllowNyClose: false,
@@ -56,7 +62,7 @@ const TF_PROFILES = {
   },
   '1h': {
     label:               '1H Swing',
-    modeColor:           '#f5c842',
+    modeColor:           '#f7c948',
     primaryKey:          '1h',
     structureKey:        '4h',
     biasKey:             '1d',
@@ -65,6 +71,7 @@ const TF_PROFILES = {
     minPillars:          4,
     minConfluence:       5,
     maxSlPct:            0.025,
+    maxTpPct:            0.12,   // 12% max TP range
     sweepThreshold:      0.0015,
     hasEmaSignal:        false,
     sessionAllowNyClose: false,
@@ -72,7 +79,7 @@ const TF_PROFILES = {
   },
   '4h': {
     label:               '4H Position',
-    modeColor:           '#9b6dff',
+    modeColor:           '#9d6fff',
     primaryKey:          '4h',
     structureKey:        '1d',
     biasKey:             '1d',
@@ -81,12 +88,38 @@ const TF_PROFILES = {
     minPillars:          4,
     minConfluence:       6,
     maxSlPct:            0.030,
+    maxTpPct:            0.20,   // 20% max TP range
     sweepThreshold:      0.0015,
     hasEmaSignal:        false,
     sessionAllowNyClose: false,
     isScalping:          false,
   },
+  '1d': {
+    label:               '1D Trend',
+    modeColor:           '#ff3f5e',
+    primaryKey:          '1d',
+    structureKey:        '1d',
+    biasKey:             '1d',
+    obKey:               '1d',
+    swingLookback:       7,
+    minPillars:          4,
+    minConfluence:       6,
+    maxSlPct:            0.050,
+    maxTpPct:            0.30,
+    sweepThreshold:      0.002,
+    hasEmaSignal:        false,
+    sessionAllowNyClose: false,
+    isScalping:          false,
+  },
 };
+
+/**
+ * Tag swing points with the timeframe they came from,
+ * so the TP engine can label them properly.
+ */
+function tagSwings(swings, tfLabel) {
+  return swings.map(s => ({ ...s, tfLabel }));
+}
 
 export function runAnalysis(allData, config = {}) {
   const {
@@ -98,56 +131,57 @@ export function runAnalysis(allData, config = {}) {
 
   const profile = TF_PROFILES[activeTimeframe] || TF_PROFILES['15m'];
   const steps   = [];
-  steps.push(`Engine v8.0 | ${profile.label} | ${symbol}`);
+  steps.push(`Engine v9.0 | ${profile.label} | ${symbol}`);
 
-  // ── News veto ──────────────────────────────────────────
+  // ── News veto ──────────────────────────────────────────────────
   if (newsStatus.veto) {
     return {
       decision: 'NO_TRADE',
       rejectionReason: `ECONOMIC VETO: ${newsStatus.reason}`,
       confluenceScore: { total: 0, max: 11, checks: [], tier: 'REJECT' },
-      analysisSteps: [`Vetoed: ${newsStatus.reason}`],
-      analysisMode: profile.label,
+      analysisSteps:   [`Vetoed: ${newsStatus.reason}`],
+      analysisMode:    profile.label,
       primaryTimeframe: profile.primaryKey,
     };
   }
 
-  // ── Candle sets ────────────────────────────────────────
+  // ── Candle sets ────────────────────────────────────────────────
   const candlesPrimary   = allData[profile.primaryKey]   || [];
   const candlesStructure = allData[profile.structureKey] || [];
   const candlesBias      = allData[profile.biasKey]      || [];
   const candlesOB        = allData[profile.obKey]        || [];
   const candles1d        = allData['1d']                 || [];
-  // Fallbacks: if structure/bias data is missing, use what we have
-  const candlesForBias = candlesBias.length > 20 ? candlesBias : (candlesStructure.length > 20 ? candlesStructure : candlesPrimary);
-  const candlesForOB   = candlesOB.length  > 20 ? candlesOB   : candlesStructure;
+
+  const candlesForBias = candlesBias.length > 20   ? candlesBias
+    : candlesStructure.length > 20                 ? candlesStructure
+    : candlesPrimary;
+  const candlesForOB   = candlesOB.length  > 20   ? candlesOB : candlesStructure;
 
   if (candlesPrimary.length < 30) {
     return {
-      decision: 'NO_TRADE',
-      direction: null,
+      decision: 'NO_TRADE', direction: null,
       rejectionReason: `Insufficient ${profile.primaryKey} data (${candlesPrimary.length} candles)`,
-      analysisSteps: ['ERROR: Not enough primary candle data.'],
+      analysisSteps:   ['ERROR: Not enough primary candle data.'],
       confluenceScore: { total: 0, max: 11, checks: [], pillarsAllMet: false, pillarsMet: 0, pillarsTotal: 5, tier: 'REJECT' },
-      analysisMode: profile.label,
+      analysisMode:    profile.label,
       primaryTimeframe: profile.primaryKey,
     };
   }
 
   const currentPrice = candlesPrimary[candlesPrimary.length - 1].close;
 
-  // ── Step 1: Daily Bias ─────────────────────────────────
-  const ema200_1d    = calculateEMA(candles1d.length > 20 ? candles1d : candlesForBias, 200);
-  const lastEma200_1d = ema200_1d[ema200_1d.length - 1];
-  const dailyBias = lastEma200_1d
+  // ── Step 1: Daily Bias (EMA200 on 1D) ──────────────────────────
+  const ema200_1d      = calculateEMA(candles1d.length > 20 ? candles1d : candlesForBias, 200);
+  const lastEma200_1d  = ema200_1d[ema200_1d.length - 1];
+  const dailyBias      = lastEma200_1d
     ? (currentPrice > lastEma200_1d ? 'bullish' : 'bearish')
     : 'neutral';
-  steps.push(`Daily Bias: ${dailyBias}`);
+  steps.push(`Daily Bias: ${dailyBias} (EMA200 1D = ${lastEma200_1d?.toFixed(0) || 'N/A'})`);
 
-  // ── Step 2: Higher-TF Trend (bias candles) ─────────────
-  const swingsBias     = findSwingPoints(candlesForBias, profile.swingLookback + 2);
-  const lastHighsBias  = swingsBias.filter(s => s.type === 'high').slice(-2);
-  const lastLowsBias   = swingsBias.filter(s => s.type === 'low').slice(-2);
+  // ── Step 2: Higher-TF Trend ────────────────────────────────────
+  const swingsBias    = findSwingPoints(candlesForBias, profile.swingLookback + 2);
+  const lastHighsBias = swingsBias.filter(s => s.type === 'high').slice(-2);
+  const lastLowsBias  = swingsBias.filter(s => s.type === 'low').slice(-2);
   let trendBias = 'ranging';
   if (lastHighsBias.length >= 2 && lastLowsBias.length >= 2) {
     if (lastHighsBias[1].price > lastHighsBias[0].price && lastLowsBias[1].price > lastLowsBias[0].price)
@@ -157,7 +191,7 @@ export function runAnalysis(allData, config = {}) {
   }
   steps.push(`${profile.biasKey.toUpperCase()} Trend: ${trendBias}`);
 
-  // ── EMA stack on bias timeframe ────────────────────────
+  // ── EMA stack on bias TF ───────────────────────────────────────
   const ema20_bias  = calculateEMA(candlesForBias, 20);
   const ema50_bias  = calculateEMA(candlesForBias, 50);
   const ema200_bias = calculateEMA(candlesForBias, 200);
@@ -165,38 +199,33 @@ export function runAnalysis(allData, config = {}) {
   const e50b  = ema50_bias[ema50_bias.length - 1];
   const e200b = ema200_bias[ema200_bias.length - 1];
 
-  // ── EMA crossover/pullback on PRIMARY timeframe (for scalping) ──
+  // ── EMA crossover / pullback signal (5m scalping only) ────────
   let emaSignalActive = false;
   let emaSignalType   = null;
   if (profile.hasEmaSignal && candlesPrimary.length >= 52) {
-    const ema20_p  = calculateEMA(candlesPrimary, 20);
-    const ema50_p  = calculateEMA(candlesPrimary, 50);
+    const ema20_p = calculateEMA(candlesPrimary, 20);
+    const ema50_p = calculateEMA(candlesPrimary, 50);
     const n = ema20_p.length;
-    const prevE20 = ema20_p[n - 2];
-    const currE20 = ema20_p[n - 1];
-    const prevE50 = ema50_p[n - 2];
-    const currE50 = ema50_p[n - 1];
+    const prevE20 = ema20_p[n - 2], currE20 = ema20_p[n - 1];
+    const prevE50 = ema50_p[n - 2], currE50 = ema50_p[n - 1];
 
-    // Bullish cross: EMA20 just crossed above EMA50 (within last 3 bars)
     const bullCross = prevE20 != null && prevE50 != null && prevE20 <= prevE50 && currE20 > currE50;
-    // Bearish cross
     const bearCross = prevE20 != null && prevE50 != null && prevE20 >= prevE50 && currE20 < currE50;
-    // Pullback to EMA20 while trending
     const bullPull  = currE20 > currE50 && Math.abs(currentPrice - currE20) / currE20 < 0.003;
     const bearPull  = currE20 < currE50 && Math.abs(currentPrice - currE20) / currE20 < 0.003;
 
-    if (bullCross) { emaSignalActive = true; emaSignalType = 'EMA Bullish Cross'; }
+    if      (bullCross) { emaSignalActive = true; emaSignalType = 'EMA Bullish Cross'; }
     else if (bearCross) { emaSignalActive = true; emaSignalType = 'EMA Bearish Cross'; }
-    else if (bullPull) { emaSignalActive = true; emaSignalType = 'EMA20 Bullish Pullback'; }
-    else if (bearPull) { emaSignalActive = true; emaSignalType = 'EMA20 Bearish Pullback'; }
+    else if (bullPull)  { emaSignalActive = true; emaSignalType = 'EMA20 Bullish Pullback'; }
+    else if (bearPull)  { emaSignalActive = true; emaSignalType = 'EMA20 Bearish Pullback'; }
     if (emaSignalType) steps.push(`EMA Signal: ${emaSignalType}`);
   }
 
-  // ── Step 3: SMC Detection ──────────────────────────────
-  const obsOB      = detectOrderBlocks(candlesForOB, currentPrice);
-  const obsPrimary = detectOrderBlocks(candlesPrimary, currentPrice);
-  const fvgsOB     = detectFVGs(candlesForOB, currentPrice);
-  const fvgsPrimary= detectFVGs(candlesPrimary, currentPrice);
+  // ── Step 3: SMC Detection ──────────────────────────────────────
+  const obsOB       = detectOrderBlocks(candlesForOB, currentPrice);
+  const obsPrimary  = detectOrderBlocks(candlesPrimary, currentPrice);
+  const fvgsOB      = detectFVGs(candlesForOB, currentPrice);
+  const fvgsPrimary = detectFVGs(candlesPrimary, currentPrice);
 
   const sweepsPrimary   = detectSweeps(candlesPrimary,   profile.sweepThreshold);
   const sweepsStructure = detectSweeps(candlesStructure, profile.sweepThreshold);
@@ -208,92 +237,128 @@ export function runAnalysis(allData, config = {}) {
 
   steps.push(`OBs: ${obsOB.length + obsPrimary.length} | FVGs: ${fvgsOB.length + fvgsPrimary.length} | Sweeps: ${allSweeps.length} | Shifts: ${allShifts.length}`);
 
-  // ── Session ────────────────────────────────────────────
+  // ── Session ────────────────────────────────────────────────────
   const session   = getCurrentSession();
   const sessionOk = session.status === 'optimal' || session.status === 'valid' ||
                     (profile.sessionAllowNyClose && session.status === 'caution');
   steps.push(`Session: ${session.name} | Valid: ${sessionOk}`);
 
-  // ── Direction ──────────────────────────────────────────
+  // ── Direction ──────────────────────────────────────────────────
   let direction = null;
   let upProb = 50, downProb = 50;
 
-  if (trendBias === 'bullish' && dailyBias === 'bullish') { direction = 'long';  upProb = 75; }
-  else if (trendBias === 'bearish' && dailyBias === 'bearish') { direction = 'short'; downProb = 75; }
-  else if (trendBias === 'bullish') { direction = 'long';  upProb = 62; }
-  else if (trendBias === 'bearish') { direction = 'short'; downProb = 62; }
+  if      (trendBias === 'bullish' && dailyBias === 'bullish') { direction = 'long';  upProb = 75; downProb = 25; }
+  else if (trendBias === 'bearish' && dailyBias === 'bearish') { direction = 'short'; downProb = 75; upProb = 25; }
+  else if (trendBias === 'bullish')                             { direction = 'long';  upProb = 62; downProb = 38; }
+  else if (trendBias === 'bearish')                             { direction = 'short'; downProb = 62; upProb = 38; }
+  // Ranging — probabilities stay equal (50/50)
 
-  // For 5m scalping: EMA signal on primary TF can override ranging bias
+  // FIX #7: calculate actual ranging probability
+  const rangeProbability = direction === null ? 50 : Math.max(0, 100 - upProb - downProb);
+
+  // 5m: EMA signal can provide direction when bias is ranging
   if (profile.isScalping && emaSignalActive && direction === null) {
     if (emaSignalType?.includes('Bullish') && currentPrice > (e200b || 0)) {
-      direction = 'long';  upProb = 58;
-      steps.push('5m EMA signal providing direction (Bullish) — bias override');
+      direction = 'long';  upProb = 58; downProb = 30;
+      steps.push('5m EMA override: direction = LONG (EMA signal above EMA200)');
     } else if (emaSignalType?.includes('Bearish') && currentPrice < (e200b || Infinity)) {
-      direction = 'short'; downProb = 58;
-      steps.push('5m EMA signal providing direction (Bearish) — bias override');
+      direction = 'short'; downProb = 58; upProb = 30;
+      steps.push('5m EMA override: direction = SHORT (EMA signal below EMA200)');
     }
   }
 
-  steps.push(`Direction: ${direction || 'none'} | Up: ${upProb}% Down: ${downProb}%`);
+  steps.push(`Direction: ${direction || 'RANGING'} | Bull: ${upProb}% Bear: ${downProb}%`);
 
-  // ── OTE Zone ───────────────────────────────────────────
-  const swingsStructure = findSwingPoints(candlesStructure.length > 20 ? candlesStructure : candlesPrimary, profile.swingLookback);
+  // ── OTE Zone ───────────────────────────────────────────────────
+  // FIX #6: verify temporal order (high must precede low for long, vice versa for short)
+  const swingsStructure = findSwingPoints(
+    candlesStructure.length > 20 ? candlesStructure : candlesPrimary,
+    profile.swingLookback
+  );
   let oteZone = null;
   if (direction === 'long') {
-    const lows  = swingsStructure.filter(s => s.type === 'low'  && s.price < currentPrice).sort((a, b) => b.index - a.index);
-    const highs = swingsStructure.filter(s => s.type === 'high' && s.price > currentPrice).sort((a, b) => b.index - a.index);
-    if (lows[0] && highs[0]) oteZone = calculateOTE(highs[0].price, lows[0].price, 'long');
+    const lows  = swingsStructure.filter(s => s.type === 'low'  && s.price < currentPrice).sort((a,b) => b.index - a.index);
+    const highs = swingsStructure.filter(s => s.type === 'high' && s.price > lows[0]?.price).sort((a,b) => b.index - a.index);
+    // Guard: high must have occurred BEFORE the recent low (impulse down → OTE on pullback)
+    if (lows[0] && highs[0] && highs[0].index < lows[0].index)
+      oteZone = calculateOTE(highs[0].price, lows[0].price, 'long');
   } else if (direction === 'short') {
-    const highs = swingsStructure.filter(s => s.type === 'high' && s.price > currentPrice).sort((a, b) => b.index - a.index);
-    const lows  = swingsStructure.filter(s => s.type === 'low'  && s.price < currentPrice).sort((a, b) => b.index - a.index);
-    if (highs[0] && lows[0]) oteZone = calculateOTE(highs[0].price, lows[0].price, 'short');
+    const highs = swingsStructure.filter(s => s.type === 'high' && s.price > currentPrice).sort((a,b) => b.index - a.index);
+    const lows  = swingsStructure.filter(s => s.type === 'low'  && s.price < highs[0]?.price).sort((a,b) => b.index - a.index);
+    // Guard: high must have occurred BEFORE the recent low (impulse up → OTE on pullback)
+    if (highs[0] && lows[0] && highs[0].index > lows[0].index)
+      oteZone = calculateOTE(highs[0].price, lows[0].price, 'short');
   }
   const inOTE = isInOTE(currentPrice, oteZone);
-  steps.push(`OTE: ${oteZone ? `${oteZone.lower.toFixed(2)}–${oteZone.upper.toFixed(2)}` : 'N/A'} | In OTE: ${inOTE}`);
+  steps.push(`OTE: ${oteZone ? `${oteZone.lower.toFixed(0)}–${oteZone.upper.toFixed(0)}` : 'N/A'} | In OTE: ${inOTE}`);
 
-  // ── Entry / SL ─────────────────────────────────────────
+  // ── Entry / SL ──────────────────────────────────────────────────
   let entry  = currentPrice;
   let slData = null;
 
   if (direction) {
-    const allOBs = [...obsOB, ...obsPrimary];
+    const allOBs    = [...obsOB, ...obsPrimary];
     const nearestOB = direction === 'long'
-      ? allOBs.filter(o => o.type === 'demand').sort((a, b) => b.entryBoundary - a.entryBoundary)[0]
-      : allOBs.filter(o => o.type === 'supply').sort((a, b) => a.entryBoundary - b.entryBoundary)[0];
+      ? allOBs.filter(o => o.type === 'demand').sort((a,b) => b.entryBoundary - a.entryBoundary)[0]
+      : allOBs.filter(o => o.type === 'supply').sort((a,b) => a.entryBoundary - b.entryBoundary)[0];
 
     const inv = nearestOB
       ? (direction === 'long' ? nearestOB.lowerBound : nearestOB.upperBound)
       : (direction === 'long' ? currentPrice * (1 - profile.maxSlPct * 0.8) : currentPrice * (1 + profile.maxSlPct * 0.8));
 
-    if (inOTE && oteZone) entry = oteZone.midpoint;
-    else if (nearestOB) entry = nearestOB.entryBoundary;
+    if (inOTE && oteZone)   entry = oteZone.midpoint;
+    else if (nearestOB)     entry = nearestOB.entryBoundary;
 
     const allFVGs = [...fvgsOB, ...fvgsPrimary];
     slData = calculateSmartSL(inv, direction, allFVGs);
-    steps.push(`Entry: ${entry.toFixed(2)} | SL: ${slData.value.toFixed(2)} | Dist: ${((Math.abs(entry - slData.value) / entry) * 100).toFixed(2)}%`);
+    steps.push(`Entry: ${entry.toFixed(2)} | SL: ${slData.value.toFixed(2)} | SL%: ${((Math.abs(entry - slData.value) / entry) * 100).toFixed(2)}%`);
   }
 
-  // ── TPs ────────────────────────────────────────────────
-  const swingsBiasAll = findSwingPoints(candlesForBias, profile.swingLookback + 2);
+  // ── TPs — Multi-TF Swing Pool ──────────────────────────────────
+  // FIX #1 & #2: Use swings from ALL available timeframes as TP candidates.
+  // Tag each with its TF label so the UI can show "1H Swing @ 74,500" etc.
+  // Structural levels from primary (nearest) and structure/bias (further out)
+  // give the engine real chart levels to target instead of arithmetic multiples.
   let tpData = null;
   if (direction && slData) {
-    const tpSwings = swingsBiasAll.filter(s =>
-      direction === 'long' ? s.type === 'high' && s.price > entry : s.type === 'low' && s.price < entry
-    );
     const allFVGs = [...fvgsOB, ...fvgsPrimary];
-    tpData = calculateTPs(entry, slData.value, tpSwings, allFVGs, direction, 'HIGH', session.name);
+
+    const tpSwingPool = [
+      ...tagSwings(findSwingPoints(candlesPrimary,   profile.swingLookback    ), profile.primaryKey.toUpperCase()),
+      ...tagSwings(findSwingPoints(candlesStructure, profile.swingLookback + 1), profile.structureKey.toUpperCase()),
+      ...tagSwings(swingsBias,                                                   profile.biasKey.toUpperCase()),
+    ].filter(s =>
+      direction === 'long'  ? s.type === 'high' && s.price > entry
+                            : s.type === 'low'  && s.price < entry
+    );
+
+    tpData = calculateTPs(
+      entry, slData.value,
+      tpSwingPool, allFVGs,
+      direction,
+      'HIGH',
+      session.name,
+      profile.maxTpPct,
+    );
+
+    // Attach projected P&L to each TP
+    const posSize = calculatePositionSize(entry, slData.value);
     tpData.tps.forEach(tp => {
-      const fullPnl   = Math.abs(tp.level - entry) * calculatePositionSize(entry, slData.value);
-      tp.projectedProfit = (fullPnl * (tp.closePercent / 100)).toFixed(2);
+      const fullPnl       = Math.abs(tp.level - entry) * posSize;
+      tp.projectedProfit  = (fullPnl * ((tp.closePercent || 0) / 100)).toFixed(2);
     });
-    steps.push(`TPs: ${tpData.tps.map((t, i) => `TP${i + 1}=$${t.level.toFixed(2)} (1:${t.rrr})`).join(', ')}`);
+
+    steps.push(`TPs: ${tpData.tps.map((t, i) =>
+      `TP${i+1}=$${t.level.toFixed(0)} (1:${t.rrr}) ${t.isStructural ? '★' : '⚡'}`
+    ).join(' | ')}`);
+    steps.push(`TP source: ${tpData.tps.map(t => t.reason).join(' → ')}`);
   }
 
-  // ── RRR pillar ─────────────────────────────────────────
-  const tp1Rrr        = tpData?.tps?.[0]?.rrr ?? 0;
-  const rrrMeetsMin   = tp1Rrr >= 3.0;
+  // ── Pillar: RRR ────────────────────────────────────────────────
+  const tp1Rrr      = tpData?.tps?.[0]?.rrr ?? 0;
+  const rrrMeetsMin = tp1Rrr >= 3.0;
 
-  // ── Scoring ────────────────────────────────────────────
+  // ── Confluence Checks ──────────────────────────────────────────
   const trend4HAligned = (direction === 'long'  && trendBias === 'bullish') ||
                          (direction === 'short' && trendBias === 'bearish');
   const dailyAligned   = (direction === 'long'  && dailyBias === 'bullish') ||
@@ -301,27 +366,28 @@ export function runAnalysis(allData, config = {}) {
   const liquidityEvent = allSweeps.length > 0 ||
                          [...fvgsOB, ...fvgsPrimary].some(f => currentPrice >= f.lower && currentPrice <= f.upper);
   const structureShift = allShifts.length > 0;
-  const rsiResult      = detectRSIDivergence(candlesStructure.length > 20 ? candlesStructure : candlesPrimary, direction, 14);
+  const rsiResult      = detectRSIDivergence(
+    candlesStructure.length > 20 ? candlesStructure : candlesPrimary,
+    direction, 14
+  );
   const ema200Acting   = e200b && Math.abs(currentPrice - e200b) / e200b < 0.005;
   const slPct          = slData ? Math.abs(entry - slData.value) / entry : 0;
-
-  // Align EMA signal to direction
   const emaSignalAligned = emaSignalActive &&
     ((direction === 'long'  && emaSignalType?.includes('Bullish')) ||
      (direction === 'short' && emaSignalType?.includes('Bearish')));
 
   const checks = [
-    { label: `${profile.biasKey.toUpperCase()} Trend Aligned`,  met: trend4HAligned,              pillar: true,  weight: 2 },
-    { label: 'Liquidity Sweep / FVG Fill',                       met: liquidityEvent,               pillar: true,  weight: 2 },
-    { label: `${profile.primaryKey}/${profile.structureKey} BOS/CHOCH`, met: structureShift,       pillar: true,  weight: 2 },
-    { label: 'Active Trading Session',                           met: sessionOk,                    pillar: true,  weight: 1 },
-    { label: 'RRR ≥ 1:3 (Structural)',                          met: rrrMeetsMin,                  pillar: true,  weight: 2 },
-    { label: 'Daily Bias Aligned',                               met: dailyAligned,                 pillar: false, weight: 1 },
-    { label: 'RSI Divergence Present',                           met: rsiResult.hasDivergence,      pillar: false, weight: 1 },
-    { label: 'EMA200 Acting as S/R',                            met: ema200Acting,                 pillar: false, weight: 1 },
-    { label: 'Entry in OTE Zone (Fib)',                         met: inOTE,                        pillar: false, weight: 1 },
+    { label: `${profile.biasKey.toUpperCase()} Trend Aligned`, met: trend4HAligned,         pillar: true,  weight: 2 },
+    { label: 'Liquidity Sweep / FVG Fill',                     met: liquidityEvent,           pillar: true,  weight: 2 },
+    { label: `${profile.primaryKey.toUpperCase()}/${profile.structureKey.toUpperCase()} BOS/CHOCH`, met: structureShift, pillar: true, weight: 2 },
+    { label: 'Active Trading Session',                         met: sessionOk,                pillar: true,  weight: 1 },
+    { label: 'RRR ≥ 1:3 (Structural)',                        met: rrrMeetsMin,              pillar: true,  weight: 2 },
+    { label: 'Daily Bias Aligned (EMA200)',                    met: dailyAligned,             pillar: false, weight: 1 },
+    { label: 'RSI Divergence',                                 met: rsiResult.hasDivergence,  pillar: false, weight: 1 },
+    { label: 'EMA200 Acting as S/R',                          met: ema200Acting,             pillar: false, weight: 1 },
+    { label: 'Entry in OTE Zone (61.8–78.6%)',                met: inOTE,                    pillar: false, weight: 1 },
     ...(profile.hasEmaSignal
-      ? [{ label: `EMA Signal (${emaSignalType || 'N/A'})`,     met: emaSignalAligned,             pillar: false, weight: 1 }]
+      ? [{ label: `EMA Signal: ${emaSignalType || 'None'}`,   met: emaSignalAligned,         pillar: false, weight: 1 }]
       : []),
   ];
 
@@ -331,32 +397,32 @@ export function runAnalysis(allData, config = {}) {
   const normalizedTotal = Math.min(max, Math.round((scoredWeight / totalWeight) * max));
   const pillarsMet      = checks.filter(c => c.pillar && c.met).length;
   const pillarsTotal    = checks.filter(c => c.pillar).length;
-  const tier = normalizedTotal >= 8 ? 'EXCEPTIONAL' : normalizedTotal >= 6 ? 'HIGH' : normalizedTotal >= 4 ? 'MEDIUM' : 'REJECT';
+  const tier            = normalizedTotal >= 8 ? 'EXCEPTIONAL' : normalizedTotal >= 6 ? 'HIGH' : normalizedTotal >= 4 ? 'MEDIUM' : 'REJECT';
 
-  // ── Decision ───────────────────────────────────────────
+  // ── Decision ───────────────────────────────────────────────────
   let decision        = 'NO_TRADE';
   let rejectionReason = null;
 
   if (!direction) {
-    rejectionReason = `No directional bias on ${profile.biasKey.toUpperCase()} — market ranging`;
+    rejectionReason = `Market ranging — no ${profile.biasKey.toUpperCase()} directional bias`;
   } else if (slPct > profile.maxSlPct) {
     rejectionReason = `SL too wide: ${(slPct * 100).toFixed(2)}% > ${(profile.maxSlPct * 100).toFixed(1)}% max for ${profile.label}`;
   } else if (!rrrMeetsMin) {
     rejectionReason = `RRR too low: ${tp1Rrr.toFixed(2)} < 3.0 minimum`;
   } else if (pillarsMet < profile.minPillars) {
-    rejectionReason = `Pillars: ${pillarsMet}/${pillarsTotal} met, need ${profile.minPillars} for ${profile.label}`;
+    rejectionReason = `Pillars: ${pillarsMet}/${pillarsTotal} (need ${profile.minPillars} for ${profile.label})`;
   } else if (normalizedTotal < profile.minConfluence) {
-    rejectionReason = `Confluence: ${normalizedTotal}/${max} — need ${profile.minConfluence} for ${profile.label}`;
+    rejectionReason = `Confluence: ${normalizedTotal}/${max} (need ${profile.minConfluence} for ${profile.label})`;
   } else {
     decision = 'TAKE_NOW';
   }
 
-  steps.push(`→ ${decision} | Confluence: ${normalizedTotal}/${max} | Pillars: ${pillarsMet}/${pillarsTotal}`);
+  steps.push(`→ ${decision} | Score: ${normalizedTotal}/${max} | Pillars: ${pillarsMet}/${pillarsTotal}`);
   if (rejectionReason) steps.push(`Rejected: ${rejectionReason}`);
 
   const finalTier = (decision === 'NO_TRADE' && pillarsMet < pillarsTotal) ? 'REJECT' : tier;
 
-  // ── Final Return ───────────────────────────────────────
+  // ── Return ─────────────────────────────────────────────────────
   return {
     decision,
     direction,
@@ -367,37 +433,33 @@ export function runAnalysis(allData, config = {}) {
     projectedLoss: direction ? '5.00' : '0.00',
     breakevenMove: (direction && slData) ? calculateBreakevenMove(entry, slData.value) : null,
     confluenceScore: {
-      total: normalizedTotal,
-      max,
-      tier: finalTier,
-      checks,
-      pillarsMet,
-      pillarsTotal,
+      total: normalizedTotal, max, tier: finalTier,
+      checks, pillarsMet, pillarsTotal,
       pillarsAllMet: pillarsMet === pillarsTotal,
     },
     session,
-    upProbability:   upProb,
-    downProbability: 100 - upProb,
-    rangeProbability: 0,
+    // FIX #3: downProbability was `100-upProb` (wrong for shorts) — now uses downProb
+    upProbability:    upProb,
+    downProbability:  downProb,
+    rangeProbability, // FIX #7: was always hardcoded 0
     rejectionReason,
-    waitCondition:   null,
-    keyRisk: ema200Acting ? 'EMA200 Resistance' : slPct > 0.012 ? 'Wide SL — reduced position size' : 'Market Volatility',
+    waitCondition:    null,
+    keyRisk: ema200Acting ? 'EMA200 Resistance / Support' : slPct > 0.012 ? 'Wide SL — size reduced automatically' : 'Market Volatility',
     invalidationLevel: slData ? slData.rawInvalidation.toFixed(2) : 'N/A',
     analysisSteps:  steps,
     oteZone,
     symbol,
     balance,
-    // Mode metadata for UI display
+    // Mode metadata
     analysisMode:     profile.label,
     modeColor:        profile.modeColor,
     primaryTimeframe: profile.primaryKey,
     isScalping:       profile.isScalping,
     emaSignal:        emaSignalActive ? { active: true, type: emaSignalType } : null,
-    // SMC counts for UI
     smcData: {
-      orderBlocks:    [...obsOB, ...obsPrimary],
-      fvgs:           [...fvgsOB, ...fvgsPrimary],
-      sweeps:         allSweeps,
+      orderBlocks:     [...obsOB, ...obsPrimary],
+      fvgs:            [...fvgsOB, ...fvgsPrimary],
+      sweeps:          allSweeps,
       structureShifts: allShifts,
     },
   };

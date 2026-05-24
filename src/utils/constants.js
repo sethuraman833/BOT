@@ -24,5 +24,6 @@ export const DEFAULT_TIMEFRAME = '15m';
 export const BINANCE_REST = 'https://fapi.binance.com/fapi/v1';
 export const BINANCE_WSS  = 'wss://fstream.binance.com/stream';
 
-export const RISK_AMOUNT  = 5;   // $5 max risk per trade
-export const CANDLE_LIMIT = 500;
+export const RISK_AMOUNT  = 5;    // $5 max risk per trade
+export const CANDLE_LIMIT = 1500; // Binance Futures max per request (was 500)
+

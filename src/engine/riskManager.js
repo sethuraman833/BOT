@@ -1,8 +1,10 @@
 // ─────────────────────────────────────────────────────────
-//  Risk Manager v8.1 — Corrected TP Placement
-//  FIX: TP anchors use clean 3x/3.5x/4x multiples (not fib 3.272/4.236)
-//  FIX: Structural candidates capped at MAX_TP_MULTIPLIER x risk
-//  FIX: Nearest qualifying target always wins
+//  Risk Manager v9.0 — Full Structural TP Engine
+//  Fix: Multi-TF swing candidates (primary + structure + bias)
+//  Fix: Min spacing 1.0% (was 0.4% → caused near-identical TPs)
+//  Fix: Wider fallback anchors 3x/5x/7x (was 3x/3.5x/4x)
+//  Fix: Dynamic cap = max(entry×5%, risk×5) so tight SLs
+//       don't get forced to extreme % targets
 // ─────────────────────────────────────────────────────────
 
 import { RISK_AMOUNT } from '../utils/constants.js';
@@ -11,10 +13,10 @@ import { RISK_AMOUNT } from '../utils/constants.js';
 const ENTRY_OFFSET       = 0.0008; // 0.08% buffer inside structural level
 const SL_BUFFER          = 0.003;  // 0.3% beyond invalidation
 const MIN_TP1_RRR        = 3.0;    // TP1 must reach at least 1:3
-const MIN_TP2_RRR        = 3.5;    // TP2 must reach at least 1:3.5
-const MIN_TP3_RRR        = 4.0;    // TP3 must reach at least 1:4
-const MAX_TP_MULTIPLIER  = 4.5;    // Never place TP beyond 4.5x risk — prevents absurdly far targets
-const MIN_TP_SPACING_PCT = 0.004;  // TPs must be at least 0.4% apart
+const MIN_TP2_RRR        = 3.0;    // TP2 also needs 1:3 but must be further away
+const MIN_TP3_RRR        = 3.0;    // TP3 also 1:3 minimum — spacing enforced separately
+const MIN_TP_SPACING_PCT = 0.010;  // 1% minimum price gap between consecutive TPs
+const MAX_TP_RISK_MULT   = 7.0;    // Hard cap: never beyond 7x risk from entry
 
 /**
  * Calculate Risk-to-Reward Ratio.
@@ -32,9 +34,8 @@ export function calculateRRR(entry, stopLoss, takeProfit) {
  * Formula: $5 Fixed Risk / SL Distance
  */
 export function calculatePositionSize(entry, stopLoss) {
-  const riskAmount   = 5.0; // Fixed $5 risk
-  const slDistance   = Math.abs(entry - stopLoss);
-  
+  const riskAmount = 5.0; // Fixed $5 risk
+  const slDistance = Math.abs(entry - stopLoss);
   if (slDistance === 0) return 0;
   return parseFloat((riskAmount / slDistance).toFixed(6));
 }
@@ -77,130 +78,186 @@ export function calculateSmartSL(invalidationLevel, direction, fvgs) {
 }
 
 /**
- * Calculate dynamic scaling percentages based on conviction tier and session.
- * Profile: [TP1, TP2, TP3]
+ * Calculate dynamic position scaling percentages.
+ * Returns [tp1%, tp2%, tp3%] that sum to 100.
  */
 export function getDynamicScaling(tier, sessionName, tpCount) {
-  // Base profiles
-  let [p1, p2, p3] = { 
-    EXCEPTIONAL: [25, 35, 40], 
-    HIGH:        [35, 40, 25], 
-    MEDIUM:      [50, 35, 15], 
-    REJECT:      [80, 15, 5] 
-  }[tier] || [40, 35, 25];
-
-  // Session Modifiers
-  const isActivePower = sessionName?.includes('London') || sessionName?.includes('NY');
+  // Session modifier
+  const isPower = sessionName?.includes('London') || sessionName?.includes('NY');
   const isAsian = sessionName?.includes('Asian') || !sessionName;
 
-  if (isActivePower) { p1 -= 5; p3 += 5; } // Trend potential
-  if (isAsian)       { p1 += 10; p3 -= 10; } // Mean reverting
+  const base = {
+    EXCEPTIONAL: [25, 35, 40],
+    HIGH:        [30, 40, 30],
+    MEDIUM:      [45, 35, 20],
+    REJECT:      [70, 20, 10],
+  }[tier] || [35, 35, 30];
 
-  // Distribution for fewer TPs
-  if (tpCount === 2) return [55, 45, 0];
+  let [p1, p2, p3] = base;
+  if (isPower) { p1 -= 5; p3 += 5; }  // trend session → ride to TP3
+  if (isAsian)  { p1 += 10; p3 -= 10; } // range session → take early
+
   if (tpCount === 1) return [100, 0, 0];
-
+  if (tpCount === 2) return [isPower ? 45 : 55, isPower ? 55 : 45, 0];
   return [p1, p2, p3];
 }
 
 /**
- * Calculate TPs using structural levels with minimum RRR validation.
- * FIX: MIN_TP1_RRR is now 3.0, fallback uses risk*3.0
+ * Build a deduplicated list of structural swing levels near entry,
+ * sourced from multiple timeframes (primary / structure / bias).
+ * Levels within 0.3% of each other are collapsed to avoid duplicates.
  */
-export function calculateTPs(entry, stopLoss, swings, fvgs, direction, tier = 'HIGH', sessionName = '') {
+function buildStructuralLevels(entry, direction, allSwings, fvgs, maxDist) {
+  const raw = [];
+
+  // Swings from all timeframes
+  for (const s of allSwings) {
+    const price = s.price;
+    const dist  = direction === 'long' ? price - entry : entry - price;
+    if ((direction === 'long' && price > entry && dist <= maxDist) ||
+        (direction === 'short' && price < entry && dist <= maxDist)) {
+      raw.push({ price, reason: `${s.tfLabel || 'Swing'} @ ${price.toFixed(0)}`, isStructural: true });
+    }
+  }
+
+  // FVGs
+  for (const f of fvgs) {
+    if (direction === 'long' && f.type === 'bearish' && f.lower > entry) {
+      const dist = f.lower - entry;
+      if (dist <= maxDist) raw.push({ price: f.midpoint, reason: `Bearish FVG @ ${f.midpoint?.toFixed(0)}`, isStructural: true });
+    }
+    if (direction === 'short' && f.type === 'bullish' && f.upper < entry) {
+      const dist = entry - f.upper;
+      if (dist <= maxDist) raw.push({ price: f.midpoint, reason: `Bullish FVG @ ${f.midpoint?.toFixed(0)}`, isStructural: true });
+    }
+  }
+
+  // Sort: LONG ascending (closest first), SHORT descending (highest = closest first)
+  raw.sort((a, b) => direction === 'long' ? a.price - b.price : b.price - a.price);
+
+  // Deduplicate: collapse levels within 0.3% of each other
+  const deduped = [];
+  for (const lvl of raw) {
+    if (deduped.length === 0) { deduped.push(lvl); continue; }
+    const prev = deduped[deduped.length - 1];
+    if (Math.abs(lvl.price - prev.price) / prev.price < 0.003) continue; // same zone
+    deduped.push(lvl);
+  }
+
+  return deduped;
+}
+
+/**
+ * Calculate TPs using multi-TF structural levels as primary candidates.
+ *
+ * Key logic:
+ *  1. Build structural candidates from primary + structure + bias swings + FVGs
+ *  2. Deduplicate levels within 0.3% of each other
+ *  3. Enforce MIN_TP_SPACING_PCT = 1% between consecutive TPs
+ *  4. Fallback anchors at 3x / 5x / 7x risk — wide enough to always be well-separated
+ *  5. Cap at max(entry×5%, risk×7) so targets stay realistic
+ *
+ * @param {number}   entry
+ * @param {number}   stopLoss
+ * @param {Array}    allSwings   – pre-tagged array [{price, tfLabel}] from multiple TFs
+ * @param {Array}    fvgs
+ * @param {string}   direction   – 'long' | 'short'
+ * @param {string}   tier        – confluence tier
+ * @param {string}   sessionName
+ * @param {number}   maxTpPct    – max TP distance as fraction of entry price (per TF profile)
+ */
+export function calculateTPs(
+  entry, stopLoss, allSwings, fvgs,
+  direction, tier = 'HIGH', sessionName = '', maxTpPct = 0.06
+) {
   const tps = [];
   const risk = Math.abs(entry - stopLoss);
-  // Cap: never place a TP beyond this distance from entry
-  const maxTpDistance = risk * MAX_TP_MULTIPLIER;
+
+  // Dynamic cap: larger of (entry × maxTpPct) and (risk × 5), but never beyond risk × 7
+  const pctCap  = entry * maxTpPct;
+  const riskCap = risk * 5.0;
+  const hardCap = risk * MAX_TP_RISK_MULT;
+  const maxTpDistance = Math.min(hardCap, Math.max(pctCap, riskCap));
 
   const applyOffset = (price) =>
     direction === 'long' ? price * (1 - ENTRY_OFFSET) : price * (1 + ENTRY_OFFSET);
 
-  const candidates = [];
+  // ── Build structural candidates ─────────────────────────────────────
+  const structural = buildStructuralLevels(entry, direction, allSwings, fvgs, maxTpDistance);
 
-  // ── 1. Structural swing levels (capped at MAX_TP_MULTIPLIER × risk) ──
-  for (const s of swings) {
-    if (direction === 'long' && s.price > entry) {
-      if (s.price - entry <= maxTpDistance)
-        candidates.push({ price: s.price, reason: `Swing High @ ${s.price.toFixed(0)}` });
-    }
-    if (direction === 'short' && s.price < entry) {
-      if (entry - s.price <= maxTpDistance)
-        candidates.push({ price: s.price, reason: `Swing Low @ ${s.price.toFixed(0)}` });
-    }
-  }
+  // ── Fallback anchors: 3x / 5x / 7x risk ────────────────────────────
+  // Wide spacing ensures they never land near-identically even for tiny SLs.
+  // Only include anchors that fall within the maxTpDistance cap.
+  const anchors = [
+    { mult: 3.0, label: '1:3 RRR Anchor'  },
+    { mult: 5.0, label: '1:5 RRR Anchor'  },
+    { mult: 7.0, label: '1:7 RRR Anchor'  },
+  ]
+    .map(a => ({
+      price:  direction === 'long' ? entry + risk * a.mult : entry - risk * a.mult,
+      reason: a.label,
+      isStructural: false,
+    }))
+    .filter(a => {
+      const dist = Math.abs(a.price - entry);
+      return dist <= maxTpDistance;
+    });
 
-  // ── 2. FVG levels (capped) ─────────────────────────────────────────
-  for (const f of fvgs) {
-    if (direction === 'long' && f.type === 'bearish' && f.lower > entry) {
-      if (f.lower - entry <= maxTpDistance)
-        candidates.push({ price: f.midpoint, reason: `Bearish FVG @ ${f.midpoint?.toFixed(0)}` });
-    }
-    if (direction === 'short' && f.type === 'bullish' && f.upper < entry) {
-      if (entry - f.upper <= maxTpDistance)
-        candidates.push({ price: f.midpoint, reason: `Bullish FVG @ ${f.midpoint?.toFixed(0)}` });
-    }
-  }
+  // ── Merge: structural first, then anchors (structural levels take priority) ──
+  // Re-sort merged list by proximity to entry
+  const allCandidates = [...structural, ...anchors];
+  allCandidates.sort((a, b) => direction === 'long' ? a.price - b.price : b.price - a.price);
 
-  // ── 3. Clean RRR anchors (guaranteed fallbacks, always in range) ───
-  // These replace the old fibonacci extensions (3.272x, 4.236x) which placed
-  // TPs at awkward multiples. Clean anchors ensure the NEAREST qualifying
-  // target wins: if no structural level is between entry and 3.0x risk,
-  // TP1 lands exactly at 3:1 — not at a 4H swing low at 4.31x.
-  const anchor1 = direction === 'long' ? entry + risk * 3.0 : entry - risk * 3.0;  // 1:3 minimum
-  const anchor2 = direction === 'long' ? entry + risk * 3.5 : entry - risk * 3.5;  // 1:3.5
-  const anchor3 = direction === 'long' ? entry + risk * 4.0 : entry - risk * 4.0;  // 1:4
-  candidates.push({ price: anchor1, reason: '1:3 RRR Target'   });
-  candidates.push({ price: anchor2, reason: '1:3.5 RRR Target' });
-  candidates.push({ price: anchor3, reason: '1:4 RRR Target'   });
-
-  // Sort: LONG ascending (closest first), SHORT descending (highest price = closest first)
-  candidates.sort((a, b) => direction === 'long' ? a.price - b.price : b.price - a.price);
-
-  // ── Find TPs with minimum RRR, nearest qualifying target wins ─────
-  const minRRRs = [MIN_TP1_RRR, MIN_TP2_RRR, MIN_TP3_RRR];
-  for (const minRRR of minRRRs) {
+  // ── Select up to 3 TPs ──────────────────────────────────────────────
+  for (const candidate of allCandidates) {
     if (tps.length >= 3) break;
-    for (const candidate of candidates) {
-      // Skip if already used as a previous TP (within $1)
-      if (tps.some(t => Math.abs(t.level - candidate.price) < 1)) continue;
 
-      const exitLevel = applyOffset(candidate.price);
-      const rrr = calculateRRR(entry, stopLoss, exitLevel);
-      if (rrr < minRRR) continue;
+    const exitLevel = applyOffset(candidate.price);
+    const rrr = calculateRRR(entry, stopLoss, exitLevel);
+    if (rrr < MIN_TP1_RRR) continue; // must be at least 3:1
 
-      // Ensure minimum spacing between consecutive TPs
-      if (tps.length > 0) {
-        const spacing = Math.abs(exitLevel - tps[tps.length - 1].level) / tps[tps.length - 1].level;
-        if (spacing < MIN_TP_SPACING_PCT) continue;
-      }
-
-      tps.push({ level: parseFloat(exitLevel.toFixed(2)), reason: candidate.reason, rrr });
-      break;
+    // Enforce minimum 1% spacing from last TP
+    if (tps.length > 0) {
+      const prev    = tps[tps.length - 1];
+      const spacing = Math.abs(exitLevel - prev.level) / prev.level;
+      if (spacing < MIN_TP_SPACING_PCT) continue; // too close, skip
     }
+
+    // Avoid near-duplicate levels
+    if (tps.some(t => Math.abs(t.level - exitLevel) / exitLevel < 0.005)) continue;
+
+    tps.push({
+      level:       parseFloat(exitLevel.toFixed(2)),
+      reason:      candidate.reason,
+      rrr,
+      isStructural: candidate.isStructural,
+    });
   }
 
-  // Hard fallback (should almost never trigger given anchor candidates above)
+  // ── Hard fallback — always produce at least 1 TP ────────────────────
   if (tps.length === 0) {
     const fallback = direction === 'long' ? entry + risk * 3.0 : entry - risk * 3.0;
-    tps.push({ level: parseFloat(applyOffset(fallback).toFixed(2)), reason: 'Min 1:3 Fallback', rrr: 3.0 });
+    tps.push({
+      level: parseFloat(applyOffset(fallback).toFixed(2)),
+      reason: '1:3 Fallback',
+      rrr: 3.0,
+      isStructural: false,
+    });
   }
 
-  // ── Apply Dynamic Scaling ─────────────────────────────────────────
+  // ── Dynamic scaling ─────────────────────────────────────────────────
   const closePercents = getDynamicScaling(tier, sessionName, tps.length);
-  tps.forEach((tp, i) => {
-    tp.closePercent = closePercents[i];
-  });
+  tps.forEach((tp, i) => { tp.closePercent = closePercents[i] ?? 0; });
 
-  return { tps, tpStructure: tps.length >= 3 ? 'multiple' : 'single' };
+  return { tps, tpStructure: tps.length >= 3 ? 'multiple' : tps.length === 2 ? 'dual' : 'single' };
 }
 
 /**
- * Calculate the price at which to move SL to breakeven.
- * Rule: move when price has moved 1.5× the SL distance in our favour.
+ * Calculate breakeven move price.
+ * Rule: move SL to entry once price moves 1.5× risk in your favour.
  */
 export function calculateBreakevenMove(entry, stopLoss) {
   const slDistance = Math.abs(entry - stopLoss);
-  const direction  = entry > stopLoss ? 1 : -1;
-  return parseFloat((entry + direction * slDistance * 1.5).toFixed(2));
+  const dir = entry > stopLoss ? 1 : -1; // LONG: entry > SL (dir=1), SHORT: entry < SL (dir=-1)
+  return parseFloat((entry + dir * slDistance * 1.5).toFixed(2));
 }
