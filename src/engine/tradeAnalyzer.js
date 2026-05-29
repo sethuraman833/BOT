@@ -34,8 +34,8 @@ const TF_PROFILES = {
     biasKey:             '1h',
     obKey:               '1h',
     swingLookback:       2,
-    minPillars:          3,
-    minConfluence:       4,
+    minPillars:          4, // raised from 3 for quality
+    minConfluence:       6, // raised from 4 for quality
     maxSlPct:            0.015,  // 1.5% max SL for scalping
     maxTpPct:            0.04,   // 4% max TP range from entry
     sweepThreshold:      0.0008,
@@ -51,8 +51,8 @@ const TF_PROFILES = {
     biasKey:             '4h',
     obKey:               '4h',
     swingLookback:       3,
-    minPillars:          4,
-    minConfluence:       5,
+    minPillars:          5, // raised from 4 for quality
+    minConfluence:       7, // raised from 5 for quality
     maxSlPct:            0.020,  // 2% max SL
     maxTpPct:            0.07,   // 7% max TP range
     sweepThreshold:      0.0012,
@@ -68,8 +68,8 @@ const TF_PROFILES = {
     biasKey:             '1d',
     obKey:               '4h',
     swingLookback:       3,
-    minPillars:          4,
-    minConfluence:       5,
+    minPillars:          5, // raised from 4 for quality
+    minConfluence:       8, // raised from 5 for quality
     maxSlPct:            0.025,
     maxTpPct:            0.12,   // 12% max TP range
     sweepThreshold:      0.0015,
@@ -85,8 +85,8 @@ const TF_PROFILES = {
     biasKey:             '1d',
     obKey:               '1d',
     swingLookback:       5,
-    minPillars:          4,
-    minConfluence:       6,
+    minPillars:          5, // raised from 4 for quality
+    minConfluence:       8, // raised from 6 for quality
     maxSlPct:            0.030,
     maxTpPct:            0.20,   // 20% max TP range
     sweepThreshold:      0.0015,
@@ -102,8 +102,8 @@ const TF_PROFILES = {
     biasKey:             '1d',
     obKey:               '1d',
     swingLookback:       7,
-    minPillars:          4,
-    minConfluence:       6,
+    minPillars:          5, // raised from 4 for quality
+    minConfluence:       8, // raised from 6 for quality
     maxSlPct:            0.050,
     maxTpPct:            0.30,
     sweepThreshold:      0.002,
@@ -269,6 +269,55 @@ export function runAnalysis(allData, config = {}) {
 
   steps.push(`Direction: ${direction || 'RANGING'} | Bull: ${upProb}% Bear: ${downProb}%`);
 
+  // ── Primary Timeframe EMA Trend Veto ───────────────────────────
+  const primEma20_arr  = calculateEMA(candlesPrimary, 20);
+  const primEma50_arr  = calculateEMA(candlesPrimary, 50);
+  const primEma200_arr = calculateEMA(candlesPrimary, 200);
+  const primE20  = primEma20_arr[primEma20_arr.length - 1];
+  const primE50  = primEma50_arr[primEma50_arr.length - 1];
+  const primE200 = primEma200_arr[primEma200_arr.length - 1];
+
+  let emaVetoActive = false;
+  let emaVetoReason = null;
+
+  if (direction === 'long' && primE50 && primE200) {
+    const isBearishCascade = primE20 && primE20 < primE50 && primE50 < primE200;
+    const belowBothMajor   = currentPrice < primE50 && currentPrice < primE200;
+    
+    if (belowBothMajor) {
+      const hasRecentBullishChoch = allShifts.some(s => s.type === 'CHOCH' && s.direction === 'bullish');
+      const rsiDivResult = detectRSIDivergence(candlesPrimary, 'long', 14);
+      
+      if (isBearishCascade) {
+        emaVetoActive = true;
+        emaVetoReason = `Strict Long Veto: Price in strong Bearish EMA Cascade (20 < 50 < 200)`;
+      } else if (!hasRecentBullishChoch || !rsiDivResult.hasDivergence) {
+        emaVetoActive = true;
+        emaVetoReason = `Long Veto: Price is below major EMAs without combined Bullish CHOCH and RSI Divergence confirmation`;
+      }
+    }
+  } else if (direction === 'short' && primE50 && primE200) {
+    const isBullishCascade = primE20 && primE20 > primE50 && primE50 > primE200;
+    const aboveBothMajor   = currentPrice > primE50 && currentPrice > primE200;
+    
+    if (aboveBothMajor) {
+      const hasRecentBearishChoch = allShifts.some(s => s.type === 'CHOCH' && s.direction === 'bearish');
+      const rsiDivResult = detectRSIDivergence(candlesPrimary, 'short', 14);
+      
+      if (isBullishCascade) {
+        emaVetoActive = true;
+        emaVetoReason = `Strict Short Veto: Price in strong Bullish EMA Cascade (20 > 50 > 200)`;
+      } else if (!hasRecentBearishChoch || !rsiDivResult.hasDivergence) {
+        emaVetoActive = true;
+        emaVetoReason = `Short Veto: Price is above major EMAs without combined Bearish CHOCH and RSI Divergence confirmation`;
+      }
+    }
+  }
+
+  if (emaVetoActive) {
+    steps.push(`Trend Veto: ${emaVetoReason}`);
+  }
+
   // ── OTE Zone ───────────────────────────────────────────────────
   // FIX #6: verify temporal order (high must precede low for long, vice versa for short)
   const swingsStructure = findSwingPoints(
@@ -302,12 +351,39 @@ export function runAnalysis(allData, config = {}) {
       ? allOBs.filter(o => o.type === 'demand').sort((a,b) => b.entryBoundary - a.entryBoundary)[0]
       : allOBs.filter(o => o.type === 'supply').sort((a,b) => a.entryBoundary - b.entryBoundary)[0];
 
-    const inv = nearestOB
-      ? (direction === 'long' ? nearestOB.lowerBound : nearestOB.upperBound)
-      : (direction === 'long' ? currentPrice * (1 - profile.maxSlPct * 0.8) : currentPrice * (1 + profile.maxSlPct * 0.8));
-
     if (inOTE && oteZone)   entry = oteZone.midpoint;
     else if (nearestOB)     entry = nearestOB.entryBoundary;
+
+    // Find the true structural swing points within the last 35 candles on primary timeframe
+    const primaryCandleSegment = candlesPrimary.slice(-35);
+    const primaryLows  = primaryCandleSegment.map(c => c.low);
+    const primaryHighs = primaryCandleSegment.map(c => c.high);
+    
+    const trueSwingLow  = primaryLows.length > 0 ? Math.min(...primaryLows) : currentPrice * 0.99;
+    const trueSwingHigh = primaryHighs.length > 0 ? Math.max(...primaryHighs) : currentPrice * 1.01;
+
+    let inv;
+    if (direction === 'long') {
+      const obInv = nearestOB ? nearestOB.lowerBound : entry * (1 - profile.maxSlPct * 0.8);
+      // Stop loss is placed below the lowest of either the order block lower boundary or the true local swing low
+      inv = Math.min(obInv, trueSwingLow);
+      
+      // Enforce a minimum risk distance of 0.25% to prevent ultra-tight micro-SLs
+      const minDistance = entry * 0.0025;
+      if (Math.abs(entry - inv) < minDistance) {
+        inv = entry - minDistance;
+      }
+    } else {
+      const obInv = nearestOB ? nearestOB.upperBound : entry * (1 + profile.maxSlPct * 0.8);
+      // Stop loss is placed above the highest of either the order block upper boundary or the true local swing high
+      inv = Math.max(obInv, trueSwingHigh);
+      
+      // Enforce a minimum risk distance of 0.25% to prevent ultra-tight micro-SLs
+      const minDistance = entry * 0.0025;
+      if (Math.abs(entry - inv) < minDistance) {
+        inv = entry + minDistance;
+      }
+    }
 
     const allFVGs = [...fvgsOB, ...fvgsPrimary];
     slData = calculateSmartSL(inv, direction, allFVGs);
@@ -403,8 +479,15 @@ export function runAnalysis(allData, config = {}) {
   let decision        = 'NO_TRADE';
   let rejectionReason = null;
 
+  // Compute entry distance percentage
+  const entryDistPct = direction ? Math.abs(currentPrice - entry) / entry : 0;
+
   if (!direction) {
     rejectionReason = `Market ranging — no ${profile.biasKey.toUpperCase()} directional bias`;
+  } else if (emaVetoActive) {
+    rejectionReason = emaVetoReason;
+  } else if (entryDistPct > 0.003) {
+    rejectionReason = `Price too far from entry zone: ${(entryDistPct * 100).toFixed(2)}% > 0.30% (Chased/Missed entry)`;
   } else if (slPct > profile.maxSlPct) {
     rejectionReason = `SL too wide: ${(slPct * 100).toFixed(2)}% > ${(profile.maxSlPct * 100).toFixed(1)}% max for ${profile.label}`;
   } else if (!rrrMeetsMin) {
