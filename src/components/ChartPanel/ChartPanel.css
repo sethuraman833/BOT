@@ -89,5 +89,10 @@
     padding: 6px;
     border: 0.5px solid var(--bg-border);
   }
-  .ribbon-sec.size { display: none; }
+}
+
+@media (max-width: 480px) {
+  .ribbon-sec {
+    flex: 1 0 50%;
+  }
 }
