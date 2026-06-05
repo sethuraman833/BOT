@@ -171,20 +171,40 @@
 @media (max-width: 1024px) {
   .control-bar {
     height: auto;
-    padding: 10px 14px;
+    padding: 8px 12px;
     flex-direction: column;
-    gap: 10px;
+    gap: 8px;
   }
-  .control-left, .control-right {
+  .control-left {
     width: 100%;
-    justify-content: center;
-    flex-wrap: wrap;
+    display: flex;
+    flex-wrap: nowrap;
+    justify-content: space-between;
+    gap: 4px;
+  }
+  .tf-btn {
+    flex: 1;
+    text-align: center;
+    padding: 5px 2px;
+    font-size: 0.65rem;
+  }
+  .backtest-toggle {
+    padding: 5px 6px;
+    font-size: 0.6rem;
+    flex-shrink: 0;
   }
   .analyze-btn {
     width: 100%;
-    padding: 12px;
-    font-size: 0.76rem;
+    padding: 10px;
+    font-size: 0.74rem;
+    min-width: unset;
+  }
+  .control-right {
+    width: 100%;
+    justify-content: center;
+    margin-top: 2px;
   }
   .control-divider  { display: none; }
   .mode-indicator   { display: none; }
+  .last-run { font-size: 0.6rem; color: var(--text-dim); }
 }

@@ -21,7 +21,7 @@ import {
   calculateRRR, calculateBreakevenMove
 } from './riskManager.js';
 import { getCurrentSession, isSessionValid } from './sessionFilter.js';
-import { RISK_AMOUNT } from '../utils/constants.js';
+import { RISK_AMOUNT, ASSETS } from '../utils/constants.js';
 
 // ─── TIMEFRAME PROFILES ────────────────────────────────────────
 // Each profile defines the full analysis context for that timeframe.
@@ -364,22 +364,30 @@ export function runAnalysis(allData, config = {}) {
 
     let inv;
     if (direction === 'long') {
-      const obInv = nearestOB ? nearestOB.lowerBound : entry * (1 - profile.maxSlPct * 0.8);
-      // Stop loss is placed below the lowest of either the order block lower boundary or the true local swing low
-      inv = Math.min(obInv, trueSwingLow);
-      
-      // Enforce a minimum risk distance of 0.25% to prevent ultra-tight micro-SLs
-      const minDistance = entry * 0.0025;
+      const obInv = nearestOB ? nearestOB.lowerBound : trueSwingLow;
+      const sweepLow = allSweeps.length > 0 
+        ? Math.min(...allSweeps.filter(s => s.direction === 'long' || s.type === 'bullish').map(s => s.sweptLevel))
+        : Infinity;
+      // Layer 1: lowest point of demand OB or lowest wick of sweep candle (whichever is lower)
+      inv = Math.min(obInv, sweepLow);
+      if (inv === Infinity) inv = trueSwingLow;
+    } else {
+      const obInv = nearestOB ? nearestOB.upperBound : trueSwingHigh;
+      const sweepHigh = allSweeps.length > 0
+        ? Math.max(...allSweeps.filter(s => s.direction === 'short' || s.type === 'bearish').map(s => s.sweptLevel))
+        : -Infinity;
+      // Layer 1: highest point of supply OB or highest wick of sweep candle (whichever is higher)
+      inv = Math.max(obInv, sweepHigh);
+      if (inv === -Infinity) inv = trueSwingHigh;
+    }
+
+    // Enforce a minimum risk distance of 0.25% to prevent ultra-tight micro-SLs
+    const minDistance = entry * 0.0025;
+    if (direction === 'long') {
       if (Math.abs(entry - inv) < minDistance) {
         inv = entry - minDistance;
       }
     } else {
-      const obInv = nearestOB ? nearestOB.upperBound : entry * (1 + profile.maxSlPct * 0.8);
-      // Stop loss is placed above the highest of either the order block upper boundary or the true local swing high
-      inv = Math.max(obInv, trueSwingHigh);
-      
-      // Enforce a minimum risk distance of 0.25% to prevent ultra-tight micro-SLs
-      const minDistance = entry * 0.0025;
       if (Math.abs(entry - inv) < minDistance) {
         inv = entry + minDistance;
       }
@@ -488,6 +496,8 @@ export function runAnalysis(allData, config = {}) {
     rejectionReason = emaVetoReason;
   } else if (entryDistPct > 0.003) {
     rejectionReason = `Price too far from entry zone: ${(entryDistPct * 100).toFixed(2)}% > 0.30% (Chased/Missed entry)`;
+  } else if (slPct > 0.025) {
+    rejectionReason = `SL too wide: ${(slPct * 100).toFixed(2)}% > 2.50% max (Hard reject)`;
   } else if (slPct > profile.maxSlPct) {
     rejectionReason = `SL too wide: ${(slPct * 100).toFixed(2)}% > ${(profile.maxSlPct * 100).toFixed(1)}% max for ${profile.label}`;
   } else if (!rrrMeetsMin) {
@@ -528,7 +538,7 @@ export function runAnalysis(allData, config = {}) {
     rejectionReason,
     waitCondition:    null,
     keyRisk: ema200Acting ? 'EMA200 Resistance / Support' : slPct > 0.012 ? 'Wide SL — size reduced automatically' : 'Market Volatility',
-    invalidationLevel: slData ? slData.rawInvalidation.toFixed(2) : 'N/A',
+    invalidationLevel: slData ? slData.rawInvalidation.toFixed(ASSETS[symbol]?.decimals ?? 2) : 'N/A',
     analysisSteps:  steps,
     oteZone,
     symbol,

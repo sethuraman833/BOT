@@ -2,10 +2,20 @@
 //  Formatters — Price, Percent, Size
 // ─────────────────────────────────────────────────────────
 
+import { ASSETS } from './constants.js';
+
 const priceFormatters = {};
 
-export function formatPrice(value, decimals = 2) {
+export function formatPrice(value, symbol = 'BTCUSDT') {
   if (value == null || isNaN(value)) return '—';
+  
+  let decimals = 2;
+  if (typeof symbol === 'number') {
+    decimals = symbol;
+  } else if (symbol && ASSETS[symbol]) {
+    decimals = ASSETS[symbol].decimals;
+  }
+
   const key = `price_${decimals}`;
   if (!priceFormatters[key]) {
     priceFormatters[key] = new Intl.NumberFormat('en-US', {

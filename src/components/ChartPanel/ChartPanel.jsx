@@ -2,6 +2,8 @@ import { useEffect, useRef } from 'react';
 import { createChart } from 'lightweight-charts';
 import { useMarket, useMarketDispatch } from '../../context/MarketContext.jsx';
 import { calculateEMA } from '../../engine/smcDetector.js';
+import { ASSETS } from '../../utils/constants.js';
+import { formatPrice, formatSize } from '../../utils/formatters.js';
 import './ChartPanel.css';
 
 export default function ChartPanel() {
@@ -79,6 +81,17 @@ export default function ChartPanel() {
     const data = candles[key];
 
     if (!seriesRef.current || !data || data.length < 5) return;
+
+    // Apply dynamic decimal precision based on the asset ticker size
+    const decimals = ASSETS[asset]?.decimals ?? 2;
+    seriesRef.current.applyOptions({
+      priceFormat: {
+        type: 'price',
+        precision: decimals,
+        minMove: 1 / Math.pow(10, decimals),
+      },
+    });
+
     // If this key is already rendered and data length hasn't changed much
     // (i.e. this is a WS tick update — handled separately), skip full reload
     if (renderedKeyRef.current === key) return;
@@ -218,12 +231,12 @@ export default function ChartPanel() {
 
           <div className="ribbon-sec">
             <span className="ribbon-label">ENTRY</span>
-            <span className="ribbon-val mono">{analysis.entry.toLocaleString()}</span>
+            <span className="ribbon-val mono">{formatPrice(analysis.entry, asset)}</span>
           </div>
           <div className="ribbon-sec">
             <span className="ribbon-label">STOP LOSS</span>
             <span className="ribbon-val mono text-red">
-              {analysis.stopLoss?.value?.toLocaleString()} 
+              {formatPrice(analysis.stopLoss?.value, asset)} 
               <small style={{ marginLeft: '4px', opacity: 0.8 }}>(-${analysis.projectedLoss})</small>
             </span>
           </div>
@@ -231,14 +244,14 @@ export default function ChartPanel() {
             <div className="ribbon-sec" key={i}>
               <span className="ribbon-label">TP{i + 1} ({tp.closePercent}%)</span>
               <span className="ribbon-val mono text-green">
-                {tp.level?.toLocaleString()}
+                {formatPrice(tp.level, asset)}
                 <small style={{ marginLeft: '4px', opacity: 0.8 }}>(+${tp.projectedProfit})</small>
               </span>
             </div>
           ))}
           <div className="ribbon-sec size">
             <span className="ribbon-label">POSITION</span>
-            <span className="ribbon-val mono">{analysis.positionSize} units</span>
+            <span className="ribbon-val mono">{formatSize(analysis.positionSize)} units</span>
           </div>
         </div>
       )}

@@ -163,17 +163,21 @@
   .header-center {
     width: 100%;
     overflow-x: auto;
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 6px;
     padding: 2px 0 6px;
     justify-content: flex-start;
     scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
   }
   .header-center::-webkit-scrollbar { display: none; }
-  .asset-tab { padding: 6px 12px; font-size: 0.72rem; }
+  .asset-tab { padding: 5px 10px; font-size: 0.70rem; flex-shrink: 0; }
   .header-right {
     width: 100%;
     justify-content: space-between;
     border-top: 1px solid var(--bg-border);
     padding-top: 8px;
   }
-  .live-price { font-size: 1.1rem; }
+  .live-price { font-size: 1.05rem; }
 }

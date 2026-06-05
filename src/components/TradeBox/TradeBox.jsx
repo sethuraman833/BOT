@@ -58,7 +58,7 @@ export default function TradeBox({ analysis }) {
       {/* ── Entry ──────────────────────────────────────────── */}
       <div className="trade-entry-block">
         <div className="teb-label">Entry Price</div>
-        <div className="teb-price">{formatPrice(entry)}</div>
+        <div className="teb-price">{formatPrice(entry, symbol)}</div>
         <div className="teb-sub">
           <div className="teb-sub-item">
             <span className="text-dim">Size:</span>
@@ -84,7 +84,7 @@ export default function TradeBox({ analysis }) {
           <span className="tlr-label">Stop Loss</span>
         </div>
         <div className="tlr-right">
-          <span className="tlr-price text-red mono">{formatPrice(stopLoss?.value)}</span>
+          <span className="tlr-price text-red mono">{formatPrice(stopLoss?.value, symbol)}</span>
           <span className="tlr-pct text-red">−{slPct}%</span>
         </div>
       </div>
@@ -101,7 +101,7 @@ export default function TradeBox({ analysis }) {
               <span className="tlr-label">{String(tp.reason || 'Target')}</span>
             </div>
             <div className="tlr-right">
-              <span className="tlr-price text-green mono">{formatPrice(tp.level)}</span>
+              <span className="tlr-price text-green mono">{formatPrice(tp.level, symbol)}</span>
               <span className="tlr-rrr">{rrrLabel}</span>
               <span className="tlr-pct text-green">+{pctMove}%</span>
               <span className="tlr-close">→{String(tp.closePercent || 0)}%</span>
@@ -115,7 +115,45 @@ export default function TradeBox({ analysis }) {
       {/* ── Breakeven ──────────────────────────────────────── */}
       <div className="trade-be-row">
         <span className="text-dim">⚡ Move SL to BE at</span>
-        <span className="mono text-yellow">{formatPrice(breakevenMove)}</span>
+        <span className="mono text-yellow">{formatPrice(breakevenMove, symbol)}</span>
+      </div>
+
+      <div className="trade-divider" />
+      
+      {/* ── Trade Management Rules ─────────────────────────── */}
+      <div className="trade-management-rules">
+        <div className="tm-rules-header">📈 Trade Management Exit Rules</div>
+        <div className="tm-rules-body">
+          <div className="tm-rule-item">
+            <strong>BE Trigger:</strong> Move SL to Entry at 1.5R in profit ($+7.50 value: {formatPrice(breakevenMove, symbol)})
+          </div>
+          {tpDetails && tpDetails.length >= 3 ? (
+            <>
+              <div className="tm-rule-item">
+                <strong>TP1 Hit:</strong> Close 40% position & Move SL to Breakeven immediately
+              </div>
+              <div className="tm-rule-item">
+                <strong>TP2 Hit:</strong> Close 35% (total) & Trail SL to TP1 level ({formatPrice(tpDetails[0].level, symbol)})
+              </div>
+              <div className="tm-rule-item">
+                <strong>TP3 Hit:</strong> Close remaining 25% (Terminal exit)
+              </div>
+            </>
+          ) : (
+            <div className="tm-rule-item">
+              <strong>Single TP:</strong> Close 100% position at Target (No ladder applied)
+            </div>
+          )}
+          <div className="tm-rule-item text-yellow">
+            <strong>Momentum Shift:</strong> Close 100% on close of 2 consecutive 15m candles against trade
+          </div>
+          <div className="tm-rule-item text-red">
+            <strong>Structure Shift:</strong> Close 100% immediately if price closes past recent 15m HL/LH
+          </div>
+          <div className="tm-rule-item text-purple">
+            <strong>6H Time Cap:</strong> Close 50% & BE (if in profit) or exit full position if stalled after 6h
+          </div>
+        </div>
       </div>
 
       {/* ── Warnings ───────────────────────────────────────── */}

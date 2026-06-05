@@ -50,11 +50,32 @@ export async function sendTradeAlert(analysis) {
 
   // TP Lines from tpDetails
   let tpLines = '';
+  let isMultiple = tpDetails && tpDetails.length >= 3;
   if (tpDetails && Array.isArray(tpDetails)) {
     tpDetails.forEach((tp, i) => {
       tpLines += `🎯 TP${i + 1}       : $${tp.level?.toFixed(2)} (Close ${tp.closePercent}%) → RRR 1:${tp.rrr?.toFixed(1)}\n`;
     });
   }
+
+  // Management and Exit Rules Section
+  let managementRules = `
+📋 *TRADE MANAGEMENT*
+• BE Trigger: Move SL to Entry at 1.5R ($${breakevenMove?.toFixed(2)})
+`;
+  if (isMultiple) {
+    managementRules += `• TP1: Close 40%, Move SL to BE
+• TP2: Close 35%, Trail SL to TP1 ($${tpDetails[0].level?.toFixed(2)})
+• TP3: Close 25% (Terminal exit)
+`;
+  } else {
+    managementRules += `• Exit target: Close 100% (Single TP)
+`;
+  }
+  managementRules += `⚠️ *Early Exit Overrides*:
+- Close 100% if 2 consecutive 15m candles close against trade
+- Close 100% if 15m structure breaks (closes past HL/LH)
+- After 6H: if in profit close 50% & BE, if flat/stalled close 100%
+`;
 
   const msg = `${header}
 ${waitNote}
@@ -65,6 +86,7 @@ Probability: ↑${upProbability}% ↓${downProbability}%
 📍 Entry     : $${entry?.toFixed(2)}
 🛑 Stop Loss : $${stopLoss?.value?.toFixed(2)} (${slPct}% risk)
 ${tpLines}
+${managementRules}
 ${aiSection}
 📦 Size      : ${positionSize?.toFixed(4)} units
 💰 Max Risk  : $5.00 USDT

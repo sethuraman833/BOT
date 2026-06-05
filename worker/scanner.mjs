@@ -6,7 +6,7 @@ import { sendTradeAlert } from './telegramBot.mjs';
 import { getAiSecondOpinion } from './aiAgent.mjs';
 
 const REST   = 'https://fapi.binance.com/fapi/v1';
-const ASSETS = ['BTCUSDT', 'ETHUSDT'];
+const ASSETS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 'LINKUSDT'];
 const TFS    = ['1d', '4h', '1h', '15m', '5m'];  // 5m added for scalp scanning
 
 // Track last alert per symbol to avoid duplicate notifications

@@ -36,7 +36,7 @@ export default function Header() {
       <div className="header-right">
         {livePrice != null && (
           <div className="live-price-group">
-            <span className="live-price mono">{formatPrice(livePrice)}</span>
+            <span className="live-price mono">{formatPrice(livePrice, asset)}</span>
             <span className={`live-change mono ${isPositive ? 'positive' : 'negative'}`}>
               {isPositive ? '+' : ''}{formatPercent(liveChange)}
             </span>

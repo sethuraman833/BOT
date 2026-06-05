@@ -201,3 +201,47 @@
   color: var(--text-dim);
   font-size: 0.75rem;
 }
+
+/* ── Trade Management Rules ──────────────────────────────── */
+.trade-management-rules {
+  padding: 10px 14px;
+  background: rgba(255,255,255,0.015);
+  border-top: 1px solid var(--bg-border-dim);
+}
+.tm-rules-header {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 0.58rem;
+  color: var(--text-secondary);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.tm-rules-body {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.tm-rule-item {
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+.tm-rule-item strong {
+  color: var(--text-primary);
+  margin-right: 4px;
+}
+.tm-rule-item.text-yellow { color: var(--accent-yellow); }
+.tm-rule-item.text-red { color: var(--accent-red); }
+.tm-rule-item.text-purple { color: var(--accent-purple); }
+
+/* ── Mobile Responsive ─────────────────────────────────────── */
+@media (max-width: 480px) {
+  .teb-price { font-size: 1.45rem; }
+  .teb-sub { gap: 8px; flex-wrap: wrap; }
+  .tlr-right { gap: 4px; }
+  .tlr-price { font-size: 0.76rem; }
+  .tlr-rrr { font-size: 0.6rem; padding: 1px 4px; }
+  .tlr-pct { font-size: 0.58rem; }
+  .tlr-close { font-size: 0.55rem; }
+}

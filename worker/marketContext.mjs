@@ -41,7 +41,7 @@ export async function sendDailyReport() {
   const dateStr = now.toISOString().split('T')[0];
 
   try {
-    const assets = ['BTCUSDT', 'ETHUSDT'];
+    const assets = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 'LINKUSDT'];
     let report = `📊 *MARKET CONTEXT REPORT — ${dateStr}*\n━━━━━━━━━━━━━━━━━━━━━━\n`;
 
     for (const symbol of assets) {
