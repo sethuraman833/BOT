@@ -40,7 +40,13 @@ export default function ChartPanel() {
       },
       crosshair: { mode: 0 },
       rightPriceScale: { borderColor: '#1e2733' },
-      timeScale:       { borderColor: '#1e2733', timeVisible: true, secondsVisible: false },
+      timeScale:       { 
+        borderColor: '#1e2733', 
+        timeVisible: true, 
+        secondsVisible: false,
+        barSpacing: 7,
+        rightOffset: 8,
+      },
     });
 
     const series = chart.addCandlestickSeries({
@@ -122,7 +128,17 @@ export default function ChartPanel() {
     emaRefs.current.ema50.setData(mapEMA(e50,  50));
     emaRefs.current.ema200.setData(mapEMA(e200, 200));
 
-    chartRef.current?.timeScale().fitContent();
+    const timeScale = chartRef.current?.timeScale();
+    if (timeScale && clean.length > 0) {
+      timeScale.applyOptions({
+        barSpacing: 7, // Makes candles thick and visually appealing
+        rightOffset: 8, // Leave comfortable margins on the right
+      });
+      timeScale.setVisibleLogicalRange({
+        from: clean.length - 110,
+        to: clean.length + 3,
+      });
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [asset, timeframe, candles]);
   // Note: candles is in deps so we reload when fresh historical fetch completes.

@@ -25,9 +25,12 @@ async function fetchKlines(symbol, interval, limit = CANDLE_LIMIT) {
 
 export async function fetchCurrentPrice(symbol) {
   try {
-    const res = await fetch(`${BINANCE_REST}/ticker/price?symbol=${symbol}`);
+    const res = await fetch(`${BINANCE_REST}/ticker/24hr?symbol=${symbol}`);
     const data = await res.json();
-    return parseFloat(data.price);
+    return {
+      price: parseFloat(data.lastPrice),
+      change: parseFloat(data.priceChangePercent),
+    };
   } catch (_) {
     return null;
   }

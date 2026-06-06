@@ -16,8 +16,10 @@ export default function App() {
   const [mobileTab, setMobileTab] = useState('chart');
 
   useEffect(() => {
-    fetchCurrentPrice(asset).then(price => {
-      if (price) dispatch({ type: 'SET_LIVE_PRICE', price, change: 0 });
+    fetchCurrentPrice(asset).then(priceData => {
+      if (priceData) {
+        dispatch({ type: 'SET_LIVE_PRICE', price: priceData.price, change: priceData.change });
+      }
     });
     loadAllTimeframes(asset);
   }, [asset]); // eslint-disable-line react-hooks/exhaustive-deps

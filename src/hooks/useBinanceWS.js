@@ -35,7 +35,7 @@ export function useBinanceWS(symbol, chartTimeframe) {
       const tfMap = { '5m': '5m', '15m': '15m', '1h': '1h', '4h': '4h', '1d': '1d' };
       const wsInterval = tfMap[chartTimeframe] || '15m';
 
-      const url = `${BINANCE_WSS}?streams=${sym}@miniTicker/${sym}@kline_${wsInterval}`;
+      const url = `${BINANCE_WSS}?streams=${sym}@ticker/${sym}@kline_${wsInterval}`;
       log('ws', `Connecting: ${url}`);
       const ws = new WebSocket(url);
       wsRef.current = ws;
@@ -56,11 +56,11 @@ export function useBinanceWS(symbol, chartTimeframe) {
           const data = msg.data;
           if (!data) return;
 
-          if (data.e === '24hrMiniTicker') {
+          if (data.e === '24hrTicker') {
             dispatch({
               type: 'SET_LIVE_PRICE',
               price: parseFloat(data.c),
-              change: ((parseFloat(data.c) - parseFloat(data.o)) / parseFloat(data.o)) * 100,
+              change: parseFloat(data.P),
             });
           }
 
