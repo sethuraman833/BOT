@@ -395,7 +395,9 @@ export function runAnalysis(allData, config = {}) {
 
     const allFVGs = [...fvgsOB, ...fvgsPrimary];
     slData = calculateSmartSL(inv, direction, allFVGs);
-    steps.push(`Entry: ${entry.toFixed(2)} | SL: ${slData.value.toFixed(2)} | SL%: ${((Math.abs(entry - slData.value) / entry) * 100).toFixed(2)}%`);
+    const decimals = ASSETS[symbol]?.decimals ?? 2;
+    const posSize = calculatePositionSize(entry, slData.value);
+    steps.push(`Entry: ${entry.toFixed(decimals)} | SL: ${slData.value.toFixed(decimals)} | SL%: ${((Math.abs(entry - slData.value) / entry) * 100).toFixed(2)}% | Size: ${posSize} units`);
   }
 
   // ── TPs — Multi-TF Swing Pool ──────────────────────────────────
