@@ -180,331 +180,306 @@ export function calculateTPs(
     maxTpPrice = entry * (1 - maxTpPct);
   }
 
-  const maxPossibleRrr = calculateRRR(entry, stopLoss, maxTpPrice);
-
   const highs = allSwings.filter(s => s.type === 'high');
   const lows  = allSwings.filter(s => s.type === 'low');
-  
-  // 1. Calculate candidate TP1 (Nearest EQH/EQL or Nearest Swing with 0.12% buffer)
-  let tp1Target = null;
-  let tp1Reason = 'Nearest Swing';
 
+  const candidates = [];
+
+  // 1. Equal Highs / Equal Lows (EQH/EQL) Pools
   if (isLong) {
-    const validHighs = highs.filter(h => h.price > entry && h.price <= (maxTpPrice + entry * 0.0012));
-    let eqhPrice = null;
+    const validHighs = highs.filter(h => h.price > entry);
+    let eqhPrices = new Set();
     for (let i = 0; i < validHighs.length; i++) {
       for (let j = i + 1; j < validHighs.length; j++) {
         const diff = Math.abs(validHighs[i].price - validHighs[j].price) / validHighs[i].price;
         if (diff <= 0.0015) {
-          eqhPrice = Math.max(validHighs[i].price, validHighs[j].price);
-          tp1Reason = 'Equal Highs (EQH) Liquidity Pool';
-          break;
+          const eqhPrice = Math.max(validHighs[i].price, validHighs[j].price);
+          eqhPrices.add(eqhPrice);
         }
       }
-      if (eqhPrice) break;
     }
-    
-    if (eqhPrice) {
-      tp1Target = eqhPrice * (1 - 0.0012);
-    } else {
-      const nearestHigh = validHighs.sort((a, b) => a.price - b.price)[0];
-      if (nearestHigh) {
-        tp1Target = nearestHigh.price * (1 - 0.0012);
-        tp1Reason = `Nearest Swing High (${nearestHigh.tfLabel || 'Swing'})`;
-      } else {
-        tp1Target = entry + risk * MIN_TP1_RRR;
-        tp1Reason = `${MIN_TP1_RRR.toFixed(1)}R Target (No structures)`;
-      }
-    }
-
-    // Force min RRR
-    if (calculateRRR(entry, stopLoss, tp1Target) < MIN_TP1_RRR) {
-      tp1Target = entry + risk * MIN_TP1_RRR;
-      tp1Reason = `${MIN_TP1_RRR.toFixed(1)}R Target (Below min RRR)`;
-    }
-    // Cap it
-    if (tp1Target > maxTpPrice) {
-      tp1Target = maxTpPrice;
-      tp1Reason = 'Max TF/Risk TP Cap';
+    for (const eqhPrice of eqhPrices) {
+      candidates.push({
+        level: eqhPrice * (1 - 0.0012),
+        reason: 'Equal Highs (EQH) Liquidity Pool',
+        isStructural: true,
+      });
     }
   } else {
-    const validLows = lows.filter(l => l.price < entry && l.price >= (maxTpPrice - entry * 0.0012));
-    let eqlPrice = null;
+    const validLows = lows.filter(l => l.price < entry);
+    let eqlPrices = new Set();
     for (let i = 0; i < validLows.length; i++) {
       for (let j = i + 1; j < validLows.length; j++) {
         const diff = Math.abs(validLows[i].price - validLows[j].price) / validLows[i].price;
         if (diff <= 0.0015) {
-          eqlPrice = Math.min(validLows[i].price, validLows[j].price);
-          tp1Reason = 'Equal Lows (EQL) Liquidity Pool';
-          break;
+          const eqlPrice = Math.min(validLows[i].price, validLows[j].price);
+          eqlPrices.add(eqlPrice);
         }
       }
-      if (eqlPrice) break;
     }
-
-    if (eqlPrice) {
-      tp1Target = eqlPrice * (1 + 0.0012);
-    } else {
-      const nearestLow = validLows.sort((a, b) => b.price - a.price)[0];
-      if (nearestLow) {
-        tp1Target = nearestLow.price * (1 + 0.0012);
-        tp1Reason = `Nearest Swing Low (${nearestLow.tfLabel || 'Swing'})`;
-      } else {
-        tp1Target = entry - risk * MIN_TP1_RRR;
-        tp1Reason = `${MIN_TP1_RRR.toFixed(1)}R Target (No structures)`;
-      }
-    }
-
-    // Force min RRR
-    if (calculateRRR(entry, stopLoss, tp1Target) < MIN_TP1_RRR) {
-      tp1Target = entry - risk * MIN_TP1_RRR;
-      tp1Reason = `${MIN_TP1_RRR.toFixed(1)}R Target (Below min RRR)`;
-    }
-    // Cap it
-    if (tp1Target < maxTpPrice) {
-      tp1Target = maxTpPrice;
-      tp1Reason = 'Max TF/Risk TP Cap';
+    for (const eqlPrice of eqlPrices) {
+      candidates.push({
+        level: eqlPrice * (1 + 0.0012),
+        reason: 'Equal Lows (EQL) Liquidity Pool',
+        isStructural: true,
+      });
     }
   }
 
-  const tp1Rrr = calculateRRR(entry, stopLoss, tp1Target);
+  // 2. Individual Swing Highs / Lows
+  if (isLong) {
+    highs.forEach(s => {
+      if (s.price > entry) {
+        candidates.push({
+          level: s.price * (1 - 0.0012),
+          reason: `Swing High (${s.tfLabel || 'Swing'})`,
+          isStructural: true,
+        });
+      }
+    });
+  } else {
+    lows.forEach(s => {
+      if (s.price < entry) {
+        candidates.push({
+          level: s.price * (1 + 0.0012),
+          reason: `Swing Low (${s.tfLabel || 'Swing'})`,
+          isStructural: true,
+        });
+      }
+    });
+  }
 
-  // If max possible RRR is less than MIN_TP3_RRR (5.0R), or if TP1 RRR is < MIN_TP2_RRR (4.0R),
-  // we cannot form a valid 3-TP ladder, so we return a Single TP.
-  if (maxPossibleRrr < MIN_TP3_RRR || tp1Rrr < MIN_TP2_RRR) {
+  // 3. HTF FVGs
+  const htfFvgs = fvgs || [];
+  htfFvgs.forEach(f => {
+    if (isLong && f.type === 'bearish' && f.upper > entry) {
+      candidates.push({
+        level: f.midpoint,
+        reason: `${biasTf} Bearish FVG Midpoint`,
+        isStructural: true,
+      });
+      candidates.push({
+        level: f.upper * (1 - 0.0012),
+        reason: `${biasTf} Bearish FVG Far Boundary`,
+        isStructural: true,
+      });
+    } else if (!isLong && f.type === 'bullish' && f.lower < entry) {
+      candidates.push({
+        level: f.midpoint,
+        reason: `${biasTf} Bullish FVG Midpoint`,
+        isStructural: true,
+      });
+      candidates.push({
+        level: f.lower * (1 + 0.0012),
+        reason: `${biasTf} Bullish FVG Far Boundary`,
+        isStructural: true,
+      });
+    }
+  });
+
+  // 4. Fibonacci Extensions of the Primary Range
+  let primHigh = highs.filter(h => h.tfLabel === primaryTf && h.price > entry).sort((a, b) => a.price - b.price)[0]?.price;
+  let primLow = lows.filter(l => l.tfLabel === primaryTf && l.price < entry).sort((a, b) => b.price - a.price)[0]?.price;
+
+  if (!primHigh) {
+    primHigh = highs.sort((a, b) => b.price - a.price)[0]?.price;
+  }
+  if (!primLow) {
+    primLow = lows.sort((a, b) => a.price - b.price)[0]?.price;
+  }
+
+  if (primHigh && primLow && primHigh > primLow) {
+    const range = primHigh - primLow;
+    if (isLong) {
+      candidates.push({ level: (primLow + range * 1.272) * (1 - 0.0012), reason: '1.272 Fib Extension', isStructural: true });
+      candidates.push({ level: (primLow + range * 1.618) * (1 - 0.0012), reason: '1.618 Fib Extension', isStructural: true });
+      candidates.push({ level: (primLow + range * 2.0) * (1 - 0.0012), reason: '2.0 Fib Extension', isStructural: true });
+      candidates.push({ level: (primLow + range * 2.618) * (1 - 0.0012), reason: '2.618 Fib Extension', isStructural: true });
+    } else {
+      candidates.push({ level: (primHigh - range * 1.272) * (1 + 0.0012), reason: '1.272 Fib Extension', isStructural: true });
+      candidates.push({ level: (primHigh - range * 1.618) * (1 + 0.0012), reason: '1.618 Fib Extension', isStructural: true });
+      candidates.push({ level: (primHigh - range * 2.0) * (1 + 0.0012), reason: '2.0 Fib Extension', isStructural: true });
+      candidates.push({ level: (primHigh - range * 2.618) * (1 + 0.0012), reason: '2.618 Fib Extension', isStructural: true });
+    }
+  }
+
+  // Filter candidates: must be in trade direction and within maxTpPrice
+  const filteredCandidates = candidates.filter(c => {
+    if (isNaN(c.level) || !isFinite(c.level)) return false;
+    if (isLong) {
+      return c.level > entry && c.level <= maxTpPrice;
+    } else {
+      return c.level < entry && c.level >= maxTpPrice;
+    }
+  });
+
+  // Sort candidates from closest to furthest from entry
+  filteredCandidates.sort((a, b) => isLong ? a.level - b.level : b.level - a.level);
+
+  // Deduplicate candidates that are too close (within STRUCT_DEDUP_PCT)
+  const dedupedCandidates = [];
+  for (const cand of filteredCandidates) {
+    const isDup = dedupedCandidates.some(dc => Math.abs(dc.level - cand.level) / dc.level < STRUCT_DEDUP_PCT);
+    if (!isDup) {
+      dedupedCandidates.push(cand);
+    }
+  }
+
+  // Systematic fallback ONLY when no structural candidate exists at all
+  if (dedupedCandidates.length === 0) {
+    if (isLong) {
+      dedupedCandidates.push({
+        level: entry + risk * MIN_TP1_RRR,
+        reason: `${MIN_TP1_RRR.toFixed(1)}R Target (No structures)`,
+        isStructural: false,
+      });
+      dedupedCandidates.push({
+        level: entry + risk * (MIN_TP1_RRR + MIN_TP_SPACING_RRR),
+        reason: `${(MIN_TP1_RRR + MIN_TP_SPACING_RRR).toFixed(1)}R Target (No structures)`,
+        isStructural: false,
+      });
+      dedupedCandidates.push({
+        level: entry + risk * (MIN_TP1_RRR + 2 * MIN_TP_SPACING_RRR),
+        reason: `${(MIN_TP1_RRR + 2 * MIN_TP_SPACING_RRR).toFixed(1)}R Target (No structures)`,
+        isStructural: false,
+      });
+    } else {
+      dedupedCandidates.push({
+        level: entry - risk * MIN_TP1_RRR,
+        reason: `${MIN_TP1_RRR.toFixed(1)}R Target (No structures)`,
+        isStructural: false,
+      });
+      dedupedCandidates.push({
+        level: entry - risk * (MIN_TP1_RRR + MIN_TP_SPACING_RRR),
+        reason: `${(MIN_TP1_RRR + MIN_TP_SPACING_RRR).toFixed(1)}R Target (No structures)`,
+        isStructural: false,
+      });
+      dedupedCandidates.push({
+        level: entry - risk * (MIN_TP1_RRR + 2 * MIN_TP_SPACING_RRR),
+        reason: `${(MIN_TP1_RRR + 2 * MIN_TP_SPACING_RRR).toFixed(1)}R Target (No structures)`,
+        isStructural: false,
+      });
+    }
+  }
+
+  let tp1 = null;
+  let tp2 = null;
+  let tp3 = null;
+
+  // Find TP1 candidate (first one satisfying RRR >= 3.0)
+  for (const cand of dedupedCandidates) {
+    const candRrr = calculateRRR(entry, stopLoss, cand.level);
+    if (candRrr >= MIN_TP1_RRR) {
+      tp1 = { ...cand, rrr: candRrr };
+      break;
+    }
+  }
+
+  // Find TP2 candidate (first one satisfying RRR >= 4.0 and spacing >= 1.0R from TP1)
+  if (tp1) {
+    for (const cand of dedupedCandidates) {
+      const candRrr = calculateRRR(entry, stopLoss, cand.level);
+      const spacingRrr = Math.abs(cand.level - tp1.level) / risk;
+      const isFurther = isLong ? cand.level > tp1.level : cand.level < tp1.level;
+      if (candRrr >= MIN_TP2_RRR && spacingRrr >= MIN_TP_SPACING_RRR && isFurther) {
+        tp2 = { ...cand, rrr: candRrr };
+        break;
+      }
+    }
+  }
+
+  // Find TP3 candidate (first one satisfying RRR >= 5.0 and spacing >= 1.0R from TP2)
+  if (tp2) {
+    for (const cand of dedupedCandidates) {
+      const candRrr = calculateRRR(entry, stopLoss, cand.level);
+      const spacingRrr = Math.abs(cand.level - tp2.level) / risk;
+      const isFurther = isLong ? cand.level > tp2.level : cand.level < tp2.level;
+      if (candRrr >= MIN_TP3_RRR && spacingRrr >= MIN_TP_SPACING_RRR && isFurther) {
+        tp3 = { ...cand, rrr: candRrr };
+        break;
+      }
+    }
+  }
+
+  // If no TP1 satisfies RRR >= 3.0R, return single TP at the first candidate level
+  if (!tp1) {
+    const firstCand = dedupedCandidates[0];
+    const level = firstCand.level;
+    const rrr = calculateRRR(entry, stopLoss, level);
     return {
       tps: [{
-        level: parseFloat(tp1Target.toFixed(4)),
-        reason: tp1Reason,
-        rrr: tp1Rrr,
-        isStructural: true,
+        level: parseFloat(level.toFixed(4)),
+        reason: firstCand.reason,
+        rrr,
+        isStructural: firstCand.isStructural,
         closePercent: 100,
       }],
       tpStructure: 'single'
     };
   }
 
-  // 2. Calculate TP2 (Previous unmitigated swing high/low on structure or bias TF with 0.12% buffer)
-  let tp2Target = null;
-  let tp2Reason = `${structureTf}/${biasTf} Swing Target`;
-  const tfSwings = allSwings.filter(s => s.tfLabel === structureTf || s.tfLabel === biasTf);
-
-  if (isLong) {
-    const minTp2Price = tp1Target + risk * MIN_TP_SPACING_RRR;
-    const validTP2Swings = tfSwings.filter(s => s.type === 'high' && s.price * (1 - 0.0012) >= minTp2Price && s.price <= (maxTpPrice + entry * 0.0012));
-    const nearestTP2 = validTP2Swings.sort((a, b) => a.price - b.price)[0];
-    
-    if (nearestTP2) {
-      tp2Target = nearestTP2.price * (1 - 0.0012);
-      tp2Reason = `Unmitigated Swing High (${nearestTP2.tfLabel})`;
-    } else {
-      const anyValid = highs.filter(s => s.price * (1 - 0.0012) >= minTp2Price && s.price <= (maxTpPrice + entry * 0.0012));
-      const nearestAny = anyValid.sort((a, b) => a.price - b.price)[0];
-      if (nearestAny) {
-        tp2Target = nearestAny.price * (1 - 0.0012);
-        tp2Reason = `Swing High (${nearestAny.tfLabel})`;
-      } else {
-        tp2Target = tp1Target + risk * MIN_TP_SPACING_RRR;
-        tp2Reason = `Progressive RRR Target (+${MIN_TP_SPACING_RRR.toFixed(1)}R)`;
-      }
-    }
-
-    // Ensure RRR and spacing
-    const tp2Rrr = calculateRRR(entry, stopLoss, tp2Target);
-    if (tp2Rrr < MIN_TP2_RRR || tp2Rrr < tp1Rrr + MIN_TP_SPACING_RRR) {
-      tp2Target = tp1Target + risk * MIN_TP_SPACING_RRR;
-      tp2Reason = `Progressive RRR Target (+${MIN_TP_SPACING_RRR.toFixed(1)}R)`;
-    }
-  } else {
-    const maxTp2Price = tp1Target - risk * MIN_TP_SPACING_RRR;
-    const validTP2Swings = tfSwings.filter(s => s.type === 'low' && s.price * (1 + 0.0012) <= maxTp2Price && s.price >= (maxTpPrice - entry * 0.0012));
-    const nearestTP2 = validTP2Swings.sort((a, b) => b.price - a.price)[0];
-
-    if (nearestTP2) {
-      tp2Target = nearestTP2.price * (1 + 0.0012);
-      tp2Reason = `Unmitigated Swing Low (${nearestTP2.tfLabel})`;
-    } else {
-      const anyValid = lows.filter(s => s.price * (1 + 0.0012) <= maxTp2Price && s.price >= (maxTpPrice - entry * 0.0012));
-      const nearestAny = anyValid.sort((a, b) => a.price - b.price)[0];
-      if (nearestAny) {
-        tp2Target = nearestAny.price * (1 + 0.0012);
-        tp2Reason = `Swing Low (${nearestAny.tfLabel})`;
-      } else {
-        tp2Target = tp1Target - risk * MIN_TP_SPACING_RRR;
-        tp2Reason = `Progressive RRR Target (+${MIN_TP_SPACING_RRR.toFixed(1)}R)`;
-      }
-    }
-
-    // Ensure RRR and spacing
-    const tp2Rrr = calculateRRR(entry, stopLoss, tp2Target);
-    if (tp2Rrr < MIN_TP2_RRR || tp2Rrr < tp1Rrr + MIN_TP_SPACING_RRR) {
-      tp2Target = tp1Target - risk * MIN_TP_SPACING_RRR;
-      tp2Reason = `Progressive RRR Target (+${MIN_TP_SPACING_RRR.toFixed(1)}R)`;
-    }
+  // If we only have TP1
+  if (!tp2) {
+    return {
+      tps: [{
+        level: parseFloat(tp1.level.toFixed(4)),
+        reason: tp1.reason,
+        rrr: tp1.rrr,
+        isStructural: tp1.isStructural,
+        closePercent: 100,
+      }],
+      tpStructure: 'single'
+    };
   }
 
-  const tp2Rrr = calculateRRR(entry, stopLoss, tp2Target);
-
-  // 3. Calculate TP3 (HTF FVG far boundary or 1.272-1.618 Fib extension with 0.12% buffer)
-  let tp3Target = null;
-  let tp3Reason = 'HTF Target';
-  const htfFvgs = fvgs || [];
-
-  if (isLong) {
-    const minTp3Price = tp2Target + risk * MIN_TP_SPACING_RRR;
-    const validFVG = htfFvgs.find(f => f.type === 'bearish' && f.upper * (1 - 0.0012) >= minTp3Price && f.upper <= (maxTpPrice + entry * 0.0012));
-    
-    if (validFVG) {
-      tp3Target = validFVG.upper * (1 - 0.0012);
-      tp3Reason = `${biasTf} Bearish FVG Far Boundary`;
-    } else {
-      const primaryHighs = highs.filter(h => h.price > entry).sort((a, b) => a.price - b.price);
-      const primaryLows = lows.filter(l => l.price < entry).sort((a, b) => b.price - a.price);
-      if (primaryHighs[0] && primaryLows[0]) {
-        const range = primaryHighs[0].price - primaryLows[0].price;
-        const extTarget = (primaryLows[0].price + range * 1.272) * (1 - 0.0012);
-        if (extTarget >= minTp3Price) {
-          tp3Target = extTarget;
-          tp3Reason = '1.272 Fib Extension';
-        } else {
-          const ext1618 = (primaryLows[0].price + range * 1.618) * (1 - 0.0012);
-          if (ext1618 >= minTp3Price) {
-            tp3Target = ext1618;
-            tp3Reason = '1.618 Fib Extension';
-          } else {
-            tp3Target = tp2Target + risk * MIN_TP_SPACING_RRR;
-            tp3Reason = `Progressive RRR Target (+${MIN_TP_SPACING_RRR.toFixed(1)}R)`;
-          }
-        }
-      } else {
-        tp3Target = tp2Target + risk * MIN_TP_SPACING_RRR;
-        tp3Reason = `Progressive RRR Target (+${MIN_TP_SPACING_RRR.toFixed(1)}R)`;
+  // If we have TP1 and TP2
+  if (!tp3) {
+    const tps = [
+      {
+        level: parseFloat(tp1.level.toFixed(4)),
+        reason: tp1.reason,
+        rrr: tp1.rrr,
+        isStructural: tp1.isStructural,
+      },
+      {
+        level: parseFloat(tp2.level.toFixed(4)),
+        reason: tp2.reason,
+        rrr: tp2.rrr,
+        isStructural: tp2.isStructural,
       }
-    }
-
-    // Ensure RRR and spacing
-    const tp3Rrr = calculateRRR(entry, stopLoss, tp3Target);
-    if (tp3Rrr < MIN_TP3_RRR || tp3Rrr < tp2Rrr + MIN_TP_SPACING_RRR) {
-      tp3Target = tp2Target + risk * MIN_TP_SPACING_RRR;
-      tp3Reason = `Progressive RRR Target (+${MIN_TP_SPACING_RRR.toFixed(1)}R)`;
-    }
-  } else {
-    const maxTp3Price = tp2Target - risk * MIN_TP_SPACING_RRR;
-    const validFVG = htfFvgs.find(f => f.type === 'bullish' && f.lower * (1 + 0.0012) <= maxTp3Price && f.lower >= (maxTpPrice - entry * 0.0012));
-
-    if (validFVG) {
-      tp3Target = validFVG.lower * (1 + 0.0012);
-      tp3Reason = `${biasTf} Bullish FVG Far Boundary`;
-    } else {
-      const primaryHighs = highs.filter(h => h.price > entry).sort((a, b) => a.price - b.price);
-      const primaryLows = lows.filter(l => l.price < entry).sort((a, b) => b.price - a.price);
-      if (primaryHighs[0] && primaryLows[0]) {
-        const range = primaryHighs[0].price - primaryLows[0].price;
-        const extTarget = (primaryHighs[0].price - range * 1.272) * (1 + 0.0012);
-        if (extTarget <= maxTp3Price) {
-          tp3Target = extTarget;
-          tp3Reason = '1.272 Fib Extension';
-        } else {
-          const ext1618 = (primaryHighs[0].price - range * 1.618) * (1 + 0.0012);
-          if (ext1618 <= maxTp3Price) {
-            tp3Target = ext1618;
-            tp3Reason = '1.618 Fib Extension';
-          } else {
-            tp3Target = tp2Target - risk * MIN_TP_SPACING_RRR;
-            tp3Reason = `Progressive RRR Target (+${MIN_TP_SPACING_RRR.toFixed(1)}R)`;
-          }
-        }
-      } else {
-        tp3Target = tp2Target - risk * MIN_TP_SPACING_RRR;
-        tp3Reason = `Progressive RRR Target (+${MIN_TP_SPACING_RRR.toFixed(1)}R)`;
-      }
-    }
-
-    // Ensure RRR and spacing
-    const tp3Rrr = calculateRRR(entry, stopLoss, tp3Target);
-    if (tp3Rrr < MIN_TP3_RRR || tp3Rrr > tp2Rrr - MIN_TP_SPACING_RRR) {
-      tp3Target = tp2Target - risk * MIN_TP_SPACING_RRR;
-      tp3Reason = `Progressive RRR Target (+${MIN_TP_SPACING_RRR.toFixed(1)}R)`;
-    }
+    ];
+    const scaling = getDynamicScaling(tier, sessionName, 2);
+    tps.forEach((tp, idx) => {
+      tp.closePercent = scaling[idx];
+    });
+    return { tps, tpStructure: 'multiple' };
   }
 
-  // Double Check Caps and Ladder Legitimate Validation:
-  // If TP2 or TP3 exceeds the absolute maximum cap price, we must adjust them.
-  // If we cap TP3 at maxTpPrice, we must adjust TP2 down (for long) or up (for short)
-  // to maintain MIN_TP_SPACING_RRR.
-  let finalTp1 = tp1Target;
-  let finalTp2 = tp2Target;
-  let finalTp3 = tp3Target;
-
-  if (isLong) {
-    if (finalTp3 > maxTpPrice) {
-      finalTp3 = maxTpPrice;
-      finalTp2 = Math.min(finalTp2, finalTp3 - risk * MIN_TP_SPACING_RRR);
-      finalTp1 = Math.min(finalTp1, finalTp2 - risk * MIN_TP_SPACING_RRR);
-    }
-    // If the cap forced TP1 below the minimum required RRR, we cannot have a 3-TP ladder.
-    if (calculateRRR(entry, stopLoss, finalTp1) < MIN_TP1_RRR) {
-      // Fallback to Single TP capped at maxTpPrice
-      return {
-        tps: [{
-          level: parseFloat(Math.min(tp1Target, maxTpPrice).toFixed(4)),
-          reason: tp1Reason,
-          rrr: Math.min(tp1Rrr, maxPossibleRrr),
-          isStructural: true,
-          closePercent: 100,
-        }],
-        tpStructure: 'single'
-      };
-    }
-  } else {
-    if (finalTp3 < maxTpPrice) {
-      finalTp3 = maxTpPrice;
-      finalTp2 = Math.max(finalTp2, finalTp3 + risk * MIN_TP_SPACING_RRR);
-      finalTp1 = Math.max(finalTp1, finalTp2 + risk * MIN_TP_SPACING_RRR);
-    }
-    // If the cap forced TP1 below the minimum required RRR, fallback to Single TP
-    if (calculateRRR(entry, stopLoss, finalTp1) < MIN_TP1_RRR) {
-      return {
-        tps: [{
-          level: parseFloat(Math.max(tp1Target, maxTpPrice).toFixed(4)),
-          reason: tp1Reason,
-          rrr: Math.min(tp1Rrr, maxPossibleRrr),
-          isStructural: true,
-          closePercent: 100,
-        }],
-        tpStructure: 'single'
-      };
-    }
-  }
-
-  const finalTp1Rrr = calculateRRR(entry, stopLoss, finalTp1);
-  const finalTp2Rrr = calculateRRR(entry, stopLoss, finalTp2);
-  const finalTp3Rrr = calculateRRR(entry, stopLoss, finalTp3);
-
+  // If we have all three
   const tps = [
     {
-      level: parseFloat(finalTp1.toFixed(4)),
-      reason: tp1Reason,
-      rrr: finalTp1Rrr,
-      isStructural: true,
-      closePercent: 40,
+      level: parseFloat(tp1.level.toFixed(4)),
+      reason: tp1.reason,
+      rrr: tp1.rrr,
+      isStructural: tp1.isStructural,
     },
     {
-      level: parseFloat(finalTp2.toFixed(4)),
-      reason: tp2Reason,
-      rrr: finalTp2Rrr,
-      isStructural: true,
-      closePercent: 35,
+      level: parseFloat(tp2.level.toFixed(4)),
+      reason: tp2.reason,
+      rrr: tp2.rrr,
+      isStructural: tp2.isStructural,
     },
     {
-      level: parseFloat(finalTp3.toFixed(4)),
-      reason: tp3Reason,
-      rrr: finalTp3Rrr,
-      isStructural: true,
-      closePercent: 25,
+      level: parseFloat(tp3.level.toFixed(4)),
+      reason: tp3.reason,
+      rrr: tp3.rrr,
+      isStructural: tp3.isStructural,
     }
   ];
-
+  const scaling = getDynamicScaling(tier, sessionName, 3);
+  tps.forEach((tp, idx) => {
+    tp.closePercent = scaling[idx];
+  });
   return { tps, tpStructure: 'multiple' };
 }
 

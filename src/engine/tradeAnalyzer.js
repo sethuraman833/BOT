@@ -418,10 +418,13 @@ export function runAnalysis(allData, config = {}) {
       ...tagSwings(findSwingPoints(candlesPrimary,   profile.swingLookback    ), profile.primaryKey.toUpperCase()),
       ...tagSwings(findSwingPoints(candlesStructure, profile.swingLookback + 1), profile.structureKey.toUpperCase()),
       ...tagSwings(swingsBias,                                                   profile.biasKey.toUpperCase()),
-    ].filter(s =>
-      direction === 'long'  ? s.type === 'high' && s.price > entry
-                            : s.type === 'low'  && s.price < entry
-    );
+    ].filter(s => {
+      if (direction === 'long') {
+        return (s.type === 'high' && s.price > entry) || (s.type === 'low' && s.price < entry);
+      } else {
+        return (s.type === 'low' && s.price < entry) || (s.type === 'high' && s.price > entry);
+      }
+    });
 
     tpData = calculateTPs(
       entry, slData.value,
