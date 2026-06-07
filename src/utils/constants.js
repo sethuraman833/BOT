@@ -10,7 +10,6 @@ export const ASSETS = {
   XRPUSDT: { label: 'XRP/USDT', symbol: 'XRPUSDT', decimals: 4, minQty: 1.0 },
   ADAUSDT: { label: 'ADA/USDT', symbol: 'ADAUSDT', decimals: 4, minQty: 1.0 },
   LINKUSDT: { label: 'LINK/USDT', symbol: 'LINKUSDT', decimals: 3, minQty: 0.1 },
-  XAUUSDT: { label: 'XAU/USDT', symbol: 'XAUUSDT', decimals: 2, minQty: 0.01 },
 };
 
 export const ASSET_LIST = Object.keys(ASSETS);

@@ -38,6 +38,7 @@ const TF_PROFILES = {
     minConfluence:       6, // raised from 4 for quality
     maxSlPct:            0.015,  // 1.5% max SL for scalping
     maxTpPct:            0.04,   // 4% max TP range from entry
+    maxEntryDist:        0.003,  // 0.3% max entry distance
     sweepThreshold:      0.0008,
     hasEmaSignal:        true,
     sessionAllowNyClose: true,
@@ -55,6 +56,7 @@ const TF_PROFILES = {
     minConfluence:       7, // raised from 5 for quality
     maxSlPct:            0.020,  // 2% max SL
     maxTpPct:            0.07,   // 7% max TP range
+    maxEntryDist:        0.005,  // 0.5% max entry distance
     sweepThreshold:      0.0012,
     hasEmaSignal:        false,
     sessionAllowNyClose: false,
@@ -72,6 +74,7 @@ const TF_PROFILES = {
     minConfluence:       8, // raised from 5 for quality
     maxSlPct:            0.025,
     maxTpPct:            0.12,   // 12% max TP range
+    maxEntryDist:        0.010,  // 1.0% max entry distance
     sweepThreshold:      0.0015,
     hasEmaSignal:        false,
     sessionAllowNyClose: false,
@@ -89,6 +92,7 @@ const TF_PROFILES = {
     minConfluence:       8, // raised from 6 for quality
     maxSlPct:            0.030,
     maxTpPct:            0.20,   // 20% max TP range
+    maxEntryDist:        0.020,  // 2.0% max entry distance
     sweepThreshold:      0.0015,
     hasEmaSignal:        false,
     sessionAllowNyClose: false,
@@ -106,6 +110,7 @@ const TF_PROFILES = {
     minConfluence:       8, // raised from 6 for quality
     maxSlPct:            0.050,
     maxTpPct:            0.30,
+    maxEntryDist:        0.030,  // 3.0% max entry distance
     sweepThreshold:      0.002,
     hasEmaSignal:        false,
     sessionAllowNyClose: false,
@@ -425,6 +430,9 @@ export function runAnalysis(allData, config = {}) {
       'HIGH',
       session.name,
       profile.maxTpPct,
+      profile.primaryKey.toUpperCase(),
+      profile.structureKey.toUpperCase(),
+      profile.biasKey.toUpperCase()
     );
 
     // Attach projected P&L to each TP
@@ -434,8 +442,9 @@ export function runAnalysis(allData, config = {}) {
       tp.projectedProfit  = (fullPnl * ((tp.closePercent || 0) / 100)).toFixed(2);
     });
 
+    const decimals = ASSETS[symbol]?.decimals ?? 2;
     steps.push(`TPs: ${tpData.tps.map((t, i) =>
-      `TP${i+1}=$${t.level.toFixed(0)} (1:${t.rrr}) ${t.isStructural ? '★' : '⚡'}`
+      `TP${i+1}=$${t.level.toFixed(decimals)} (1:${t.rrr}) ${t.isStructural ? '★' : '⚡'}`
     ).join(' | ')}`);
     steps.push(`TP source: ${tpData.tps.map(t => t.reason).join(' → ')}`);
   }
@@ -463,24 +472,24 @@ export function runAnalysis(allData, config = {}) {
      (direction === 'short' && emaSignalType?.includes('Bearish')));
 
   const checks = [
-    { label: `${profile.biasKey.toUpperCase()} Trend Aligned`, met: trend4HAligned,         pillar: true,  weight: 2 },
-    { label: 'Liquidity Sweep / FVG Fill',                     met: liquidityEvent,           pillar: true,  weight: 2 },
-    { label: `${profile.primaryKey.toUpperCase()}/${profile.structureKey.toUpperCase()} BOS/CHOCH`, met: structureShift, pillar: true, weight: 2 },
-    { label: 'Active Trading Session',                         met: sessionOk,                pillar: true,  weight: 1 },
-    { label: 'RRR ≥ 1:3 (Structural)',                        met: rrrMeetsMin,              pillar: true,  weight: 2 },
-    { label: 'Daily Bias Aligned (EMA200)',                    met: dailyAligned,             pillar: false, weight: 1 },
-    { label: 'RSI Divergence',                                 met: rsiResult.hasDivergence,  pillar: false, weight: 1 },
-    { label: 'EMA200 Acting as S/R',                          met: ema200Acting,             pillar: false, weight: 1 },
-    { label: 'Entry in OTE Zone (61.8–78.6%)',                met: inOTE,                    pillar: false, weight: 1 },
+    { label: `${profile.biasKey.toUpperCase()} Trend Aligned`, met: trend4HAligned,         pillar: true,  weight: 1.5 },
+    { label: 'Liquidity Sweep / FVG Fill',                     met: liquidityEvent,           pillar: true,  weight: 1.5 },
+    { label: `${profile.primaryKey.toUpperCase()}/${profile.structureKey.toUpperCase()} BOS/CHOCH`, met: structureShift, pillar: true, weight: 1.5 },
+    { label: 'Active Trading Session',                         met: sessionOk,                pillar: true,  weight: 1.0 },
+    { label: 'RRR ≥ 1:3 (Structural)',                        met: rrrMeetsMin,              pillar: true,  weight: 1.5 },
+    { label: 'Daily Bias Aligned (EMA200)',                    met: dailyAligned,             pillar: false, weight: profile.hasEmaSignal ? 0.5 : 1.0 },
+    { label: 'RSI Divergence',                                 met: rsiResult.hasDivergence,  pillar: false, weight: 1.0 },
+    { label: 'EMA200 Acting as S/R',                          met: ema200Acting,             pillar: false, weight: 1.0 },
+    { label: 'Entry in OTE Zone (61.8–78.6%)',                met: inOTE,                    pillar: false, weight: profile.hasEmaSignal ? 0.5 : 1.0 },
     ...(profile.hasEmaSignal
-      ? [{ label: `EMA Signal: ${emaSignalType || 'None'}`,   met: emaSignalAligned,         pillar: false, weight: 1 }]
+      ? [{ label: `EMA Signal: ${emaSignalType || 'None'}`,   met: emaSignalAligned,         pillar: false, weight: 1.0 }]
       : []),
   ];
 
-  const totalWeight     = checks.reduce((s, c) => s + c.weight, 0);
+  const totalWeight     = checks.reduce((s, c) => s + c.weight, 0); // Always exactly 11.0
   const scoredWeight    = checks.reduce((s, c) => s + (c.met ? c.weight : 0), 0);
   const max             = 11;
-  const normalizedTotal = Math.min(max, Math.round((scoredWeight / totalWeight) * max));
+  const normalizedTotal = Math.min(max, Math.round(scoredWeight));
   const pillarsMet      = checks.filter(c => c.pillar && c.met).length;
   const pillarsTotal    = checks.filter(c => c.pillar).length;
   const tier            = normalizedTotal >= 8 ? 'EXCEPTIONAL' : normalizedTotal >= 6 ? 'HIGH' : normalizedTotal >= 4 ? 'MEDIUM' : 'REJECT';
@@ -496,12 +505,10 @@ export function runAnalysis(allData, config = {}) {
     rejectionReason = `Market ranging — no ${profile.biasKey.toUpperCase()} directional bias`;
   } else if (emaVetoActive) {
     rejectionReason = emaVetoReason;
-  } else if (entryDistPct > 0.003) {
-    rejectionReason = `Price too far from entry zone: ${(entryDistPct * 100).toFixed(2)}% > 0.30% (Chased/Missed entry)`;
-  } else if (slPct > 0.025) {
-    rejectionReason = `SL too wide: ${(slPct * 100).toFixed(2)}% > 2.50% max (Hard reject)`;
+  } else if (entryDistPct > profile.maxEntryDist) {
+    rejectionReason = `Price too far from entry zone: ${(entryDistPct * 100).toFixed(2)}% > ${(profile.maxEntryDist * 100).toFixed(2)}% max for ${profile.label}`;
   } else if (slPct > profile.maxSlPct) {
-    rejectionReason = `SL too wide: ${(slPct * 100).toFixed(2)}% > ${(profile.maxSlPct * 100).toFixed(1)}% max for ${profile.label}`;
+    rejectionReason = `SL too wide: ${(slPct * 100).toFixed(2)}% > ${(profile.maxSlPct * 100).toFixed(2)}% max for ${profile.label}`;
   } else if (!rrrMeetsMin) {
     rejectionReason = `RRR too low: ${tp1Rrr.toFixed(2)} < 3.0 minimum`;
   } else if (pillarsMet < profile.minPillars) {
@@ -525,7 +532,9 @@ export function runAnalysis(allData, config = {}) {
     stopLoss:     slData,
     tpDetails:    tpData?.tps || [],
     positionSize: (direction && slData) ? calculatePositionSize(entry, slData.value) : 0,
-    projectedLoss: direction ? '5.00' : '0.00',
+    projectedLoss: (direction && slData)
+      ? (Math.abs(entry - slData.value) * calculatePositionSize(entry, slData.value)).toFixed(2)
+      : '0.00',
     breakevenMove: (direction && slData) ? calculateBreakevenMove(entry, slData.value) : null,
     confluenceScore: {
       total: normalizedTotal, max, tier: finalTier,
