@@ -37,12 +37,14 @@ const TF_PROFILES = {
     minPillars:          4, // raised from 3 for quality
     minConfluence:       6, // raised from 4 for quality
     maxSlPct:            0.015,  // 1.5% max SL for scalping
-    maxTpPct:            0.04,   // 4% max TP range from entry
+    maxTpPct:            0.015,  // Tightened to 1.5% to ensure trades close in 4-5 hours
     maxEntryDist:        0.003,  // 0.3% max entry distance
     sweepThreshold:      0.0008,
     hasEmaSignal:        true,
     sessionAllowNyClose: true,
     isScalping:          true,
+    timeCap:             '4H',
+    riskAmount:          10,    // Increased size/risk for short duration scalps
   },
   '15m': {
     label:               '15m Intraday',
@@ -61,6 +63,8 @@ const TF_PROFILES = {
     hasEmaSignal:        false,
     sessionAllowNyClose: false,
     isScalping:          false,
+    timeCap:             '6H',
+    riskAmount:          5,
   },
   '1h': {
     label:               '1H Swing',
@@ -79,6 +83,8 @@ const TF_PROFILES = {
     hasEmaSignal:        false,
     sessionAllowNyClose: false,
     isScalping:          false,
+    timeCap:             '24H',
+    riskAmount:          5,
   },
   '4h': {
     label:               '4H Position',
@@ -97,6 +103,8 @@ const TF_PROFILES = {
     hasEmaSignal:        false,
     sessionAllowNyClose: false,
     isScalping:          false,
+    timeCap:             '48H',
+    riskAmount:          5,
   },
   '1d': {
     label:               '1D Trend',
@@ -115,6 +123,8 @@ const TF_PROFILES = {
     hasEmaSignal:        false,
     sessionAllowNyClose: false,
     isScalping:          false,
+    timeCap:             '5D',
+    riskAmount:          5,
   },
 };
 
@@ -135,6 +145,7 @@ export function runAnalysis(allData, config = {}) {
   } = config;
 
   const profile = TF_PROFILES[activeTimeframe] || TF_PROFILES['15m'];
+  const riskAmount = profile.riskAmount || RISK_AMOUNT;
   const steps   = [];
   steps.push(`Engine v9.0 | ${profile.label} | ${symbol}`);
 
@@ -401,7 +412,7 @@ export function runAnalysis(allData, config = {}) {
     const allFVGs = [...fvgsOB, ...fvgsPrimary];
     slData = calculateSmartSL(inv, direction, allFVGs);
     const decimals = ASSETS[symbol]?.decimals ?? 2;
-    const posSize = calculatePositionSize(entry, slData.value);
+    const posSize = calculatePositionSize(entry, slData.value, riskAmount);
     steps.push(`Entry: ${entry.toFixed(decimals)} | SL: ${slData.value.toFixed(decimals)} | SL%: ${((Math.abs(entry - slData.value) / entry) * 100).toFixed(2)}% | Size: ${posSize} units`);
   }
 
@@ -439,7 +450,7 @@ export function runAnalysis(allData, config = {}) {
     );
 
     // Attach projected P&L to each TP
-    const posSize = calculatePositionSize(entry, slData.value);
+    const posSize = calculatePositionSize(entry, slData.value, riskAmount);
     tpData.tps.forEach(tp => {
       const fullPnl       = Math.abs(tp.level - entry) * posSize;
       tp.projectedProfit  = (fullPnl * ((tp.closePercent || 0) / 100)).toFixed(2);
@@ -534,9 +545,9 @@ export function runAnalysis(allData, config = {}) {
     entry,
     stopLoss:     slData,
     tpDetails:    tpData?.tps || [],
-    positionSize: (direction && slData) ? calculatePositionSize(entry, slData.value) : 0,
+    positionSize: (direction && slData) ? calculatePositionSize(entry, slData.value, riskAmount) : 0,
     projectedLoss: (direction && slData)
-      ? (Math.abs(entry - slData.value) * calculatePositionSize(entry, slData.value)).toFixed(2)
+      ? (Math.abs(entry - slData.value) * calculatePositionSize(entry, slData.value, riskAmount)).toFixed(2)
       : '0.00',
     breakevenMove: (direction && slData) ? calculateBreakevenMove(entry, slData.value) : null,
     confluenceScore: {
@@ -557,6 +568,8 @@ export function runAnalysis(allData, config = {}) {
     oteZone,
     symbol,
     balance,
+    timeCap:          profile.timeCap,
+    riskAmount:       riskAmount,
     // Mode metadata
     analysisMode:     profile.label,
     modeColor:        profile.modeColor,

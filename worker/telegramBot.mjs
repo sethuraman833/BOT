@@ -23,7 +23,7 @@ export async function sendTradeAlert(analysis) {
     positionSize, breakevenMove, confluenceScore,
     session, keyRisk, invalidationLevel, aiAnalysis,
     upProbability, downProbability, waitCondition, decision,
-    balance
+    balance, timeCap, riskAmount
   } = analysis;
 
   const slPct   = entry && stopLoss?.value ? ((Math.abs(entry - stopLoss.value) / entry) * 100).toFixed(2) : '?';
@@ -74,7 +74,7 @@ export async function sendTradeAlert(analysis) {
   managementRules += `⚠️ *Early Exit Overrides*:
 - Close 100% if 2 consecutive 15m candles close against trade
 - Close 100% if 15m structure breaks (closes past HL/LH)
-- After 6H: if in profit close 50% & BE, if flat/stalled close 100%
+- After ${timeCap || '6H'}: if in profit close 50% & BE, if flat/stalled close 100%
 `;
 
   const msg = `${header}
@@ -89,7 +89,7 @@ ${tpLines}
 ${managementRules}
 ${aiSection}
 📦 Size      : ${positionSize?.toFixed(4)} units
-💰 Max Risk  : $5.00 USDT
+💰 Max Risk  : $${(riskAmount || 5).toFixed(2)} USDT
 ⚡ Breakeven : $${breakevenMove?.toFixed(2)}
 
 ⚠️ Key Risk  : ${keyRisk}

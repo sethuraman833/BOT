@@ -66,7 +66,7 @@ export default function TradeBox({ analysis }) {
           </div>
           <div className="teb-sub-item">
             <span className="text-dim">Risk:</span>
-            <strong className="mono text-red">$5.00</strong>
+            <strong className="mono text-red">${analysis.riskAmount ? analysis.riskAmount.toFixed(2) : '5.00'}</strong>
           </div>
           <div className="teb-sub-item">
             <span className="text-dim">SL dist:</span>
@@ -125,7 +125,7 @@ export default function TradeBox({ analysis }) {
         <div className="tm-rules-header">📈 Trade Management Exit Rules</div>
         <div className="tm-rules-body">
           <div className="tm-rule-item">
-            <strong>BE Trigger:</strong> Move SL to Entry at 1.5R in profit ($+7.50 value: {formatPrice(breakevenMove, symbol)})
+            <strong>BE Trigger:</strong> Move SL to Entry at 1.5R in profit ($+{(analysis.riskAmount * 1.5 || 7.50).toFixed(2)} value: {formatPrice(breakevenMove, symbol)})
           </div>
           {tpDetails && tpDetails.length >= 3 ? (
             <>
@@ -151,7 +151,7 @@ export default function TradeBox({ analysis }) {
             <strong>Structure Shift:</strong> Close 100% immediately if price closes past recent 15m HL/LH
           </div>
           <div className="tm-rule-item text-purple">
-            <strong>6H Time Cap:</strong> Close 50% & BE (if in profit) or exit full position if stalled after 6h
+            <strong>{analysis.timeCap || '6H'} Time Cap:</strong> Close 50% & BE (if in profit) or exit full position if stalled after {(analysis.timeCap || '6H').toLowerCase()}
           </div>
         </div>
       </div>

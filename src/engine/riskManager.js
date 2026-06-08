@@ -33,8 +33,8 @@ export function calculateRRR(entry, stopLoss, takeProfit) {
 /**
  * Calculate position size based on fixed RISK_AMOUNT.
  */
-export function calculatePositionSize(entry, stopLoss) {
-  const riskAmount = RISK_AMOUNT;
+export function calculatePositionSize(entry, stopLoss, customRiskAmount) {
+  const riskAmount = customRiskAmount !== undefined ? customRiskAmount : RISK_AMOUNT;
   const slDistance = Math.abs(entry - stopLoss);
   if (slDistance === 0) return 0;
   return parseFloat((riskAmount / slDistance).toFixed(6));
