@@ -44,7 +44,7 @@ const TF_PROFILES = {
     sessionAllowNyClose: true,
     isScalping:          true,
     timeCap:             '4H',
-    riskAmount:          10,    // Increased size/risk for short duration scalps
+    riskAmount:          5,     // Set back to $5 to align with uniform risk rules
     minRrr:              3.0,   // Capped min RRR at 1:3 as explicitly requested
   },
   '15m': {
