@@ -73,18 +73,23 @@ export function calculateSmartSL(invalidationLevel, direction, fvgs) {
   let layer3 = layer2;
   if (fvgs && fvgs.length > 0) {
     if (direction === 'long') {
-      // Find bullish FVG behind Layer 2 SL (spans across layer 2)
       const fvg = fvgs.find(f => f.type === 'bullish' && f.upper > layer2 && f.lower < layer2);
       if (fvg) {
-        layer3 = fvg.lower; // Move SL to far side of FVG
+        layer3 = fvg.lower;
       }
     } else {
-      // Find bearish FVG behind Layer 2 SL (spans across layer 2)
       const fvg = fvgs.find(f => f.type === 'bearish' && f.lower < layer2 && f.upper > layer2);
       if (fvg) {
-        layer3 = fvg.upper; // Move SL to far side of FVG
+        layer3 = fvg.upper;
       }
     }
+  }
+
+  // Cap: prevent FVG from widening SL more than 0.3% beyond Layer 2
+  if (direction === 'long' && layer3 < layer2 * (1 - 0.003)) {
+    layer3 = layer2 * (1 - 0.003);
+  } else if (direction !== 'long' && layer3 > layer2 * (1 + 0.003)) {
+    layer3 = layer2 * (1 + 0.003);
   }
 
   return {
@@ -120,44 +125,6 @@ export function getDynamicScaling(tier, sessionName, tpCount) {
   return [p1, p2, p3];
 }
 
-/**
- * Build and deduplicate structural swing levels near entry.
- */
-function buildStructuralLevels(entry, direction, allSwings, fvgs, maxDist) {
-  const raw = [];
-
-  for (const s of allSwings) {
-    const price = s.price;
-    const dist  = direction === 'long' ? price - entry : entry - price;
-    if ((direction === 'long' && price > entry && dist <= maxDist) ||
-        (direction === 'short' && price < entry && dist <= maxDist)) {
-      raw.push({ price, reason: `${s.tfLabel || 'Swing'} @ ${price.toFixed(0)}`, isStructural: true });
-    }
-  }
-
-  for (const f of fvgs) {
-    if (direction === 'long' && f.type === 'bearish' && f.lower > entry) {
-      const dist = f.lower - entry;
-      if (dist <= maxDist) raw.push({ price: f.midpoint, reason: `Bearish FVG @ ${f.midpoint?.toFixed(0)}`, isStructural: true });
-    }
-    if (direction === 'short' && f.type === 'bullish' && f.upper < entry) {
-      const dist = entry - f.upper;
-      if (dist <= maxDist) raw.push({ price: f.midpoint, reason: `Bullish FVG @ ${f.midpoint?.toFixed(0)}`, isStructural: true });
-    }
-  }
-
-  raw.sort((a, b) => direction === 'long' ? a.price - b.price : b.price - a.price);
-
-  const deduped = [];
-  for (const lvl of raw) {
-    if (deduped.length === 0) { deduped.push(lvl); continue; }
-    const prev = deduped[deduped.length - 1];
-    if (Math.abs(lvl.price - prev.price) / prev.price < STRUCT_DEDUP_PCT) continue;
-    deduped.push(lvl);
-  }
-
-  return deduped;
-}
 
 /**
  * Primary TP engine combining progressive RRR, risk scaling, and structural logic.
@@ -285,11 +252,12 @@ export function calculateTPs(
   let primHigh = highs.filter(h => h.tfLabel === primaryTf && h.price > entry).sort((a, b) => a.price - b.price)[0]?.price;
   let primLow = lows.filter(l => l.tfLabel === primaryTf && l.price < entry).sort((a, b) => b.price - a.price)[0]?.price;
 
+  // Fallback: nearest swing from ANY timeframe (not the most extreme)
   if (!primHigh) {
-    primHigh = highs.sort((a, b) => b.price - a.price)[0]?.price;
+    primHigh = highs.filter(h => h.price > entry).sort((a, b) => a.price - b.price)[0]?.price;
   }
   if (!primLow) {
-    primLow = lows.sort((a, b) => a.price - b.price)[0]?.price;
+    primLow = lows.filter(l => l.price < entry).sort((a, b) => b.price - a.price)[0]?.price;
   }
 
   if (primHigh && primLow && primHigh > primLow) {
@@ -405,21 +373,9 @@ export function calculateTPs(
     }
   }
 
-  // If no TP1 satisfies RRR >= minTp1Rrr, return single TP at the first candidate level
+  // If no TP1 satisfies RRR >= minTp1Rrr, reject the trade — never accept sub-minRRR targets
   if (!tp1) {
-    const firstCand = dedupedCandidates[0];
-    const level = firstCand.level;
-    const rrr = calculateRRR(entry, stopLoss, level);
-    return {
-      tps: [{
-        level: parseFloat(level.toFixed(4)),
-        reason: firstCand.reason,
-        rrr,
-        isStructural: firstCand.isStructural,
-        closePercent: 100,
-      }],
-      tpStructure: 'single'
-    };
+    return { tps: [], tpStructure: 'rejected', rejectReason: `No TP candidate meets minimum ${minTp1Rrr}R requirement` };
   }
 
   // If we only have TP1
