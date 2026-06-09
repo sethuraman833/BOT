@@ -165,12 +165,16 @@ function buildStructuralLevels(entry, direction, allSwings, fvgs, maxDist) {
 export function calculateTPs(
   entry, stopLoss, allSwings, fvgs,
   direction, tier = 'HIGH', sessionName = '', maxTpPct = 0.06,
-  primaryTf = '15M', structureTf = '1H', biasTf = '4H'
+  primaryTf = '15M', structureTf = '1H', biasTf = '4H',
+  minRrr = 3.0
 ) {
   const risk = Math.abs(entry - stopLoss);
   if (risk === 0) return { tps: [], tpStructure: 'single' };
 
   const isLong = direction === 'long';
+  const minTp1Rrr = minRrr;
+  const minTp2Rrr = minRrr + 1.0;
+  const minTp3Rrr = minRrr + 2.0;
 
   // Compute absolute maximum allowed price based on profile maxTpPct
   let maxTpPrice;
@@ -329,34 +333,34 @@ export function calculateTPs(
   if (dedupedCandidates.length === 0) {
     if (isLong) {
       dedupedCandidates.push({
-        level: entry + risk * MIN_TP1_RRR,
-        reason: `${MIN_TP1_RRR.toFixed(1)}R Target (No structures)`,
+        level: entry + risk * minTp1Rrr,
+        reason: `${minTp1Rrr.toFixed(1)}R Target (No structures)`,
         isStructural: false,
       });
       dedupedCandidates.push({
-        level: entry + risk * (MIN_TP1_RRR + MIN_TP_SPACING_RRR),
-        reason: `${(MIN_TP1_RRR + MIN_TP_SPACING_RRR).toFixed(1)}R Target (No structures)`,
+        level: entry + risk * (minTp1Rrr + MIN_TP_SPACING_RRR),
+        reason: `${(minTp1Rrr + MIN_TP_SPACING_RRR).toFixed(1)}R Target (No structures)`,
         isStructural: false,
       });
       dedupedCandidates.push({
-        level: entry + risk * (MIN_TP1_RRR + 2 * MIN_TP_SPACING_RRR),
-        reason: `${(MIN_TP1_RRR + 2 * MIN_TP_SPACING_RRR).toFixed(1)}R Target (No structures)`,
+        level: entry + risk * (minTp1Rrr + 2 * MIN_TP_SPACING_RRR),
+        reason: `${(minTp1Rrr + 2 * MIN_TP_SPACING_RRR).toFixed(1)}R Target (No structures)`,
         isStructural: false,
       });
     } else {
       dedupedCandidates.push({
-        level: entry - risk * MIN_TP1_RRR,
-        reason: `${MIN_TP1_RRR.toFixed(1)}R Target (No structures)`,
+        level: entry - risk * minTp1Rrr,
+        reason: `${minTp1Rrr.toFixed(1)}R Target (No structures)`,
         isStructural: false,
       });
       dedupedCandidates.push({
-        level: entry - risk * (MIN_TP1_RRR + MIN_TP_SPACING_RRR),
-        reason: `${(MIN_TP1_RRR + MIN_TP_SPACING_RRR).toFixed(1)}R Target (No structures)`,
+        level: entry - risk * (minTp1Rrr + MIN_TP_SPACING_RRR),
+        reason: `${(minTp1Rrr + MIN_TP_SPACING_RRR).toFixed(1)}R Target (No structures)`,
         isStructural: false,
       });
       dedupedCandidates.push({
-        level: entry - risk * (MIN_TP1_RRR + 2 * MIN_TP_SPACING_RRR),
-        reason: `${(MIN_TP1_RRR + 2 * MIN_TP_SPACING_RRR).toFixed(1)}R Target (No structures)`,
+        level: entry - risk * (minTp1Rrr + 2 * MIN_TP_SPACING_RRR),
+        reason: `${(minTp1Rrr + 2 * MIN_TP_SPACING_RRR).toFixed(1)}R Target (No structures)`,
         isStructural: false,
       });
     }
@@ -366,42 +370,42 @@ export function calculateTPs(
   let tp2 = null;
   let tp3 = null;
 
-  // Find TP1 candidate (first one satisfying RRR >= 3.0)
+  // Find TP1 candidate (first one satisfying RRR >= minTp1Rrr)
   for (const cand of dedupedCandidates) {
     const candRrr = calculateRRR(entry, stopLoss, cand.level);
-    if (candRrr >= MIN_TP1_RRR) {
+    if (candRrr >= minTp1Rrr) {
       tp1 = { ...cand, rrr: candRrr };
       break;
     }
   }
 
-  // Find TP2 candidate (first one satisfying RRR >= 4.0 and spacing >= 1.0R from TP1)
+  // Find TP2 candidate (first one satisfying RRR >= minTp2Rrr and spacing >= 1.0R from TP1)
   if (tp1) {
     for (const cand of dedupedCandidates) {
       const candRrr = calculateRRR(entry, stopLoss, cand.level);
       const spacingRrr = Math.abs(cand.level - tp1.level) / risk;
       const isFurther = isLong ? cand.level > tp1.level : cand.level < tp1.level;
-      if (candRrr >= MIN_TP2_RRR && spacingRrr >= MIN_TP_SPACING_RRR && isFurther) {
+      if (candRrr >= minTp2Rrr && spacingRrr >= MIN_TP_SPACING_RRR && isFurther) {
         tp2 = { ...cand, rrr: candRrr };
         break;
       }
     }
   }
 
-  // Find TP3 candidate (first one satisfying RRR >= 5.0 and spacing >= 1.0R from TP2)
+  // Find TP3 candidate (first one satisfying RRR >= minTp3Rrr and spacing >= 1.0R from TP2)
   if (tp2) {
     for (const cand of dedupedCandidates) {
       const candRrr = calculateRRR(entry, stopLoss, cand.level);
       const spacingRrr = Math.abs(cand.level - tp2.level) / risk;
       const isFurther = isLong ? cand.level > tp2.level : cand.level < tp2.level;
-      if (candRrr >= MIN_TP3_RRR && spacingRrr >= MIN_TP_SPACING_RRR && isFurther) {
+      if (candRrr >= minTp3Rrr && spacingRrr >= MIN_TP_SPACING_RRR && isFurther) {
         tp3 = { ...cand, rrr: candRrr };
         break;
       }
     }
   }
 
-  // If no TP1 satisfies RRR >= 3.0R, return single TP at the first candidate level
+  // If no TP1 satisfies RRR >= minTp1Rrr, return single TP at the first candidate level
   if (!tp1) {
     const firstCand = dedupedCandidates[0];
     const level = firstCand.level;

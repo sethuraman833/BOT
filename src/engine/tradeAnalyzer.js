@@ -45,6 +45,7 @@ const TF_PROFILES = {
     isScalping:          true,
     timeCap:             '4H',
     riskAmount:          10,    // Increased size/risk for short duration scalps
+    minRrr:              3.0,   // Capped min RRR at 1:3 as explicitly requested
   },
   '15m': {
     label:               '15m Intraday',
@@ -65,6 +66,7 @@ const TF_PROFILES = {
     isScalping:          false,
     timeCap:             '6H',
     riskAmount:          5,
+    minRrr:              3.0,
   },
   '1h': {
     label:               '1H Swing',
@@ -85,6 +87,7 @@ const TF_PROFILES = {
     isScalping:          false,
     timeCap:             '24H',
     riskAmount:          5,
+    minRrr:              3.0,
   },
   '4h': {
     label:               '4H Position',
@@ -105,6 +108,7 @@ const TF_PROFILES = {
     isScalping:          false,
     timeCap:             '48H',
     riskAmount:          5,
+    minRrr:              3.0,
   },
   '1d': {
     label:               '1D Trend',
@@ -125,6 +129,7 @@ const TF_PROFILES = {
     isScalping:          false,
     timeCap:             '5D',
     riskAmount:          5,
+    minRrr:              3.0,
   },
 };
 
@@ -446,7 +451,8 @@ export function runAnalysis(allData, config = {}) {
       profile.maxTpPct,
       profile.primaryKey.toUpperCase(),
       profile.structureKey.toUpperCase(),
-      profile.biasKey.toUpperCase()
+      profile.biasKey.toUpperCase(),
+      profile.minRrr || 3.0
     );
 
     // Attach projected P&L to each TP
@@ -465,7 +471,7 @@ export function runAnalysis(allData, config = {}) {
 
   // ── Pillar: RRR ────────────────────────────────────────────────
   const tp1Rrr      = tpData?.tps?.[0]?.rrr ?? 0;
-  const rrrMeetsMin = tp1Rrr >= 3.0;
+  const rrrMeetsMin = tp1Rrr >= (profile.minRrr || 3.0);
 
   // ── Confluence Checks ──────────────────────────────────────────
   const trend4HAligned = (direction === 'long'  && trendBias === 'bullish') ||
@@ -490,7 +496,7 @@ export function runAnalysis(allData, config = {}) {
     { label: 'Liquidity Sweep / FVG Fill',                     met: liquidityEvent,           pillar: true,  weight: 1.5 },
     { label: `${profile.primaryKey.toUpperCase()}/${profile.structureKey.toUpperCase()} BOS/CHOCH`, met: structureShift, pillar: true, weight: 1.5 },
     { label: 'Active Trading Session',                         met: sessionOk,                pillar: true,  weight: 1.0 },
-    { label: 'RRR ≥ 1:3 (Structural)',                        met: rrrMeetsMin,              pillar: true,  weight: 1.5 },
+    { label: `RRR ≥ 1:${(profile.minRrr || 3.0).toFixed(0)} (Structural)`, met: rrrMeetsMin, pillar: true, weight: 1.5 },
     { label: 'Daily Bias Aligned (EMA200)',                    met: dailyAligned,             pillar: false, weight: profile.hasEmaSignal ? 0.5 : 1.0 },
     { label: 'RSI Divergence',                                 met: rsiResult.hasDivergence,  pillar: false, weight: 1.0 },
     { label: 'EMA200 Acting as S/R',                          met: ema200Acting,             pillar: false, weight: 1.0 },
@@ -524,7 +530,7 @@ export function runAnalysis(allData, config = {}) {
   } else if (slPct > profile.maxSlPct) {
     rejectionReason = `SL too wide: ${(slPct * 100).toFixed(2)}% > ${(profile.maxSlPct * 100).toFixed(2)}% max for ${profile.label}`;
   } else if (!rrrMeetsMin) {
-    rejectionReason = `RRR too low: ${tp1Rrr.toFixed(2)} < 3.0 minimum`;
+    rejectionReason = `RRR too low: ${tp1Rrr.toFixed(2)} < ${(profile.minRrr || 3.0).toFixed(1)} minimum`;
   } else if (pillarsMet < profile.minPillars) {
     rejectionReason = `Pillars: ${pillarsMet}/${pillarsTotal} (need ${profile.minPillars} for ${profile.label})`;
   } else if (normalizedTotal < profile.minConfluence) {
