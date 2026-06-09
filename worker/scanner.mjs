@@ -7,7 +7,7 @@ import { getAiSecondOpinion } from './aiAgent.mjs';
 
 const REST   = 'https://fapi.binance.com/fapi/v1';
 const ASSETS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 'LINKUSDT'];
-const TFS    = ['1d', '4h', '1h', '15m', '5m'];  // 5m added for scalp scanning
+const TFS    = ['1w', '1d', '4h', '1h', '15m', '5m'];  // 1w added for weekly context
 
 // Track last alert per symbol to avoid duplicate notifications
 const lastAlertTime = {};

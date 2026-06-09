@@ -95,7 +95,7 @@ export default function ControlBar() {
   return (
     <div className="control-bar">
       <div className="control-left">
-        {TIMEFRAMES.map(tf => (
+        {TIMEFRAMES.filter(tf => tf.key !== '1w').map(tf => (
           <button
             key={tf.key}
             data-tf={tf.key}

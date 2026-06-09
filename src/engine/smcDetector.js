@@ -96,7 +96,13 @@ export function detectFVGs(candles, currentPrice) {
 
     // Bullish FVG: gap up
     if (c3.low > c1.high && (c3.low - c1.high) / c1.high > minGapPct) {
-      const filled = currentPrice != null && currentPrice <= c3.low && currentPrice >= c1.high;
+      let filled = false;
+      for (let k = i + 2; k < candles.length; k++) {
+        if (candles[k].low <= c3.low) {
+          filled = true;
+          break;
+        }
+      }
       if (!filled) {
         fvgs.push({ type: 'bullish', upper: c3.low, lower: c1.high, midpoint: (c3.low + c1.high) / 2, status: 'unfilled', candleIndex: i, time: candles[i].time });
       }
@@ -104,7 +110,13 @@ export function detectFVGs(candles, currentPrice) {
 
     // Bearish FVG: gap down
     if (c1.low > c3.high && (c1.low - c3.high) / c3.high > minGapPct) {
-      const filled = currentPrice != null && currentPrice >= c3.high && currentPrice <= c1.low;
+      let filled = false;
+      for (let k = i + 2; k < candles.length; k++) {
+        if (candles[k].high >= c3.high) {
+          filled = true;
+          break;
+        }
+      }
       if (!filled) {
         fvgs.push({ type: 'bearish', upper: c1.low, lower: c3.high, midpoint: (c1.low + c3.high) / 2, status: 'unfilled', candleIndex: i, time: candles[i].time });
       }
@@ -322,20 +334,27 @@ export function detectRSIDivergence(candles, direction, period = 14) {
   let hasDivergence = false;
   let detail = '';
 
+  const startIndex = Math.max(0, candles.length - 50);
   const swings = findSwingPoints(candles.slice(-50), 3);
-  const offset = candles.length - 50 - period;
-  const rsiOffset = Math.max(0, offset);
+
+  // Helper to get RSI value for a swing point relative to the slice
+  const getRsiForSwing = (swing) => {
+    const originalIndex = startIndex + swing.index;
+    const rsiIndex = originalIndex - period;
+    if (rsiIndex < 0 || rsiIndex >= rsiValues.length) return null;
+    return rsiValues[rsiIndex];
+  };
 
   if (direction === 'short') {
     const priceHighs = swings.filter(s => s.type === 'high').slice(-3);
     if (priceHighs.length >= 2) {
       const ph1 = priceHighs[priceHighs.length - 2];
       const ph2 = priceHighs[priceHighs.length - 1];
-      const ri1 = rsiValues[rsiOffset + ph1.index];
-      const ri2 = rsiValues[rsiOffset + ph2.index];
-      if (ri1 && ri2 && ph2.price > ph1.price && ri2 < ri1) {
+      const ri1 = getRsiForSwing(ph1);
+      const ri2 = getRsiForSwing(ph2);
+      if (ri1 !== null && ri2 !== null && ph2.price > ph1.price && ri2 < ri1) {
         hasDivergence = true;
-        detail = `Bearish divergence: price HH (${ph2.price.toFixed(0)}) but RSI LH (${ri2?.toFixed(1)})`;
+        detail = `Bearish divergence: price HH (${ph2.price.toFixed(0)}) but RSI LH (${ri2.toFixed(1)})`;
       }
     }
   } else if (direction === 'long') {
@@ -343,11 +362,11 @@ export function detectRSIDivergence(candles, direction, period = 14) {
     if (priceLows.length >= 2) {
       const pl1 = priceLows[priceLows.length - 2];
       const pl2 = priceLows[priceLows.length - 1];
-      const ri1 = rsiValues[rsiOffset + pl1.index];
-      const ri2 = rsiValues[rsiOffset + pl2.index];
-      if (ri1 && ri2 && pl2.price < pl1.price && ri2 > ri1) {
+      const ri1 = getRsiForSwing(pl1);
+      const ri2 = getRsiForSwing(pl2);
+      if (ri1 !== null && ri2 !== null && pl2.price < pl1.price && ri2 > ri1) {
         hasDivergence = true;
-        detail = `Bullish divergence: price LL (${pl2.price.toFixed(0)}) but RSI HL (${ri2?.toFixed(1)})`;
+        detail = `Bullish divergence: price LL (${pl2.price.toFixed(0)}) but RSI HL (${ri2.toFixed(1)})`;
       }
     }
   }

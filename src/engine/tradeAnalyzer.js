@@ -94,7 +94,7 @@ const TF_PROFILES = {
     modeColor:           '#9d6fff',
     primaryKey:          '4h',
     structureKey:        '1d',
-    biasKey:             '1d',
+    biasKey:             '1w',
     obKey:               '1d',
     swingLookback:       5,
     minPillars:          5, // raised from 4 for quality
@@ -114,12 +114,12 @@ const TF_PROFILES = {
     label:               '1D Trend',
     modeColor:           '#ff3f5e',
     primaryKey:          '1d',
-    structureKey:        '1d',
-    biasKey:             '1d',
-    obKey:               '1d',
+    structureKey:        '1w',
+    biasKey:             '1w',
+    obKey:               '1w',
     swingLookback:       7,
-    minPillars:          5, // raised from 4 for quality
-    minConfluence:       8, // raised from 6 for quality
+    minPillars:          4, // lowered from 5 to make achievable (Flaw 13)
+    minConfluence:       6, // lowered from 8 to make achievable (Flaw 13)
     maxSlPct:            0.050,
     maxTpPct:            0.30,
     maxEntryDist:        0.030,  // 3.0% max entry distance
@@ -372,8 +372,15 @@ export function runAnalysis(allData, config = {}) {
       ? allOBs.filter(o => o.type === 'demand').sort((a,b) => b.entryBoundary - a.entryBoundary)[0]
       : allOBs.filter(o => o.type === 'supply').sort((a,b) => a.entryBoundary - b.entryBoundary)[0];
 
-    if (inOTE && oteZone)   entry = oteZone.midpoint;
-    else if (nearestOB)     entry = nearestOB.entryBoundary;
+    if (inOTE && oteZone) {
+      entry = oteZone.midpoint;
+    } else if (nearestOB) {
+      const obEntry = nearestOB.entryBoundary;
+      if ((direction === 'long' && obEntry <= currentPrice) ||
+          (direction === 'short' && obEntry >= currentPrice)) {
+        entry = obEntry;
+      }
+    }
 
     // Find the true structural swing points within the last 35 candles on primary timeframe
     const primaryCandleSegment = candlesPrimary.slice(-35);
@@ -386,16 +393,20 @@ export function runAnalysis(allData, config = {}) {
     let inv;
     if (direction === 'long') {
       const obInv = nearestOB ? nearestOB.lowerBound : trueSwingLow;
-      const sweepLow = allSweeps.length > 0 
-        ? Math.min(...allSweeps.filter(s => s.direction === 'long' || s.type === 'bullish').map(s => s.sweptLevel))
+      const primarySweeps = sweepsPrimary.filter(s => s.direction === 'long' || s.type === 'bullish');
+      const targetSweeps = primarySweeps.length > 0 ? primarySweeps : sweepsStructure.filter(s => s.direction === 'long' || s.type === 'bullish');
+      const sweepLow = targetSweeps.length > 0 
+        ? Math.min(...targetSweeps.map(s => s.sweptLevel))
         : Infinity;
       // Layer 1: lowest point of demand OB or lowest wick of sweep candle (whichever is lower)
       inv = Math.min(obInv, sweepLow);
       if (inv === Infinity) inv = trueSwingLow;
     } else {
       const obInv = nearestOB ? nearestOB.upperBound : trueSwingHigh;
-      const sweepHigh = allSweeps.length > 0
-        ? Math.max(...allSweeps.filter(s => s.direction === 'short' || s.type === 'bearish').map(s => s.sweptLevel))
+      const primarySweeps = sweepsPrimary.filter(s => s.direction === 'short' || s.type === 'bearish');
+      const targetSweeps = primarySweeps.length > 0 ? primarySweeps : sweepsStructure.filter(s => s.direction === 'short' || s.type === 'bearish');
+      const sweepHigh = targetSweeps.length > 0
+        ? Math.max(...targetSweeps.map(s => s.sweptLevel))
         : -Infinity;
       // Layer 1: highest point of supply OB or highest wick of sweep candle (whichever is higher)
       inv = Math.max(obInv, sweepHigh);

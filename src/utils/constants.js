@@ -20,6 +20,7 @@ export const TIMEFRAMES = [
   { key: '1h',  label: '1H',  seconds: 3600  },
   { key: '4h',  label: '4H',  seconds: 14400 },
   { key: '1d',  label: '1D',  seconds: 86400 },
+  { key: '1w',  label: '1W',  seconds: 604800 },
 ];
 
 export const DEFAULT_ASSET     = 'BTCUSDT';
