@@ -37,7 +37,7 @@ const TF_PROFILES = {
     minPillars:          4, // raised from 3 for quality
     minConfluence:       6, // raised from 4 for quality
     maxSlPct:            0.015,  // 1.5% max SL for scalping
-    maxTpPct:            0.015,  // Tightened to 1.5% to ensure trades close in 4-5 hours
+    maxTpPct:            0.030,  // 3.0% window — wide enough for minRRR=3.0 with SLs up to ~1% (targets hit in 4-6h)
     maxEntryDist:        0.003,  // 0.3% max entry distance
     sweepThreshold:      0.0008,
     hasEmaSignal:        true,
