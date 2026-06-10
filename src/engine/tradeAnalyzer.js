@@ -384,6 +384,7 @@ export function runAnalysis(allData, config = {}) {
   // ── Entry / SL ──────────────────────────────────────────────────
   let entry  = currentPrice;
   let slData = null;
+  let posSize = 0;
 
   if (direction) {
     const allOBs    = [...obsOB, ...obsPrimary];
@@ -457,7 +458,7 @@ export function runAnalysis(allData, config = {}) {
 
     const decimals = ASSETS[symbol]?.decimals ?? 2;
     // Compute position size once (L1) and pass symbol for step rounding (C6)
-    const posSize = (slData && !slSideInvalid) ? calculatePositionSize(entry, slData.value, riskAmount, symbol) : 0;
+    posSize = (slData && !slSideInvalid) ? calculatePositionSize(entry, slData.value, riskAmount, symbol) : 0;
     steps.push(`Entry: ${entry.toFixed(decimals)} | SL: ${slData ? slData.value.toFixed(decimals) : 'N/A'} | SL%: ${slData ? ((Math.abs(entry - slData.value) / entry) * 100).toFixed(2) + '%' : 'N/A'} | Size: ${posSize} units`);
   }
 
