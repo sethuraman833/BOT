@@ -3,7 +3,7 @@
 // ─────────────────────────────────────────────────────────
 
 import { createContext, useContext, useReducer } from 'react';
-import { DEFAULT_ASSET, DEFAULT_TIMEFRAME } from '../utils/constants.js';
+import { DEFAULT_ASSET, DEFAULT_TIMEFRAME, CANDLE_LIMIT } from '../utils/constants.js';
 
 const MarketContext = createContext(null);
 const MarketDispatchContext = createContext(null);
@@ -38,11 +38,18 @@ function reducer(state, action) {
     case 'UPDATE_LAST_CANDLE': {
       const key = action.key;
       const existing = state.candles[key];
-      if (!existing) return state;
+      if (!existing || existing.length === 0) {
+        return { ...state, candles: { ...state.candles, [key]: [action.candle] } };
+      }
       const updated = [...existing];
       if (action.isClosed) {
-        updated.push(action.candle);
-        if (updated.length > 500) updated.shift();
+        const lastCandle = updated[updated.length - 1];
+        if (lastCandle && lastCandle.time === action.candle.time) {
+          updated[updated.length - 1] = action.candle;
+        } else {
+          updated.push(action.candle);
+        }
+        if (updated.length > CANDLE_LIMIT) updated.shift();
       } else {
         updated[updated.length - 1] = action.candle;
       }
@@ -74,12 +81,12 @@ export function MarketProvider({ children }) {
 
 export function useMarket() {
   const ctx = useContext(MarketContext);
-  if (!ctx) throw new Error('useMarket must be inside MarketProvider');
+  if (ctx === null) throw new Error('useMarket must be inside MarketProvider');
   return ctx;
 }
 
 export function useMarketDispatch() {
   const ctx = useContext(MarketDispatchContext);
-  if (!ctx) throw new Error('useMarketDispatch must be inside MarketProvider');
+  if (ctx === null) throw new Error('useMarketDispatch must be inside MarketProvider');
   return ctx;
 }

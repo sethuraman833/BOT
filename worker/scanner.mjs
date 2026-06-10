@@ -1,30 +1,68 @@
 // ─────────────────────────────────────────────────────────
-//  Scanner v8.0 — Dual-TF Scan (5m Scalp + 15m Intraday)
+//  Scanner v9.0 — Dual-TF Scan with Audited Limits & Validation
 // ─────────────────────────────────────────────────────────
 
 import { sendTradeAlert } from './telegramBot.mjs';
 import { getAiSecondOpinion } from './aiAgent.mjs';
+import { CANDLE_LIMIT } from '../src/utils/constants.js';
+import fs from 'fs';
+import path from 'path';
 
 const REST   = 'https://fapi.binance.com/fapi/v1';
 const ASSETS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 'LINKUSDT'];
 const TFS    = ['1w', '1d', '4h', '1h', '15m', '5m'];  // 1w added for weekly context
 
-// Track last alert per symbol to avoid duplicate notifications
-const lastAlertTime = {};
+// L11: Track last alert per symbol and persist to a local file
+const ALERT_FILE = path.join(process.cwd(), 'worker', 'lastAlertTime.json');
+let lastAlertTime = {};
+try {
+  if (fs.existsSync(ALERT_FILE)) {
+    lastAlertTime = JSON.parse(fs.readFileSync(ALERT_FILE, 'utf8'));
+  }
+} catch (err) {
+  console.error('[SCANNER] Failed to load lastAlertTime.json:', err.message);
+}
+
+function saveAlertTime(symbol, timestamp) {
+  lastAlertTime[symbol] = timestamp;
+  try {
+    fs.mkdirSync(path.dirname(ALERT_FILE), { recursive: true });
+    fs.writeFileSync(ALERT_FILE, JSON.stringify(lastAlertTime, null, 2), 'utf8');
+  } catch (err) {
+    console.error('[SCANNER] Failed to save lastAlertTime.json:', err.message);
+  }
+}
+
 const ALERT_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour cooldown per symbol
 
-async function getKlines(symbol, interval, limit = 200) {
+async function getKlines(symbol, interval, limit = CANDLE_LIMIT) { // H7: use CANDLE_LIMIT (1500)
   const res = await fetch(`${REST}/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`);
   if (!res.ok) throw new Error(`Binance API error: ${res.status} for ${symbol} ${interval}`);
   const raw = await res.json();
-  return raw.map(k => ({
-    time:   Math.floor(k[0] / 1000),
-    open:   parseFloat(k[1]),
-    high:   parseFloat(k[2]),
-    low:    parseFloat(k[3]),
-    close:  parseFloat(k[4]),
-    volume: parseFloat(k[5]),
-  }));
+  
+  // H9: Verify API kline response is array & filter NaN values
+  if (!Array.isArray(raw)) {
+    throw new Error(`Binance API returned invalid data format: expected array, got ${typeof raw}`);
+  }
+
+  return raw
+    .map(k => {
+      if (!Array.isArray(k) || k.length < 6) return null;
+      const candle = {
+        time:   Math.floor(k[0] / 1000),
+        open:   parseFloat(k[1]),
+        high:   parseFloat(k[2]),
+        low:    parseFloat(k[3]),
+        close:  parseFloat(k[4]),
+        volume: parseFloat(k[5]),
+      };
+      
+      if (isNaN(candle.time) || isNaN(candle.open) || isNaN(candle.high) || isNaN(candle.low) || isNaN(candle.close) || isNaN(candle.volume)) {
+        return null;
+      }
+      return candle;
+    })
+    .filter(k => k !== null);
 }
 
 export async function runScan() {
@@ -40,7 +78,7 @@ export async function runScan() {
       console.log(`\n[SCANNER] Fetching data for ${symbol}...`);
       const data = {};
       for (const tf of TFS) {
-        data[tf] = await getKlines(symbol, tf, 200);
+        data[tf] = await getKlines(symbol, tf, CANDLE_LIMIT); // H7: sync candle limit
       }
 
       // Run dual-TF analysis: 15m intraday + 5m scalping
@@ -79,7 +117,7 @@ export async function runScan() {
         // Only alert if AI doesn't explicitly disagree
         if (aiResponse.decision !== 'DISAGREE') {
           await sendTradeAlert(result);
-          lastAlertTime[symbol] = Date.now();
+          saveAlertTime(symbol, Date.now()); // L11: save persistent alert time
         } else {
           console.log(`[SCANNER] ${symbol}: AI DISAGREES — alert suppressed.`);
         }

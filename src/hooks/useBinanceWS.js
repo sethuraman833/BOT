@@ -14,6 +14,7 @@ export function useBinanceWS(symbol, chartTimeframe) {
   const reconnectTimerRef = useRef(null);
   const reconnectDelayRef = useRef(1000);
   const intentionalCloseRef = useRef(false);
+  const lastDispatchTimeRef = useRef(0);
 
   useEffect(() => {
     if (!symbol) return;
@@ -32,7 +33,7 @@ export function useBinanceWS(symbol, chartTimeframe) {
       intentionalCloseRef.current = false;
 
       const sym = symbol.toLowerCase();
-      const tfMap = { '5m': '5m', '15m': '15m', '1h': '1h', '4h': '4h', '1d': '1d' };
+      const tfMap = { '5m': '5m', '15m': '15m', '1h': '1h', '4h': '4h', '1d': '1d', '1w': '1w' };
       const wsInterval = tfMap[chartTimeframe] || '15m';
 
       const url = `${BINANCE_WSS}?streams=${sym}@ticker/${sym}@kline_${wsInterval}/${sym}@aggTrade`;
@@ -57,10 +58,14 @@ export function useBinanceWS(symbol, chartTimeframe) {
           if (!data) return;
 
           if (data.e === 'aggTrade') {
-            dispatch({
-              type: 'SET_LIVE_PRICE',
-              price: parseFloat(data.p),
-            });
+            const now = Date.now();
+            if (now - lastDispatchTimeRef.current >= 250) {
+              lastDispatchTimeRef.current = now;
+              dispatch({
+                type: 'SET_LIVE_PRICE',
+                price: parseFloat(data.p),
+              });
+            }
           }
 
           if (data.e === '24hrTicker') {
@@ -87,7 +92,6 @@ export function useBinanceWS(symbol, chartTimeframe) {
               candle,
               isClosed: k.x,
             });
-            dispatch({ type: 'SET_LIVE_PRICE', price: candle.close });
           }
         } catch (err) {
           logError('ws', 'Parse error', err);
@@ -100,7 +104,7 @@ export function useBinanceWS(symbol, chartTimeframe) {
       };
 
       ws.onclose = () => {
-        if (!isMounted || intentionalCloseRef.current) return;
+        if (!isMounted || ws !== wsRef.current) return;
         log('ws', `Disconnected. Reconnecting in ${reconnectDelayRef.current}ms...`);
         reconnectTimerRef.current = setTimeout(() => {
           reconnectDelayRef.current = Math.min(reconnectDelayRef.current * 2, 30000);

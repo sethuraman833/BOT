@@ -1,18 +1,27 @@
 // ─────────────────────────────────────────────────────────
-//  SMC Detector v7.0 — Corrected Sweep Validation
-//  FIXES: 0.15% sweep threshold, displacement candle check
+//  SMC Detector v8.0 — Fully Audited SMC Detection Engine
 // ─────────────────────────────────────────────────────────
 
 /**
  * Find swing highs and lows using a configurable lookback.
  */
 export function findSwingPoints(candles, lookback = 5) {
+  if (!candles || candles.length === 0) return []; // L6 null guard
   const swings = [];
   for (let i = lookback; i < candles.length - lookback; i++) {
     let isHigh = true, isLow = true;
     for (let j = 1; j <= lookback; j++) {
       if (candles[i].high <= candles[i - j].high || candles[i].high <= candles[i + j].high) isHigh = false;
       if (candles[i].low >= candles[i - j].low || candles[i].low >= candles[i + j].low) isLow = false;
+    }
+    // L4: Mutually exclusive swing high/low check
+    if (isHigh && isLow) {
+      const bodyMid = (candles[i].open + candles[i].close) / 2;
+      if (candles[i].high - bodyMid > bodyMid - candles[i].low) {
+        isLow = false;
+      } else {
+        isHigh = false;
+      }
     }
     if (isHigh) swings.push({ type: 'high', price: candles[i].high, index: i, time: candles[i].time });
     if (isLow)  swings.push({ type: 'low',  price: candles[i].low,  index: i, time: candles[i].time });
@@ -24,19 +33,28 @@ export function findSwingPoints(candles, lookback = 5) {
  * Detect Order Blocks (v6: requires 2.5x impulse ratio, body validation, recency cap 50 bars).
  */
 export function detectOrderBlocks(candles, currentPrice) {
+  if (!candles || candles.length === 0) return []; // L6 null guard
   const obs = [];
   const recencyCutoff = candles.length - 50;
 
-  for (let i = 2; i < candles.length - 2; i++) {
+  for (let i = 0; i < candles.length - 1; i++) { // start at 0 (M7)
     const ob = candles[i];
     const impulse = candles[i + 1];
+    if (!ob || !impulse) continue;
     const obBody = Math.abs(ob.close - ob.open);
     const impulseBody = Math.abs(impulse.close - impulse.open);
     if (obBody === 0) continue; // skip doji
 
     // Demand OB: bearish candle followed by strong bullish impulse
     if (ob.close < ob.open && impulse.close > impulse.open && impulseBody >= obBody * 2.5) {
-      const mitigated = currentPrice != null && currentPrice < ob.low;
+      // H5: Historical mitigation check (loop from i+2 to now)
+      let mitigated = false;
+      for (let k = i + 2; k < candles.length; k++) {
+        if (candles[k].low <= ob.high) {
+          mitigated = true;
+          break;
+        }
+      }
       if (!mitigated && i >= recencyCutoff) {
         obs.push({
           type: 'demand',
@@ -54,7 +72,14 @@ export function detectOrderBlocks(candles, currentPrice) {
 
     // Supply OB: bullish candle followed by strong bearish impulse
     if (ob.close > ob.open && impulse.close < impulse.open && impulseBody >= obBody * 2.5) {
-      const mitigated = currentPrice != null && currentPrice > ob.high;
+      // H5: Historical mitigation check (loop from i+2 to now)
+      let mitigated = false;
+      for (let k = i + 2; k < candles.length; k++) {
+        if (candles[k].high >= ob.low) {
+          mitigated = true;
+          break;
+        }
+      }
       if (!mitigated && i >= recencyCutoff) {
         obs.push({
           type: 'supply',
@@ -85,6 +110,7 @@ export function detectOrderBlocks(candles, currentPrice) {
  * Detect Fair Value Gaps. Only unfilled, recent (last 60 bars), with minimum size filter.
  */
 export function detectFVGs(candles, currentPrice) {
+  if (!candles || candles.length === 0) return []; // L6 null guard
   const fvgs = [];
   const recencyCutoff = candles.length - 60;
   const minGapPct = 0.001; // 0.1% minimum gap size
@@ -93,12 +119,15 @@ export function detectFVGs(candles, currentPrice) {
     if (i < recencyCutoff) continue;
     const c1 = candles[i - 1];
     const c3 = candles[i + 1];
+    if (!c1 || !c3) continue;
 
     // Bullish FVG: gap up
     if (c3.low > c1.high && (c3.low - c1.high) / c1.high > minGapPct) {
+      const gapSize = c3.low - c1.high;
+      const fillThreshold = c3.low - gapSize * 0.5; // H4: 50% partial fill
       let filled = false;
       for (let k = i + 2; k < candles.length; k++) {
-        if (candles[k].low <= c3.low) {
+        if (candles[k].low <= fillThreshold) {
           filled = true;
           break;
         }
@@ -110,9 +139,11 @@ export function detectFVGs(candles, currentPrice) {
 
     // Bearish FVG: gap down
     if (c1.low > c3.high && (c1.low - c3.high) / c3.high > minGapPct) {
+      const gapSize = c1.low - c3.high;
+      const fillThreshold = c3.high + gapSize * 0.5; // H4: 50% partial fill
       let filled = false;
       for (let k = i + 2; k < candles.length; k++) {
-        if (candles[k].high >= c3.high) {
+        if (candles[k].high >= fillThreshold) {
           filled = true;
           break;
         }
@@ -132,9 +163,6 @@ export function detectFVGs(candles, currentPrice) {
 /**
  * Check if a candle qualifies as a displacement candle (strong directional body).
  * Used as confirmation after a liquidity sweep.
- * @param {object} candle - The OHLCV candle to check
- * @param {string} direction - 'bullish' or 'bearish' expected displacement direction
- * @returns {boolean}
  */
 function isDisplacementCandle(candle, direction) {
   if (!candle) return false;
@@ -152,39 +180,37 @@ function isDisplacementCandle(candle, direction) {
 
 /**
  * Detect Liquidity Sweeps — wick extends beyond a prior swing, then closes back inside.
- * 
- * sweepThreshold: minimum breach % beyond the swing level (default 0.15%).
- * FIX BUG 6: 0.15% minimum threshold (not just any 1-tick wick).
- * FIX BUG 7: Displacement candle confirmation required.
  */
-export function detectSweeps(candles, sweepThreshold = 0.0015) {
+export function detectSweeps(candles, sweepThreshold = 0.0015, lookback = 3) {
+  if (!candles || candles.length === 0) return []; // L6 null guard
   const sweeps = [];
-  const swings = findSwingPoints(candles, 3);
+  const swings = findSwingPoints(candles, lookback); // L5: standardized lookback
   const recentHighs = swings.filter(s => s.type === 'high').slice(-6);
   const recentLows  = swings.filter(s => s.type === 'low').slice(-6);
 
   const MIN_SWEEP_PCT = sweepThreshold;
 
-  // Check last 10 candles for sweep events
-  const lookback = Math.min(10, candles.length - 2); // -2 to leave room for displacement candle check
-  for (let i = candles.length - lookback; i < candles.length - 1; i++) {
+  // Check last 10 candles for sweep events. M8: i < candles.length - 2 to prevent OOB
+  const scanLimit = Math.min(10, candles.length - 3);
+  for (let i = candles.length - scanLimit; i < candles.length - 2; i++) {
     const c = candles[i];
+    if (!c) continue;
 
     // Bearish sweep: wick above a prior high, then closes below it (bull trap)
     for (const swing of recentHighs) {
       if (swing.index >= i) continue;
 
-      // FIX BUG 6: Must exceed the high by at least 0.15%
       const breachPct = (c.high - swing.price) / swing.price;
       if (breachPct < MIN_SWEEP_PCT) continue;
 
       // Sweep candle close must be back below the swept level
       if (c.close >= swing.price) continue;
 
-      // FIX BUG 7: Must have displacement candle within next 1-2 candles
+      // Displacement candle within next 1-2 candles
       const next1 = candles[i + 1];
+      const next2 = candles[i + 2];
       const hasDisplacement = isDisplacementCandle(next1, 'bearish') ||
-                              (candles[i + 2] && isDisplacementCandle(candles[i + 2], 'bearish'));
+                              (next2 && isDisplacementCandle(next2, 'bearish'));
 
       if (!hasDisplacement) continue;
 
@@ -203,17 +229,17 @@ export function detectSweeps(candles, sweepThreshold = 0.0015) {
     for (const swing of recentLows) {
       if (swing.index >= i) continue;
 
-      // FIX BUG 6: Must exceed the low by at least 0.15%
       const breachPct = (swing.price - c.low) / swing.price;
       if (breachPct < MIN_SWEEP_PCT) continue;
 
       // Sweep candle close must be back above the swept level
       if (c.close <= swing.price) continue;
 
-      // FIX BUG 7: Must have displacement candle within next 1-2 candles
+      // Displacement candle within next 1-2 candles
       const next1 = candles[i + 1];
+      const next2 = candles[i + 2];
       const hasDisplacement = isDisplacementCandle(next1, 'bullish') ||
-                              (candles[i + 2] && isDisplacementCandle(candles[i + 2], 'bullish'));
+                              (next2 && isDisplacementCandle(next2, 'bullish'));
 
       if (!hasDisplacement) continue;
 
@@ -235,19 +261,17 @@ export function detectSweeps(candles, sweepThreshold = 0.0015) {
 /**
  * Detect BOS (Break of Structure) and CHOCH (Change of Character).
  * BOS = trend continuation. CHOCH = potential reversal.
- * @param {Array} candles - OHLCV candle array
- * @param {number} minAge - Minimum age in candles for a shift to count (0 = no gate).
- *   When > 0, the break must have existed `minAge` candles ago AND still hold now.
  */
-export function detectStructureShifts(candles, minAge = 0) {
+export function detectStructureShifts(candles, minAge = 1, lookback = 3) {
+  if (!candles || candles.length === 0) return []; // L6 null guard
   const shifts = [];
-  const swings = findSwingPoints(candles, 3);
+  const swings = findSwingPoints(candles, lookback); // L5: standardized lookback
   const highs = swings.filter(s => s.type === 'high').slice(-5);
   const lows  = swings.filter(s => s.type === 'low').slice(-5);
   const last = candles[candles.length - 1];
+  if (!last) return [];
 
   // Age gate: check a candle `minAge` positions before the latest
-  // If it also broke structure, the shift is confirmed (not a fresh/fleeting break)
   const ageIdx = candles.length - 1 - minAge;
   const ageCandle = (minAge > 0 && ageIdx >= 0) ? candles[ageIdx] : last;
 
@@ -255,11 +279,11 @@ export function detectStructureShifts(candles, minAge = 0) {
     const prevHigh = highs[highs.length - 2];
     const lastHigh = highs[highs.length - 1];
 
-    // BOS Bullish: price closes above previous HH (must hold on both age candle and latest)
+    // BOS Bullish: price closes above previous HH
     if (ageCandle.close > prevHigh.price && last.close > prevHigh.price) {
       shifts.push({ type: 'BOS', direction: 'bullish', level: prevHigh.price, time: last.time });
     }
-    // CHOCH Bearish: price closes below a recent HL after uptrend (reversal signal)
+    // CHOCH Bearish: price closes below a recent HL after uptrend
     if (lows.length >= 2) {
       const lastLow = lows[lows.length - 1];
       if (lastHigh.price > prevHigh.price && ageCandle.close < lastLow.price && last.close < lastLow.price) {
@@ -276,12 +300,32 @@ export function detectStructureShifts(candles, minAge = 0) {
     if (ageCandle.close < prevLow.price && last.close < prevLow.price) {
       shifts.push({ type: 'BOS', direction: 'bearish', level: prevLow.price, time: last.time });
     }
-    // CHOCH Bullish: price closes above a recent LH after downtrend (reversal signal)
+    // CHOCH Bullish: price closes above a recent LH after downtrend
     if (highs.length >= 2) {
       const lastHigh = highs[highs.length - 1];
       if (lastLow.price < prevLow.price && ageCandle.close > lastHigh.price && last.close > lastHigh.price) {
         shifts.push({ type: 'CHOCH', direction: 'bullish', level: lastHigh.price, time: last.time });
       }
+    }
+  }
+
+  // M6: Priority and contradiction resolution:
+  // If we have both bullish and bearish shifts, prioritize CHOCH over BOS,
+  // and keep only the latest shift if contradictory.
+  if (shifts.length > 1) {
+    const chochs = shifts.filter(s => s.type === 'CHOCH');
+    if (chochs.length > 0) {
+      const bullChoch = chochs.filter(s => s.direction === 'bullish');
+      const bearChoch = chochs.filter(s => s.direction === 'bearish');
+      if (bullChoch.length > 0 && bearChoch.length > 0) {
+        return [chochs[chochs.length - 1]];
+      }
+      return chochs;
+    }
+    const bullBOS = shifts.filter(s => s.type === 'BOS' && s.direction === 'bullish');
+    const bearBOS = shifts.filter(s => s.type === 'BOS' && s.direction === 'bearish');
+    if (bullBOS.length > 0 && bearBOS.length > 0) {
+      return [shifts[shifts.length - 1]];
     }
   }
 
@@ -292,7 +336,7 @@ export function detectStructureShifts(candles, minAge = 0) {
  * Calculate EMA (Exponential Moving Average).
  */
 export function calculateEMA(candles, period) {
-  if (candles.length < period) return [];
+  if (!candles || candles.length < period) return []; // L6 null guard
   const k = 2 / (period + 1);
   const closes = candles.map(c => c.close);
   const ema = [closes.slice(0, period).reduce((a, b) => a + b, 0) / period];
@@ -306,7 +350,7 @@ export function calculateEMA(candles, period) {
  * Calculate RSI.
  */
 export function calculateRSI(candles, period = 14) {
-  if (candles.length < period + 1) return [];
+  if (!candles || candles.length < period + 1) return []; // L6 null guard
   const closes = candles.map(c => c.close);
   const rsis = [];
   let gains = 0, losses = 0;
@@ -323,19 +367,23 @@ export function calculateRSI(candles, period = 14) {
       avgGain = (avgGain * (period - 1) + Math.max(diff, 0)) / period;
       avgLoss = (avgLoss * (period - 1) + Math.max(-diff, 0)) / period;
     }
-    const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
-    rsis.push(100 - 100 / (1 + rs));
+    if (avgLoss === 0) { // M9: Return 100 instead of 99.01
+      rsis.push(100);
+    } else {
+      const rs = avgGain / avgLoss;
+      rsis.push(100 - 100 / (1 + rs));
+    }
   }
   return rsis;
 }
 
 /**
  * Detect RSI divergence by comparing price swings vs RSI swings.
- * Bearish: higher price high, lower RSI high.
- * Bullish: lower price low, higher RSI low.
  */
 export function detectRSIDivergence(candles, direction, period = 14) {
+  if (!candles || candles.length === 0) return { rsiValue: 50, hasDivergence: false, detail: '', isOverbought: false, isOversold: false }; // L6 null guard
   const rsiValues = calculateRSI(candles, period);
+  if (rsiValues.length === 0) return { rsiValue: 50, hasDivergence: false, detail: '', isOverbought: false, isOversold: false };
   const rsiValue = rsiValues[rsiValues.length - 1];
   const isOverbought = rsiValue > 70;
   const isOversold = rsiValue < 30;

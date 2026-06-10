@@ -1,51 +1,69 @@
 // ─────────────────────────────────────────────────────────
-//  Risk Manager v10.0 — Risk-Scaled Progressive Engine
-//  - Progressive RRR targets (3R, 4R, 5R)
-//  - Pure risk-scaled buffers (no fixed percentages)
-//  - One-directional anchor logic
-//  - Risk-based deduplication
+//  Risk Manager v11.0 — Risk-Scaled Progressive Engine
 // ─────────────────────────────────────────────────────────
 
-import { RISK_AMOUNT } from '../utils/constants.js';
+import { RISK_AMOUNT, ASSETS } from '../utils/constants.js';
 
 // ── 🎯 Tunable Constants ──────────────────────────────────
-const MIN_TP1_RRR        = 3.0;   // TP1 must be at least 3R
-const MIN_TP2_RRR        = 4.0;   // TP2 must be at least 4R
-const MIN_TP3_RRR        = 5.0;   // TP3 must be at least 5R
 const MIN_TP_SPACING_RRR = 1.0;   // Minimum 1R between TPs
-const MAX_TP_RISK_MULT   = 7.0;   // Hard cap on TP distance
+const MAX_TP_RISK_MULT   = 7.0;   // Hard cap on TP distance (L8)
 const STRUCT_DEDUP_PCT   = 0.003; // Collapse structural levels within 0.3%
 const DEDUP_THRESHOLD_R  = 0.2;   // Drop TPs within 0.2R of each other
-const ENTRY_OFFSET_MULT  = 0.05;  // Front-run by 5% of risk
-const SL_BUFFER_MULT     = 0.15;  // Buffer SL by 15% of risk
 
 /**
- * Calculate Risk-to-Reward Ratio.
+ * Calculate Risk-to-Reward Ratio (direction-aware - H10).
  * @returns {number} RRR rounded to 2 decimals
  */
-export function calculateRRR(entry, stopLoss, takeProfit) {
+export function calculateRRR(entry, stopLoss, takeProfit, direction = 'long') {
   const risk   = Math.abs(entry - stopLoss);
-  const reward = Math.abs(takeProfit - entry);
   if (risk === 0) return 0;
+  const reward = direction === 'long' ? (takeProfit - entry) : (entry - takeProfit);
   return parseFloat((reward / risk).toFixed(2));
 }
 
 /**
- * Calculate position size based on fixed RISK_AMOUNT.
+ * Calculate position size based on fixed RISK_AMOUNT (C6: step size rounding).
  */
-export function calculatePositionSize(entry, stopLoss, customRiskAmount) {
+export function calculatePositionSize(entry, stopLoss, customRiskAmount, symbol) {
   const riskAmount = customRiskAmount !== undefined ? customRiskAmount : RISK_AMOUNT;
   const slDistance = Math.abs(entry - stopLoss);
   if (slDistance === 0) return 0;
-  return parseFloat((riskAmount / slDistance).toFixed(6));
+  const rawQty = riskAmount / slDistance;
+  
+  if (symbol && ASSETS[symbol]) {
+    const minQty = ASSETS[symbol].minQty;
+    const stepSize = minQty; // standard stepSize is the minQty for these futures contracts
+    const qty = Math.max(minQty, Math.floor(rawQty / stepSize) * stepSize);
+    
+    // Calculate decimal places from minQty
+    const minQtyString = minQty.toString();
+    const dotIdx = minQtyString.indexOf('.');
+    const stepDecimals = dotIdx === -1 ? 0 : minQtyString.length - dotIdx - 1;
+    return parseFloat(qty.toFixed(stepDecimals));
+  }
+  
+  return parseFloat(rawQty.toFixed(6));
 }
 
 /**
- * Apply risk-scaled front-run offset to a target price.
+ * Calculate leverage based on position size, entry price, and account balance (C7).
  */
-function applyFrontRunOffset(price, direction, risk) {
-  const offset = risk * ENTRY_OFFSET_MULT;
-  return direction === 'long' ? price - offset : price + offset;
+export function calculateLeverage(positionSize, entryPrice, balance) {
+  if (!balance || balance <= 0) return 1;
+  const notionalValue = positionSize * entryPrice;
+  return parseFloat((notionalValue / balance).toFixed(1));
+}
+
+/**
+ * Estimate liquidation price for a futures position (C7).
+ */
+export function estimateLiquidationPrice(entry, direction, leverage, mmr = 0.005) {
+  if (!leverage || leverage <= 0) return 0;
+  if (direction === 'long') {
+    return parseFloat((entry * (1 - 1 / leverage + mmr)).toFixed(4));
+  } else {
+    return parseFloat((entry * (1 + 1 / leverage - mmr)).toFixed(4));
+  }
 }
 
 /**
@@ -59,15 +77,23 @@ function isDuplicate(level, existingTPs, risk) {
 }
 
 /**
- * Calculate smart stop loss with 3-layer defense using Risk scaling.
+ * Calculate smart stop loss with 3-layer defense using Risk scaling (M10: risk-scaled buffer).
  */
-export function calculateSmartSL(invalidationLevel, direction, fvgs) {
+export function calculateSmartSL(invalidationLevel, direction, fvgs, symbol) {
   const layer1 = invalidationLevel;
   
-  // Layer 2: 0.3% buffer above/below Layer 1
+  // Scale buffer based on asset decimal precision or standard risk scale
+  let bufferPct = 0.0025; // default 0.25%
+  if (symbol && ASSETS[symbol]) {
+    const decimals = ASSETS[symbol].decimals;
+    if (decimals === 2) bufferPct = 0.0015; // tighter for BTC/ETH/SOL/BNB
+    else if (decimals >= 4) bufferPct = 0.004; // wider for XRP/ADA
+  }
+  
+  // Layer 2: buffer above/below Layer 1
   const layer2 = direction === 'long'
-    ? layer1 * (1 - 0.003)
-    : layer1 * (1 + 0.003);
+    ? layer1 * (1 - bufferPct)
+    : layer1 * (1 + bufferPct);
 
   // Layer 3: Imbalance Void Check
   let layer3 = layer2;
@@ -85,17 +111,18 @@ export function calculateSmartSL(invalidationLevel, direction, fvgs) {
     }
   }
 
-  // Cap: prevent FVG from widening SL more than 0.3% beyond Layer 2
-  if (direction === 'long' && layer3 < layer2 * (1 - 0.003)) {
-    layer3 = layer2 * (1 - 0.003);
-  } else if (direction !== 'long' && layer3 > layer2 * (1 + 0.003)) {
-    layer3 = layer2 * (1 + 0.003);
+  // Cap: prevent FVG from widening SL more than the buffer percentage beyond Layer 2
+  if (direction === 'long' && layer3 < layer2 * (1 - bufferPct)) {
+    layer3 = layer2 * (1 - bufferPct);
+  } else if (direction !== 'long' && layer3 > layer2 * (1 + bufferPct)) {
+    layer3 = layer2 * (1 + bufferPct);
   }
 
+  const priceDecimals = (symbol && ASSETS[symbol]) ? ASSETS[symbol].decimals : 4;
   return {
-    value: parseFloat(layer3.toFixed(4)),
+    value: parseFloat(layer3.toFixed(priceDecimals)),
     rawInvalidation: invalidationLevel,
-    buffer: `±0.3% liquidity buffer`,
+    buffer: `±${(bufferPct * 100).toFixed(2)}% liquidity buffer`,
     layer1,
     layer2,
     layer3,
@@ -125,7 +152,6 @@ export function getDynamicScaling(tier, sessionName, tpCount) {
   return [p1, p2, p3];
 }
 
-
 /**
  * Primary TP engine combining progressive RRR, risk scaling, and structural logic.
  */
@@ -133,7 +159,7 @@ export function calculateTPs(
   entry, stopLoss, allSwings, fvgs,
   direction, tier = 'HIGH', sessionName = '', maxTpPct = 0.06,
   primaryTf = '15M', structureTf = '1H', biasTf = '4H',
-  minRrr = 3.0
+  minRrr = 3.0, symbol
 ) {
   const risk = Math.abs(entry - stopLoss);
   if (risk === 0) return { tps: [], tpStructure: 'single' };
@@ -142,6 +168,7 @@ export function calculateTPs(
   const minTp1Rrr = minRrr;
   const minTp2Rrr = minRrr + 1.0;
   const minTp3Rrr = minRrr + 2.0;
+  const priceDecimals = (symbol && ASSETS[symbol]) ? ASSETS[symbol].decimals : 4;
 
   // Compute absolute maximum allowed price based on profile maxTpPct
   let maxTpPrice;
@@ -252,7 +279,7 @@ export function calculateTPs(
   let primHigh = highs.filter(h => h.tfLabel === primaryTf && h.price > entry).sort((a, b) => a.price - b.price)[0]?.price;
   let primLow = lows.filter(l => l.tfLabel === primaryTf && l.price < entry).sort((a, b) => b.price - a.price)[0]?.price;
 
-  // Fallback: nearest swing from ANY timeframe (not the most extreme)
+  // Fallback: nearest swing from ANY timeframe
   if (!primHigh) {
     primHigh = highs.filter(h => h.price > entry).sort((a, b) => a.price - b.price)[0]?.price;
   }
@@ -275,9 +302,11 @@ export function calculateTPs(
     }
   }
 
-  // Filter candidates: must be in trade direction and within maxTpPrice
+  // Filter candidates: must be in trade direction, positive price (M12), and within maxTpPrice
   const filteredCandidates = candidates.filter(c => {
-    if (isNaN(c.level) || !isFinite(c.level)) return false;
+    if (isNaN(c.level) || !isFinite(c.level) || c.level <= 0) return false;
+    const candRrr = calculateRRR(entry, stopLoss, c.level, direction);
+    if (candRrr > MAX_TP_RISK_MULT) return false; // Enforce max risk-reward cap (L8)
     if (isLong) {
       return c.level > entry && c.level <= maxTpPrice;
     } else {
@@ -340,7 +369,7 @@ export function calculateTPs(
 
   // Find TP1 candidate (first one satisfying RRR >= minTp1Rrr)
   for (const cand of dedupedCandidates) {
-    const candRrr = calculateRRR(entry, stopLoss, cand.level);
+    const candRrr = calculateRRR(entry, stopLoss, cand.level, direction);
     if (candRrr >= minTp1Rrr) {
       tp1 = { ...cand, rrr: candRrr };
       break;
@@ -350,7 +379,7 @@ export function calculateTPs(
   // Find TP2 candidate (first one satisfying RRR >= minTp2Rrr and spacing >= 1.0R from TP1)
   if (tp1) {
     for (const cand of dedupedCandidates) {
-      const candRrr = calculateRRR(entry, stopLoss, cand.level);
+      const candRrr = calculateRRR(entry, stopLoss, cand.level, direction);
       const spacingRrr = Math.abs(cand.level - tp1.level) / risk;
       const isFurther = isLong ? cand.level > tp1.level : cand.level < tp1.level;
       if (candRrr >= minTp2Rrr && spacingRrr >= MIN_TP_SPACING_RRR && isFurther) {
@@ -363,7 +392,7 @@ export function calculateTPs(
   // Find TP3 candidate (first one satisfying RRR >= minTp3Rrr and spacing >= 1.0R from TP2)
   if (tp2) {
     for (const cand of dedupedCandidates) {
-      const candRrr = calculateRRR(entry, stopLoss, cand.level);
+      const candRrr = calculateRRR(entry, stopLoss, cand.level, direction);
       const spacingRrr = Math.abs(cand.level - tp2.level) / risk;
       const isFurther = isLong ? cand.level > tp2.level : cand.level < tp2.level;
       if (candRrr >= minTp3Rrr && spacingRrr >= MIN_TP_SPACING_RRR && isFurther) {
@@ -382,7 +411,7 @@ export function calculateTPs(
   if (!tp2) {
     return {
       tps: [{
-        level: parseFloat(tp1.level.toFixed(4)),
+        level: parseFloat(tp1.level.toFixed(priceDecimals)),
         reason: tp1.reason,
         rrr: tp1.rrr,
         isStructural: tp1.isStructural,
@@ -396,13 +425,13 @@ export function calculateTPs(
   if (!tp3) {
     const tps = [
       {
-        level: parseFloat(tp1.level.toFixed(4)),
+        level: parseFloat(tp1.level.toFixed(priceDecimals)),
         reason: tp1.reason,
         rrr: tp1.rrr,
         isStructural: tp1.isStructural,
       },
       {
-        level: parseFloat(tp2.level.toFixed(4)),
+        level: parseFloat(tp2.level.toFixed(priceDecimals)),
         reason: tp2.reason,
         rrr: tp2.rrr,
         isStructural: tp2.isStructural,
@@ -418,19 +447,19 @@ export function calculateTPs(
   // If we have all three
   const tps = [
     {
-      level: parseFloat(tp1.level.toFixed(4)),
+      level: parseFloat(tp1.level.toFixed(priceDecimals)),
       reason: tp1.reason,
       rrr: tp1.rrr,
       isStructural: tp1.isStructural,
     },
     {
-      level: parseFloat(tp2.level.toFixed(4)),
+      level: parseFloat(tp2.level.toFixed(priceDecimals)),
       reason: tp2.reason,
       rrr: tp2.rrr,
       isStructural: tp2.isStructural,
     },
     {
-      level: parseFloat(tp3.level.toFixed(4)),
+      level: parseFloat(tp3.level.toFixed(priceDecimals)),
       reason: tp3.reason,
       rrr: tp3.rrr,
       isStructural: tp3.isStructural,
@@ -444,10 +473,11 @@ export function calculateTPs(
 }
 
 /**
- * Breakeven price calculation (move SL to entry when 1.5R reached).
+ * Breakeven price calculation (move SL to entry when 1.5R reached - L10: asset decimals).
  */
-export function calculateBreakevenMove(entry, stopLoss) {
+export function calculateBreakevenMove(entry, stopLoss, symbol) {
   const risk = Math.abs(entry - stopLoss);
   const dir = entry > stopLoss ? 1 : -1;
-  return parseFloat((entry + dir * risk * 1.5).toFixed(2));
+  const decimals = (symbol && ASSETS[symbol]) ? ASSETS[symbol].decimals : 2;
+  return parseFloat((entry + dir * risk * 1.5).toFixed(decimals));
 }

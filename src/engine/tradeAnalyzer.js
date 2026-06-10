@@ -18,7 +18,8 @@ import {
 import { calculateOTE, isInOTE } from './oteCalculator.js';
 import {
   calculateSmartSL, calculateTPs, calculatePositionSize,
-  calculateRRR, calculateBreakevenMove
+  calculateRRR, calculateBreakevenMove, calculateLeverage,
+  estimateLiquidationPrice
 } from './riskManager.js';
 import { getCurrentSession, isSessionValid } from './sessionFilter.js';
 import { RISK_AMOUNT, ASSETS } from '../utils/constants.js';
@@ -68,6 +69,7 @@ const TF_PROFILES = {
     timeCap:             '6H',
     riskAmount:          5,
     minRrr:              3.0,
+    minShiftAge:         1,     // BOS/CHOCH confirmation (H6)
   },
   '1h': {
     label:               '1H Swing',
@@ -89,6 +91,7 @@ const TF_PROFILES = {
     timeCap:             '24H',
     riskAmount:          5,
     minRrr:              3.0,
+    minShiftAge:         1,     // BOS/CHOCH confirmation (H6)
   },
   '4h': {
     label:               '4H Position',
@@ -110,6 +113,7 @@ const TF_PROFILES = {
     timeCap:             '48H',
     riskAmount:          5,
     minRrr:              3.0,
+    minShiftAge:         1,     // BOS/CHOCH confirmation (H6)
   },
   '1d': {
     label:               '1D Trend',
@@ -131,6 +135,7 @@ const TF_PROFILES = {
     timeCap:             '5D',
     riskAmount:          5,
     minRrr:              3.0,
+    minShiftAge:         1,     // BOS/CHOCH confirmation (H6)
   },
 };
 
@@ -154,6 +159,8 @@ export function runAnalysis(allData, config = {}) {
   const riskAmount = profile.riskAmount || RISK_AMOUNT;
   const steps   = [];
   steps.push(`Engine v9.0 | ${profile.label} | ${symbol}`);
+  
+  let slSideInvalid = false; // H2 validation flag declared early
 
   // ── News veto ──────────────────────────────────────────────────
   if (newsStatus.veto) {
@@ -227,9 +234,10 @@ export function runAnalysis(allData, config = {}) {
   if (profile.hasEmaSignal && candlesPrimary.length >= 52) {
     const ema20_p = calculateEMA(candlesPrimary, 20);
     const ema50_p = calculateEMA(candlesPrimary, 50);
-    const n = ema20_p.length;
-    const prevE20 = ema20_p[n - 2], currE20 = ema20_p[n - 1];
-    const prevE50 = ema50_p[n - 2], currE50 = ema50_p[n - 1];
+    const n20 = ema20_p.length;
+    const n50 = ema50_p.length;
+    const prevE20 = ema20_p[n20 - 2], currE20 = ema20_p[n20 - 1];
+    const prevE50 = ema50_p[n50 - 2], currE50 = ema50_p[n50 - 1];
 
     const bullCross = prevE20 != null && prevE50 != null && prevE20 <= prevE50 && currE20 > currE50;
     const bearCross = prevE20 != null && prevE50 != null && prevE20 >= prevE50 && currE20 < currE50;
@@ -245,16 +253,16 @@ export function runAnalysis(allData, config = {}) {
   }
 
   // ── Step 3: SMC Detection ──────────────────────────────────────
-  const obsOB       = detectOrderBlocks(candlesForOB, currentPrice);
-  const obsPrimary  = detectOrderBlocks(candlesPrimary, currentPrice);
-  const fvgsOB      = detectFVGs(candlesForOB, currentPrice);
-  const fvgsPrimary = detectFVGs(candlesPrimary, currentPrice);
-
-  // For scalping: exclude the current unclosed candle to prevent wick-based signal flickering
+  // For scalping: exclude the current unclosed candle to prevent wick-based signal flickering (H3)
   const closedPrimary = profile.isScalping ? candlesPrimary.slice(0, -1) : candlesPrimary;
 
+  const obsOB       = detectOrderBlocks(candlesForOB, currentPrice);
+  const obsPrimary  = detectOrderBlocks(closedPrimary, currentPrice);
+  const fvgsOB      = detectFVGs(candlesForOB, currentPrice);
+  const fvgsPrimary = detectFVGs(closedPrimary, currentPrice);
+
   const sweepsPrimary   = detectSweeps(closedPrimary,    profile.sweepThreshold);
-  const sweepsStructure = detectSweeps(candlesStructure, profile.sweepThreshold);
+  const sweepsStructure = detectSweeps(candlesStructure, profile.sweepThreshold * 1.5); // M4: wider structure threshold
   const allSweeps       = [...sweepsPrimary, ...sweepsStructure];
 
   const minShiftAge     = profile.minShiftAge || 0;
@@ -266,19 +274,24 @@ export function runAnalysis(allData, config = {}) {
 
   // ── Session ────────────────────────────────────────────────────
   const session   = getCurrentSession();
-  const sessionOk = session.status === 'optimal' || session.status === 'valid' ||
-                    (profile.sessionAllowNyClose && session.status === 'caution');
+  const isHigherTF = activeTimeframe === '1h' || activeTimeframe === '4h' || activeTimeframe === '1d';
+  const sessionOk = isHigherTF ? true : (session.status === 'optimal' || session.status === 'valid' ||
+                    (profile.sessionAllowNyClose && session.status === 'caution'));
   steps.push(`Session: ${session.name} | Valid: ${sessionOk}`);
 
   // ── Direction ──────────────────────────────────────────────────
   let direction = null;
-  let upProb = 50, downProb = 50;
+  let upProb = 25, downProb = 25; // default to ranging 25/25 (M1)
 
   if      (trendBias === 'bullish' && dailyBias === 'bullish') { direction = 'long';  upProb = 75; downProb = 25; }
   else if (trendBias === 'bearish' && dailyBias === 'bearish') { direction = 'short'; downProb = 75; upProb = 25; }
   else if (trendBias === 'bullish')                             { direction = 'long';  upProb = 62; downProb = 38; }
   else if (trendBias === 'bearish')                             { direction = 'short'; downProb = 62; upProb = 38; }
-  // Ranging — probabilities stay equal (50/50)
+  else {
+    // direction === null (ranging)
+    upProb = 25;
+    downProb = 25;
+  }
 
   // FIX #7: calculate actual ranging probability
   const rangeProbability = direction === null ? 50 : Math.max(0, 100 - upProb - downProb);
@@ -355,14 +368,14 @@ export function runAnalysis(allData, config = {}) {
   if (direction === 'long') {
     const lows  = swingsStructure.filter(s => s.type === 'low'  && s.price < currentPrice).sort((a,b) => b.index - a.index);
     const highs = swingsStructure.filter(s => s.type === 'high' && s.price > lows[0]?.price).sort((a,b) => b.index - a.index);
-    // Guard: high must have occurred BEFORE the recent low (impulse down → OTE on pullback)
-    if (lows[0] && highs[0] && highs[0].index < lows[0].index)
+    // Guard: low must have occurred before the recent high in time (L3)
+    if (lows[0] && highs[0] && lows[0].index < highs[0].index)
       oteZone = calculateOTE(highs[0].price, lows[0].price, 'long');
   } else if (direction === 'short') {
     const highs = swingsStructure.filter(s => s.type === 'high' && s.price > currentPrice).sort((a,b) => b.index - a.index);
     const lows  = swingsStructure.filter(s => s.type === 'low'  && s.price < highs[0]?.price).sort((a,b) => b.index - a.index);
-    // Guard: high must have occurred BEFORE the recent low (impulse up → OTE on pullback)
-    if (highs[0] && lows[0] && highs[0].index > lows[0].index)
+    // Guard: high must have occurred before the recent low in time (L3)
+    if (highs[0] && lows[0] && highs[0].index < lows[0].index)
       oteZone = calculateOTE(highs[0].price, lows[0].price, 'short');
   }
   const inOTE = isInOTE(currentPrice, oteZone);
@@ -375,11 +388,13 @@ export function runAnalysis(allData, config = {}) {
   if (direction) {
     const allOBs    = [...obsOB, ...obsPrimary];
     const nearestOB = direction === 'long'
-      ? allOBs.filter(o => o.type === 'demand').sort((a,b) => b.entryBoundary - a.entryBoundary)[0]
-      : allOBs.filter(o => o.type === 'supply').sort((a,b) => a.entryBoundary - b.entryBoundary)[0];
+      ? allOBs.filter(o => o.type === 'demand' && o.entryBoundary <= currentPrice).sort((a,b) => b.entryBoundary - a.entryBoundary)[0]
+      : allOBs.filter(o => o.type === 'supply' && o.entryBoundary >= currentPrice).sort((a,b) => a.entryBoundary - b.entryBoundary)[0];
 
     if (inOTE && oteZone) {
-      entry = oteZone.midpoint;
+      entry = direction === 'long'
+        ? Math.min(oteZone.midpoint, currentPrice)
+        : Math.max(oteZone.midpoint, currentPrice);
     } else if (nearestOB) {
       const obEntry = nearestOB.entryBoundary;
       if ((direction === 'long' && obEntry <= currentPrice) ||
@@ -432,10 +447,18 @@ export function runAnalysis(allData, config = {}) {
     }
 
     const allFVGs = [...fvgsOB, ...fvgsPrimary];
-    slData = calculateSmartSL(inv, direction, allFVGs);
+    slData = calculateSmartSL(inv, direction, allFVGs, symbol); // pass symbol for decimals (M11)
+    
+    // Stop Loss side validation (H2)
+    if (slData) {
+      if (direction === 'long' && slData.value >= entry) slSideInvalid = true;
+      if (direction === 'short' && slData.value <= entry) slSideInvalid = true;
+    }
+
     const decimals = ASSETS[symbol]?.decimals ?? 2;
-    const posSize = calculatePositionSize(entry, slData.value, riskAmount);
-    steps.push(`Entry: ${entry.toFixed(decimals)} | SL: ${slData.value.toFixed(decimals)} | SL%: ${((Math.abs(entry - slData.value) / entry) * 100).toFixed(2)}% | Size: ${posSize} units`);
+    // Compute position size once (L1) and pass symbol for step rounding (C6)
+    const posSize = (slData && !slSideInvalid) ? calculatePositionSize(entry, slData.value, riskAmount, symbol) : 0;
+    steps.push(`Entry: ${entry.toFixed(decimals)} | SL: ${slData ? slData.value.toFixed(decimals) : 'N/A'} | SL%: ${slData ? ((Math.abs(entry - slData.value) / entry) * 100).toFixed(2) + '%' : 'N/A'} | Size: ${posSize} units`);
   }
 
   // ── TPs — Multi-TF Swing Pool ──────────────────────────────────
@@ -472,8 +495,7 @@ export function runAnalysis(allData, config = {}) {
       profile.minRrr || 3.0
     );
 
-    // Attach projected P&L to each TP
-    const posSize = calculatePositionSize(entry, slData.value, riskAmount);
+    // Attach projected P&L to each TP (reuses outer posSize - L1)
     tpData.tps.forEach(tp => {
       const fullPnl       = Math.abs(tp.level - entry) * posSize;
       tp.projectedProfit  = (fullPnl * ((tp.closePercent || 0) / 100)).toFixed(2);
@@ -495,9 +517,15 @@ export function runAnalysis(allData, config = {}) {
                          (direction === 'short' && trendBias === 'bearish');
   const dailyAligned   = (direction === 'long'  && dailyBias === 'bullish') ||
                          (direction === 'short' && dailyBias === 'bearish');
-  const liquidityEvent = allSweeps.length > 0 ||
-                         [...fvgsOB, ...fvgsPrimary].some(f => currentPrice >= f.lower && currentPrice <= f.upper);
-  const structureShift = allShifts.length > 0;
+  // C2: Liquidity sweeps filtered by direction; FVG fill checks also direction-aligned
+  const liquidityEvent = allSweeps.some(s => s.direction === direction) ||
+                         [...fvgsOB, ...fvgsPrimary].some(f => {
+                           const isFvgBullish = f.type === 'bullish';
+                           const isFvgAligned = direction === 'long' ? isFvgBullish : !isFvgBullish;
+                           return isFvgAligned && currentPrice >= f.lower && currentPrice <= f.upper;
+                         });
+  // C3: Structure shifts filtered by direction
+  const structureShift = allShifts.some(s => s.direction === (direction === 'long' ? 'bullish' : 'bearish'));
   const rsiResult      = detectRSIDivergence(
     candlesStructure.length > 20 ? candlesStructure : candlesPrimary,
     direction, 14
@@ -538,13 +566,15 @@ export function runAnalysis(allData, config = {}) {
   let decision        = 'NO_TRADE';
   let rejectionReason = null;
 
-  // Compute entry distance percentage
-  const entryDistPct = direction ? Math.abs(currentPrice - entry) / entry : 0;
+  // Compute entry distance percentage (divided by currentPrice - L2)
+  const entryDistPct = direction ? Math.abs(currentPrice - entry) / currentPrice : 0;
 
   if (!direction) {
     rejectionReason = `Market ranging — no ${profile.biasKey.toUpperCase()} directional bias`;
   } else if (emaVetoActive) {
     rejectionReason = emaVetoReason;
+  } else if (slSideInvalid || !slData) { // H2 validation check
+    rejectionReason = `Invalid Stop Loss placement relative to entry`;
   } else if (entryDistPct > profile.maxEntryDist) {
     rejectionReason = `Price too far from entry zone: ${(entryDistPct * 100).toFixed(2)}% > ${(profile.maxEntryDist * 100).toFixed(2)}% max for ${profile.label}`;
   } else if (slPct > profile.maxSlPct) {
@@ -571,11 +601,13 @@ export function runAnalysis(allData, config = {}) {
     entry,
     stopLoss:     slData,
     tpDetails:    tpData?.tps || [],
-    positionSize: (direction && slData) ? calculatePositionSize(entry, slData.value, riskAmount) : 0,
-    projectedLoss: (direction && slData)
-      ? (Math.abs(entry - slData.value) * calculatePositionSize(entry, slData.value, riskAmount)).toFixed(2)
+    positionSize: (direction && slData && !slSideInvalid) ? posSize : 0, // Reuse calculated posSize (L1)
+    projectedLoss: (direction && slData && !slSideInvalid)
+      ? (Math.abs(entry - slData.value) * posSize).toFixed(2)
       : '0.00',
-    breakevenMove: (direction && slData) ? calculateBreakevenMove(entry, slData.value) : null,
+    leverage: (direction && slData && !slSideInvalid) ? calculateLeverage(posSize, entry, balance) : 0,
+    liquidationPrice: (direction && slData && !slSideInvalid) ? estimateLiquidationPrice(entry, direction, calculateLeverage(posSize, entry, balance)) : 0,
+    breakevenMove: (direction && slData && !slSideInvalid) ? calculateBreakevenMove(entry, slData.value, symbol) : null,
     confluenceScore: {
       total: normalizedTotal, max, tier: finalTier,
       checks, pillarsMet, pillarsTotal,
