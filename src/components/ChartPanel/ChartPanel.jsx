@@ -144,6 +144,44 @@ export default function ChartPanel() {
   // Note: candles is in deps so we reload when fresh historical fetch completes.
   // We guard against tick-only updates with the renderedKeyRef check above.
 
+  // ── 2b. Sync live WS candle updates to the chart ──────────
+  // The historical loader above only runs on full reload (new key).
+  // This effect watches for incremental candle updates from WebSocket
+  // and efficiently pushes new closed candles + updates the forming candle.
+  useEffect(() => {
+    if (!seriesRef.current) return;
+    const key  = `${asset}_${timeframe}`;
+    if (renderedKeyRef.current !== key) return; // Not yet loaded
+
+    const data = candles[key];
+    if (!data || data.length < 5) return;
+
+    const rendered = renderedDataRef.current;
+    if (!rendered || rendered.length === 0) return;
+
+    const lastRendered = rendered[rendered.length - 1];
+    const lastData     = data[data.length - 1];
+
+    // New candle arrived (kline closed) — push it to the chart
+    if (data.length > rendered.length) {
+      const newCandles = data.slice(rendered.length);
+      for (const c of newCandles) {
+        try {
+          seriesRef.current.update(c);
+          rendered.push(c);
+        } catch (_) {}
+      }
+    }
+
+    // Update the forming (last) candle in-place
+    if (lastData && lastRendered && lastData.time === lastRendered.time) {
+      try {
+        seriesRef.current.update(lastData);
+        rendered[rendered.length - 1] = lastData;
+      } catch (_) {}
+    }
+  }, [asset, timeframe, candles]);
+
   // ── 3. Live tick — cheaply update ONLY the last candle ──
   useEffect(() => {
     if (!seriesRef.current || !livePrice || backtestMode) return;

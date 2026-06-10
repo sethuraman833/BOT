@@ -56,11 +56,11 @@ export async function runScan() {
       const { decision, confluenceScore, direction, entry, analysisMode } = result;
       console.log(`[SCANNER] ${symbol}: ${decision} (${analysisMode}) | Score: ${confluenceScore.total}/${confluenceScore.max} | Pillars: ${confluenceScore.pillarsMet}/${confluenceScore.pillarsTotal} | Dir: ${direction || 'N/A'}`);
 
-      // TAKE_NOW: Send alert if score >= 6 and not sent recently
-      const shouldAlertTakeNow = decision === 'TAKE_NOW' && confluenceScore.total >= 6;
+      // TAKE_NOW: Send alert if score >= 5 and not sent recently
+      const shouldAlertTakeNow = decision === 'TAKE_NOW' && confluenceScore.total >= 5;
 
-      // WAIT: Send alert if score >= 5 and we have clear trigger levels
-      const shouldAlertWait = decision === 'WAIT' && confluenceScore.total >= 5;
+      // WAIT: Send alert if score >= 4 and we have clear trigger levels
+      const shouldAlertWait = decision === 'WAIT' && confluenceScore.total >= 4;
 
       if (shouldAlertTakeNow || shouldAlertWait) {
         const lastSent = lastAlertTime[symbol] || 0;

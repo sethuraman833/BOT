@@ -35,7 +35,7 @@ const TF_PROFILES = {
     obKey:               '1h',
     swingLookback:       3,     // raised from 2 to filter micro-swing noise (requires 15min confirmation per side)
     minPillars:          4, // raised from 3 for quality
-    minConfluence:       6, // raised from 4 for quality
+    minConfluence:       5, // recalibrated: ~6/11 → 5/10 (count-based scale)
     maxSlPct:            0.015,  // 1.5% max SL for scalping
     maxTpPct:            0.030,  // 3.0% window — wide enough for minRRR=3.0 with SLs up to ~1% (targets hit in 4-6h)
     maxEntryDist:        0.003,  // 0.3% max entry distance
@@ -57,7 +57,7 @@ const TF_PROFILES = {
     obKey:               '4h',
     swingLookback:       3,
     minPillars:          5, // raised from 4 for quality
-    minConfluence:       7, // raised from 5 for quality
+    minConfluence:       6, // recalibrated: ~7/11 → 6/9 (count-based scale)
     maxSlPct:            0.020,  // 2% max SL
     maxTpPct:            0.07,   // 7% max TP range
     maxEntryDist:        0.005,  // 0.5% max entry distance
@@ -78,7 +78,7 @@ const TF_PROFILES = {
     obKey:               '4h',
     swingLookback:       3,
     minPillars:          5, // raised from 4 for quality
-    minConfluence:       8, // raised from 5 for quality
+    minConfluence:       7, // recalibrated: ~8/11 → 7/9 (count-based scale)
     maxSlPct:            0.025,
     maxTpPct:            0.12,   // 12% max TP range
     maxEntryDist:        0.010,  // 1.0% max entry distance
@@ -99,7 +99,7 @@ const TF_PROFILES = {
     obKey:               '1d',
     swingLookback:       5,
     minPillars:          5, // raised from 4 for quality
-    minConfluence:       8, // raised from 6 for quality
+    minConfluence:       7, // recalibrated: ~8/11 → 7/9 (count-based scale)
     maxSlPct:            0.030,
     maxTpPct:            0.20,   // 20% max TP range
     maxEntryDist:        0.020,  // 2.0% max entry distance
@@ -120,7 +120,7 @@ const TF_PROFILES = {
     obKey:               '1w',
     swingLookback:       7,
     minPillars:          4, // lowered from 5 to make achievable (Flaw 13)
-    minConfluence:       6, // lowered from 8 to make achievable (Flaw 13)
+    minConfluence:       5, // recalibrated: ~6/11 → 5/9 (count-based scale)
     maxSlPct:            0.050,
     maxTpPct:            0.30,
     maxEntryDist:        0.030,  // 3.0% max entry distance
@@ -160,7 +160,7 @@ export function runAnalysis(allData, config = {}) {
     return {
       decision: 'NO_TRADE',
       rejectionReason: `ECONOMIC VETO: ${newsStatus.reason}`,
-      confluenceScore: { total: 0, max: 11, checks: [], tier: 'REJECT' },
+      confluenceScore: { total: 0, max: 10, checks: [], tier: 'REJECT' },
       analysisSteps:   [`Vetoed: ${newsStatus.reason}`],
       analysisMode:    profile.label,
       primaryTimeframe: profile.primaryKey,
@@ -184,7 +184,7 @@ export function runAnalysis(allData, config = {}) {
       decision: 'NO_TRADE', direction: null,
       rejectionReason: `Insufficient ${profile.primaryKey} data (${candlesPrimary.length} candles)`,
       analysisSteps:   ['ERROR: Not enough primary candle data.'],
-      confluenceScore: { total: 0, max: 11, checks: [], pillarsAllMet: false, pillarsMet: 0, pillarsTotal: 5, tier: 'REJECT' },
+      confluenceScore: { total: 0, max: 10, checks: [], pillarsAllMet: false, pillarsMet: 0, pillarsTotal: 5, tier: 'REJECT' },
       analysisMode:    profile.label,
       primaryTimeframe: profile.primaryKey,
     };
@@ -523,13 +523,16 @@ export function runAnalysis(allData, config = {}) {
       : []),
   ];
 
-  const totalWeight     = checks.reduce((s, c) => s + c.weight, 0); // Always exactly 11.0
+  const totalWeight     = checks.reduce((s, c) => s + c.weight, 0);
   const scoredWeight    = checks.reduce((s, c) => s + (c.met ? c.weight : 0), 0);
-  const max             = 11;
-  const normalizedTotal = Math.min(max, Math.round(scoredWeight));
+  const max             = checks.length;
+  const normalizedTotal = Math.min(max, Math.round((scoredWeight / totalWeight) * max));
   const pillarsMet      = checks.filter(c => c.pillar && c.met).length;
   const pillarsTotal    = checks.filter(c => c.pillar).length;
-  const tier            = normalizedTotal >= 8 ? 'EXCEPTIONAL' : normalizedTotal >= 6 ? 'HIGH' : normalizedTotal >= 4 ? 'MEDIUM' : 'REJECT';
+  const tier            = normalizedTotal >= Math.ceil(max * 0.73) ? 'EXCEPTIONAL'
+                        : normalizedTotal >= Math.ceil(max * 0.55) ? 'HIGH'
+                        : normalizedTotal >= Math.ceil(max * 0.36) ? 'MEDIUM'
+                        : 'REJECT';
 
   // ── Decision ───────────────────────────────────────────────────
   let decision        = 'NO_TRADE';
