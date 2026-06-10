@@ -233,28 +233,36 @@ export function detectSweeps(candles, sweepThreshold = 0.0015) {
 }
 
 /**
- * Detect BOS (Break of Structure) and CHOCH (Change of Character) on 15m.
+ * Detect BOS (Break of Structure) and CHOCH (Change of Character).
  * BOS = trend continuation. CHOCH = potential reversal.
+ * @param {Array} candles - OHLCV candle array
+ * @param {number} minAge - Minimum age in candles for a shift to count (0 = no gate).
+ *   When > 0, the break must have existed `minAge` candles ago AND still hold now.
  */
-export function detectStructureShifts(candles) {
+export function detectStructureShifts(candles, minAge = 0) {
   const shifts = [];
   const swings = findSwingPoints(candles, 3);
   const highs = swings.filter(s => s.type === 'high').slice(-5);
   const lows  = swings.filter(s => s.type === 'low').slice(-5);
   const last = candles[candles.length - 1];
 
+  // Age gate: check a candle `minAge` positions before the latest
+  // If it also broke structure, the shift is confirmed (not a fresh/fleeting break)
+  const ageIdx = candles.length - 1 - minAge;
+  const ageCandle = (minAge > 0 && ageIdx >= 0) ? candles[ageIdx] : last;
+
   if (highs.length >= 2) {
     const prevHigh = highs[highs.length - 2];
     const lastHigh = highs[highs.length - 1];
 
-    // BOS Bullish: price closes above previous HH
-    if (last.close > prevHigh.price) {
+    // BOS Bullish: price closes above previous HH (must hold on both age candle and latest)
+    if (ageCandle.close > prevHigh.price && last.close > prevHigh.price) {
       shifts.push({ type: 'BOS', direction: 'bullish', level: prevHigh.price, time: last.time });
     }
     // CHOCH Bearish: price closes below a recent HL after uptrend (reversal signal)
     if (lows.length >= 2) {
       const lastLow = lows[lows.length - 1];
-      if (lastHigh.price > prevHigh.price && last.close < lastLow.price) {
+      if (lastHigh.price > prevHigh.price && ageCandle.close < lastLow.price && last.close < lastLow.price) {
         shifts.push({ type: 'CHOCH', direction: 'bearish', level: lastLow.price, time: last.time });
       }
     }
@@ -265,13 +273,13 @@ export function detectStructureShifts(candles) {
     const lastLow = lows[lows.length - 1];
 
     // BOS Bearish: price closes below previous LL
-    if (last.close < prevLow.price) {
+    if (ageCandle.close < prevLow.price && last.close < prevLow.price) {
       shifts.push({ type: 'BOS', direction: 'bearish', level: prevLow.price, time: last.time });
     }
     // CHOCH Bullish: price closes above a recent LH after downtrend (reversal signal)
     if (highs.length >= 2) {
       const lastHigh = highs[highs.length - 1];
-      if (lastLow.price < prevLow.price && last.close > lastHigh.price) {
+      if (lastLow.price < prevLow.price && ageCandle.close > lastHigh.price && last.close > lastHigh.price) {
         shifts.push({ type: 'CHOCH', direction: 'bullish', level: lastHigh.price, time: last.time });
       }
     }

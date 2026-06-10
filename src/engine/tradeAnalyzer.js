@@ -33,7 +33,7 @@ const TF_PROFILES = {
     structureKey:        '15m',
     biasKey:             '1h',
     obKey:               '1h',
-    swingLookback:       2,
+    swingLookback:       3,     // raised from 2 to filter micro-swing noise (requires 15min confirmation per side)
     minPillars:          4, // raised from 3 for quality
     minConfluence:       6, // raised from 4 for quality
     maxSlPct:            0.015,  // 1.5% max SL for scalping
@@ -46,6 +46,7 @@ const TF_PROFILES = {
     timeCap:             '4H',
     riskAmount:          5,     // Set back to $5 to align with uniform risk rules
     minRrr:              3.0,   // Capped min RRR at 1:3 as explicitly requested
+    minShiftAge:         2,     // BOS/CHOCH must hold for 2 closed candles (10min) before counting
   },
   '15m': {
     label:               '15m Intraday',
@@ -232,8 +233,9 @@ export function runAnalysis(allData, config = {}) {
 
     const bullCross = prevE20 != null && prevE50 != null && prevE20 <= prevE50 && currE20 > currE50;
     const bearCross = prevE20 != null && prevE50 != null && prevE20 >= prevE50 && currE20 < currE50;
-    const bullPull  = currE20 > currE50 && Math.abs(currentPrice - currE20) / currE20 < 0.003;
-    const bearPull  = currE20 < currE50 && Math.abs(currentPrice - currE20) / currE20 < 0.003;
+    const pullThreshold = profile.isScalping ? 0.0015 : 0.003; // Tighter for 5m to reduce noise
+    const bullPull  = currE20 > currE50 && Math.abs(currentPrice - currE20) / currE20 < pullThreshold;
+    const bearPull  = currE20 < currE50 && Math.abs(currentPrice - currE20) / currE20 < pullThreshold;
 
     if      (bullCross) { emaSignalActive = true; emaSignalType = 'EMA Bullish Cross'; }
     else if (bearCross) { emaSignalActive = true; emaSignalType = 'EMA Bearish Cross'; }
@@ -248,12 +250,16 @@ export function runAnalysis(allData, config = {}) {
   const fvgsOB      = detectFVGs(candlesForOB, currentPrice);
   const fvgsPrimary = detectFVGs(candlesPrimary, currentPrice);
 
-  const sweepsPrimary   = detectSweeps(candlesPrimary,   profile.sweepThreshold);
+  // For scalping: exclude the current unclosed candle to prevent wick-based signal flickering
+  const closedPrimary = profile.isScalping ? candlesPrimary.slice(0, -1) : candlesPrimary;
+
+  const sweepsPrimary   = detectSweeps(closedPrimary,    profile.sweepThreshold);
   const sweepsStructure = detectSweeps(candlesStructure, profile.sweepThreshold);
   const allSweeps       = [...sweepsPrimary, ...sweepsStructure];
 
-  const shiftsPrimary   = detectStructureShifts(candlesPrimary);
-  const shiftsStructure = detectStructureShifts(candlesStructure);
+  const minShiftAge     = profile.minShiftAge || 0;
+  const shiftsPrimary   = detectStructureShifts(closedPrimary,    minShiftAge);
+  const shiftsStructure = detectStructureShifts(candlesStructure, 0);
   const allShifts       = [...shiftsPrimary, ...shiftsStructure];
 
   steps.push(`OBs: ${obsOB.length + obsPrimary.length} | FVGs: ${fvgsOB.length + fvgsPrimary.length} | Sweeps: ${allSweeps.length} | Shifts: ${allShifts.length}`);
@@ -382,13 +388,13 @@ export function runAnalysis(allData, config = {}) {
       }
     }
 
-    // Find the true structural swing points within the last 35 candles on primary timeframe
-    const primaryCandleSegment = candlesPrimary.slice(-35);
-    const primaryLows  = primaryCandleSegment.map(c => c.low);
-    const primaryHighs = primaryCandleSegment.map(c => c.high);
-    
-    const trueSwingLow  = primaryLows.length > 0 ? Math.min(...primaryLows) : currentPrice * 0.99;
-    const trueSwingHigh = primaryHighs.length > 0 ? Math.max(...primaryHighs) : currentPrice * 1.01;
+    // Find true structural swing points (confirmed swing highs/lows, not raw min/max)
+    const primarySwings = findSwingPoints(candlesPrimary.slice(-50), profile.swingLookback);
+    const nearestSwingLows  = primarySwings.filter(s => s.type === 'low'  && s.price < currentPrice).sort((a, b) => b.price - a.price);
+    const nearestSwingHighs = primarySwings.filter(s => s.type === 'high' && s.price > currentPrice).sort((a, b) => a.price - b.price);
+
+    const trueSwingLow  = nearestSwingLows.length  > 0 ? nearestSwingLows[0].price  : currentPrice * 0.99;
+    const trueSwingHigh = nearestSwingHighs.length > 0 ? nearestSwingHighs[0].price : currentPrice * 1.01;
 
     let inv;
     if (direction === 'long') {
