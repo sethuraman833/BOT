@@ -86,7 +86,20 @@ export default function ChartPanel() {
     const key  = `${asset}_${timeframe}`;
     const data = candles[key];
 
-    if (!seriesRef.current || !data || data.length < 5) return;
+    if (!seriesRef.current) return;
+
+    // If the key changed (different symbol or TF), immediately clear stale data
+    // so the old chart doesn't linger while new data loads
+    if (renderedKeyRef.current && renderedKeyRef.current !== key) {
+      seriesRef.current.setData([]);
+      emaRefs.current.ema20.setData([]);
+      emaRefs.current.ema50.setData([]);
+      emaRefs.current.ema200.setData([]);
+      renderedDataRef.current = [];
+      renderedKeyRef.current = null; // Mark as "awaiting new data"
+    }
+
+    if (!data || data.length < 5) return;
 
     // Apply dynamic decimal precision based on the asset ticker size
     const decimals = ASSETS[asset]?.decimals ?? 2;
@@ -98,8 +111,7 @@ export default function ChartPanel() {
       },
     });
 
-    // If this key is already rendered and data length hasn't changed much
-    // (i.e. this is a WS tick update — handled separately), skip full reload
+    // If this key is already rendered, skip full reload (WS handled by #2b)
     if (renderedKeyRef.current === key) return;
 
     // De-dup + sort
