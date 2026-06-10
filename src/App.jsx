@@ -2,18 +2,30 @@ import { useEffect, useState } from 'react';
 import { useMarket, useMarketDispatch } from './context/MarketContext.jsx';
 import { useBinanceWS } from './hooks/useBinanceWS.js';
 import { useCandles, fetchCurrentPrice } from './hooks/useCandles.js';
+import { formatPrice, formatPercent } from './utils/formatters.js';
 import Header from './components/Header/Header.jsx';
 import ChartPanel from './components/ChartPanel/ChartPanel.jsx';
 import AnalysisSidebar from './components/AnalysisSidebar/AnalysisSidebar.jsx';
 import ControlBar from './components/ControlBar/ControlBar.jsx';
 
 export default function App() {
-  const { asset, timeframe, error, analysis } = useMarket();
+  const { asset, timeframe, error, analysis, livePrice, liveChange } = useMarket();
   const dispatch = useMarketDispatch();
   const { loadAllTimeframes } = useCandles();
 
   // 'chart' | 'analysis'
   const [mobileTab, setMobileTab] = useState('chart');
+
+  // Dynamic tab title update (live price + change %)
+  useEffect(() => {
+    if (livePrice != null) {
+      const formattedPrice = formatPrice(livePrice, asset);
+      const formattedChange = formatPercent(liveChange);
+      document.title = `${formattedPrice} | ${asset} (${formattedChange})`;
+    } else {
+      document.title = 'TERMINUS — SMC Institutional Trading Terminal';
+    }
+  }, [livePrice, liveChange, asset]);
 
   useEffect(() => {
     fetchCurrentPrice(asset).then(priceData => {
