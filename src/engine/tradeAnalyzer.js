@@ -91,7 +91,7 @@ const TF_PROFILES = {
     biasKey:             '1h',
     obKey:               '1h',
     swingLookback:       3,     // raised from 2 to filter micro-swing noise (requires 15min confirmation per side)
-    minPillars:          4, // raised from 3 for quality
+    minPillars:          3, // 3 of 4 core pillars (HTF Trend, Liquidity, BOS/CHOCH, RRR)
     minConfluence:       5, // recalibrated: ~6/11 → 5/10 (count-based scale)
     maxSlPct:            0.015,  // 1.5% max SL for scalping
     maxTpPct:            0.030,  // 3.0% window — wide enough for minRRR=3.0 with SLs up to ~1% (targets hit in 4-6h)
@@ -113,7 +113,7 @@ const TF_PROFILES = {
     biasKey:             '4h',
     obKey:               '4h',
     swingLookback:       3,
-    minPillars:          5, // raised from 4 for quality
+    minPillars:          4, // all 4 core pillars required
     minConfluence:       6, // recalibrated: ~7/11 → 6/9 (count-based scale)
     maxSlPct:            0.020,  // 2% max SL
     maxTpPct:            0.07,   // 7% max TP range
@@ -135,7 +135,7 @@ const TF_PROFILES = {
     biasKey:             '1d',
     obKey:               '4h',
     swingLookback:       3,
-    minPillars:          5, // raised from 4 for quality
+    minPillars:          4, // all 4 core pillars required
     minConfluence:       7, // recalibrated: ~8/11 → 7/9 (count-based scale)
     maxSlPct:            0.025,
     maxTpPct:            0.12,   // 12% max TP range
@@ -157,7 +157,7 @@ const TF_PROFILES = {
     biasKey:             '1w',
     obKey:               '1d',
     swingLookback:       5,
-    minPillars:          5, // raised from 4 for quality
+    minPillars:          4, // all 4 core pillars required
     minConfluence:       7, // recalibrated: ~8/11 → 7/9 (count-based scale)
     maxSlPct:            0.030,
     maxTpPct:            0.20,   // 20% max TP range
@@ -441,10 +441,11 @@ export function runAnalysis(allData, config = {}) {
   let entry  = currentPrice;
   let slData = null;
   let posSize = 0;
+  let nearestOB = null;
 
   if (direction) {
     const allOBs    = [...obsOB, ...obsPrimary];
-    const nearestOB = direction === 'long'
+    nearestOB = direction === 'long'
       ? allOBs.filter(o => o.type === 'demand' && o.entryBoundary <= currentPrice).sort((a,b) => b.entryBoundary - a.entryBoundary)[0]
       : allOBs.filter(o => o.type === 'supply' && o.entryBoundary >= currentPrice).sort((a,b) => a.entryBoundary - b.entryBoundary)[0];
 
@@ -577,16 +578,22 @@ export function runAnalysis(allData, config = {}) {
     ((direction === 'long'  && emaSignalType?.includes('Bullish')) ||
      (direction === 'short' && emaSignalType?.includes('Bearish')));
 
+  // OB proximity: is entry near or inside a valid unmitigated Order Block?
+  const nearOB = nearestOB !== null;
+
   // Pre-RRR checks (all except the RRR pillar — added after TP calc)
+  // PILLARS (4): HTF Trend, Liquidity, BOS/CHOCH, RRR (added later)
+  // NON-PILLARS: Session, Daily Bias, RSI Div, EMA200 S/R, OTE, OB Proximity, EMA Signal
   const preRrrChecks = [
     { label: `${profile.biasKey.toUpperCase()} Trend Aligned`, met: trend4HAligned,         pillar: true,  weight: 1.5 },
     { label: 'Liquidity Sweep / FVG Fill',                     met: liquidityEvent,           pillar: true,  weight: 1.5 },
     { label: `${profile.primaryKey.toUpperCase()}/${profile.structureKey.toUpperCase()} BOS/CHOCH`, met: structureShift, pillar: true, weight: 1.5 },
-    { label: 'Active Trading Session',                         met: sessionOk,                pillar: true,  weight: 1.5 },
-    { label: 'Daily Bias Aligned (EMA200)',                    met: dailyAligned,             pillar: false, weight: profile.hasEmaSignal ? 0.5 : 1.0 },
+    { label: 'Active Trading Session',                         met: sessionOk,                pillar: false, weight: 0.75 },
+    { label: 'Near Valid Order Block',                          met: nearOB,                   pillar: false, weight: 1.0 },
+    { label: 'Daily Bias Aligned (EMA200)',                    met: dailyAligned,             pillar: false, weight: 1.0 },
     { label: 'RSI Divergence',                                 met: rsiResult.hasDivergence,  pillar: false, weight: 1.0 },
-    { label: 'EMA200 Acting as S/R',                          met: ema200Acting,             pillar: false, weight: 1.0 },
-    { label: 'Entry in OTE Zone (61.8–78.6%)',                met: inOTE,                    pillar: false, weight: profile.hasEmaSignal ? 0.5 : 1.0 },
+    { label: 'EMA200 Acting as S/R',                          met: ema200Acting,             pillar: false, weight: 0.75 },
+    { label: 'Entry in OTE Zone (61.8–78.6%)',                met: inOTE,                    pillar: false, weight: 1.0 },
     ...(profile.hasEmaSignal
       ? [{ label: `EMA Signal: ${emaSignalType || 'None'}`,   met: emaSignalAligned,         pillar: false, weight: 1.0 }]
       : []),
