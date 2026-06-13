@@ -24,6 +24,62 @@ import {
 import { getCurrentSession, isSessionValid } from './sessionFilter.js';
 import { RISK_AMOUNT, ASSETS } from '../utils/constants.js';
 
+// ─── ATR-BASED MINIMUM SL DISTANCE ────────────────────────
+// Computes the minimum SL distance as a multiple of ATR,
+// calibrated per-symbol and per-timeframe for realistic
+// volatility-adjusted protection. Never a flat percentage.
+//
+// atrMultiplier per TF:
+//   5m  → 1.0x ATR  (tight scalp — only 1 ATR of breathing room)
+//   15m → 1.2x ATR
+//   1h  → 1.5x ATR
+//   4h  → 2.0x ATR
+//   1d  → 2.5x ATR
+//
+// Symbol category overrides (low-value alts need wider ATR mult):
+//   XRP, ADA → ×1.2 scale (wider spread, more erratic moves)
+//   LINK     → ×1.1 scale
+const ATR_TF_MULT = {
+  '5m': 1.0, '15m': 1.2, '1h': 1.5, '4h': 2.0, '1d': 2.5,
+};
+const ATR_SYMBOL_SCALE = {
+  XRPUSDT: 1.2, ADAUSDT: 1.2, LINKUSDT: 1.1,
+};
+
+function calculateATR(candles, period = 14) {
+  if (!candles || candles.length < period + 1) return null;
+  const trs = [];
+  for (let i = 1; i < candles.length; i++) {
+    const c = candles[i], p = candles[i - 1];
+    trs.push(Math.max(
+      c.high - c.low,
+      Math.abs(c.high - p.close),
+      Math.abs(c.low  - p.close)
+    ));
+  }
+  // Simple RMA (Wilder) seed
+  let atr = trs.slice(0, period).reduce((s, v) => s + v, 0) / period;
+  for (let i = period; i < trs.length; i++) {
+    atr = (atr * (period - 1) + trs[i]) / period;
+  }
+  return atr;
+}
+
+/**
+ * Compute dynamic minimum SL distance for a symbol+timeframe combination.
+ * Returns an absolute price distance (not a percentage).
+ */
+function computeMinSlDistance(candlesPrimary, entry, activeTimeframe, symbol) {
+  const atr = calculateATR(candlesPrimary, 14);
+  if (!atr || atr <= 0) {
+    // Fallback: 0.25% of entry if no ATR data
+    return entry * 0.0025;
+  }
+  const tfMult     = ATR_TF_MULT[activeTimeframe] ?? 1.2;
+  const symScale   = ATR_SYMBOL_SCALE[symbol]     ?? 1.0;
+  return atr * tfMult * symScale;
+}
+
 // ─── TIMEFRAME PROFILES ────────────────────────────────────────
 // Each profile defines the full analysis context for that timeframe.
 const TF_PROFILES = {
@@ -404,7 +460,8 @@ export function runAnalysis(allData, config = {}) {
       }
     }
 
-    const minDistance = entry * 0.0025;
+    // Compute ATR-based minimum SL distance for this symbol+timeframe
+    const minDistance = computeMinSlDistance(candlesPrimary, entry, activeTimeframe, symbol);
 
     // Find true structural swing points (confirmed swing highs/lows, not raw min/max)
     const primarySwings = findSwingPoints(candlesPrimary.slice(-50), profile.swingLookback);
@@ -525,7 +582,7 @@ export function runAnalysis(allData, config = {}) {
     { label: `${profile.biasKey.toUpperCase()} Trend Aligned`, met: trend4HAligned,         pillar: true,  weight: 1.5 },
     { label: 'Liquidity Sweep / FVG Fill',                     met: liquidityEvent,           pillar: true,  weight: 1.5 },
     { label: `${profile.primaryKey.toUpperCase()}/${profile.structureKey.toUpperCase()} BOS/CHOCH`, met: structureShift, pillar: true, weight: 1.5 },
-    { label: 'Active Trading Session',                         met: sessionOk,                pillar: true,  weight: 1.0 },
+    { label: 'Active Trading Session',                         met: sessionOk,                pillar: true,  weight: 1.5 },
     { label: 'Daily Bias Aligned (EMA200)',                    met: dailyAligned,             pillar: false, weight: profile.hasEmaSignal ? 0.5 : 1.0 },
     { label: 'RSI Divergence',                                 met: rsiResult.hasDivergence,  pillar: false, weight: 1.0 },
     { label: 'EMA200 Acting as S/R',                          met: ema200Acting,             pillar: false, weight: 1.0 },
