@@ -404,45 +404,77 @@ export function runAnalysis(allData, config = {}) {
       }
     }
 
+    const minDistance = entry * 0.0025;
+
     // Find true structural swing points (confirmed swing highs/lows, not raw min/max)
     const primarySwings = findSwingPoints(candlesPrimary.slice(-50), profile.swingLookback);
-    const nearestSwingLows  = primarySwings.filter(s => s.type === 'low'  && s.price < currentPrice).sort((a, b) => b.price - a.price);
-    const nearestSwingHighs = primarySwings.filter(s => s.type === 'high' && s.price > currentPrice).sort((a, b) => a.price - b.price);
+    const nearestSwingLows  = primarySwings.filter(s => s.type === 'low'  && s.price < entry).sort((a, b) => b.price - a.price);
+    const nearestSwingHighs = primarySwings.filter(s => s.type === 'high' && s.price > entry).sort((a, b) => a.price - b.price);
 
-    const trueSwingLow  = nearestSwingLows.length  > 0 ? nearestSwingLows[0].price  : currentPrice * 0.99;
-    const trueSwingHigh = nearestSwingHighs.length > 0 ? nearestSwingHighs[0].price : currentPrice * 1.01;
+    const trueSwingLow  = nearestSwingLows.length  > 0 ? nearestSwingLows[0].price  : entry - minDistance;
+    const trueSwingHigh = nearestSwingHighs.length > 0 ? nearestSwingHighs[0].price : entry + minDistance;
 
     let inv;
     if (direction === 'long') {
-      const obInv = nearestOB ? nearestOB.lowerBound : trueSwingLow;
-      const primarySweeps = sweepsPrimary.filter(s => s.direction === 'long' || s.type === 'bullish');
-      const targetSweeps = primarySweeps.length > 0 ? primarySweeps : sweepsStructure.filter(s => s.direction === 'long' || s.type === 'bullish');
-      const sweepLow = targetSweeps.length > 0 
-        ? Math.min(...targetSweeps.map(s => s.sweptLevel))
-        : Infinity;
-      // Layer 1: lowest point of demand OB or lowest wick of sweep candle (whichever is lower)
-      inv = Math.min(obInv, sweepLow);
-      if (inv === Infinity) inv = trueSwingLow;
-    } else {
-      const obInv = nearestOB ? nearestOB.upperBound : trueSwingHigh;
-      const primarySweeps = sweepsPrimary.filter(s => s.direction === 'short' || s.type === 'bearish');
-      const targetSweeps = primarySweeps.length > 0 ? primarySweeps : sweepsStructure.filter(s => s.direction === 'short' || s.type === 'bearish');
-      const sweepHigh = targetSweeps.length > 0
-        ? Math.max(...targetSweeps.map(s => s.sweptLevel))
-        : -Infinity;
-      // Layer 1: highest point of supply OB or highest wick of sweep candle (whichever is higher)
-      inv = Math.max(obInv, sweepHigh);
-      if (inv === -Infinity) inv = trueSwingHigh;
-    }
+      // SL anchor priority for LONG:
+      // 1) Demand OB lowerBound — the structural floor the OB is built on
+      // 2) Most-recent bullish sweep wick low — the actual extreme price swept below
+      // 3) Nearest true swing low — last resort fallback
+      if (nearestOB && nearestOB.lowerBound < entry) {
+        inv = nearestOB.lowerBound;
+        // If the most recent sweep went deeper than the OB floor, honour that wick
+        const recentBullSweeps = sweepsPrimary
+          .filter(s => (s.direction === 'long' || s.type === 'bullish') && s.wickExtreme !== undefined && s.wickExtreme < entry)
+          .sort((a, b) => b.candleIndex - a.candleIndex);
+        if (recentBullSweeps.length > 0 && recentBullSweeps[0].wickExtreme < inv) {
+          inv = recentBullSweeps[0].wickExtreme;
+        }
+      } else {
+        // No OB: anchor to the most recent sweep wick low, else swing low
+        const recentBullSweeps = [
+          ...sweepsPrimary.filter(s => (s.direction === 'long' || s.type === 'bullish') && s.wickExtreme !== undefined && s.wickExtreme < entry),
+          ...sweepsStructure.filter(s => (s.direction === 'long' || s.type === 'bullish') && s.wickExtreme !== undefined && s.wickExtreme < entry),
+        ].sort((a, b) => b.candleIndex - a.candleIndex);
+        inv = recentBullSweeps.length > 0 ? recentBullSweeps[0].wickExtreme : trueSwingLow;
+      }
 
-    // Enforce a minimum risk distance of 0.25% to prevent ultra-tight micro-SLs
-    const minDistance = entry * 0.0025;
-    if (direction === 'long') {
-      if (Math.abs(entry - inv) < minDistance) {
+      // Safety guard: if for some reason inv is still not below entry, fall back to trueSwingLow
+      if (inv >= entry) {
+        inv = trueSwingLow;
+      }
+      // Enforce minimum distance
+      if (entry - inv < minDistance) {
         inv = entry - minDistance;
       }
     } else {
-      if (Math.abs(entry - inv) < minDistance) {
+      // SL anchor priority for SHORT:
+      // 1) Supply OB upperBound — the structural ceiling the OB is built on
+      // 2) Most-recent bearish sweep wick high — the actual extreme price swept above
+      // 3) Nearest true swing high — last resort fallback
+      if (nearestOB && nearestOB.upperBound > entry) {
+        inv = nearestOB.upperBound;
+        // If the most recent sweep went higher than the OB ceiling, honour that wick
+        const recentBearSweeps = sweepsPrimary
+          .filter(s => (s.direction === 'short' || s.type === 'bearish') && s.wickExtreme !== undefined && s.wickExtreme > entry)
+          .sort((a, b) => b.candleIndex - a.candleIndex);
+        if (recentBearSweeps.length > 0 && recentBearSweeps[0].wickExtreme > inv) {
+          inv = recentBearSweeps[0].wickExtreme;
+        }
+      } else {
+        // No OB: anchor to the most recent sweep wick high, else swing high
+        const recentBearSweeps = [
+          ...sweepsPrimary.filter(s => (s.direction === 'short' || s.type === 'bearish') && s.wickExtreme !== undefined && s.wickExtreme > entry),
+          ...sweepsStructure.filter(s => (s.direction === 'short' || s.type === 'bearish') && s.wickExtreme !== undefined && s.wickExtreme > entry),
+        ].sort((a, b) => b.candleIndex - a.candleIndex);
+        inv = recentBearSweeps.length > 0 ? recentBearSweeps[0].wickExtreme : trueSwingHigh;
+      }
+
+      // Safety guard: if for some reason inv is still not above entry, fall back to trueSwingHigh
+      if (inv <= entry) {
+        inv = trueSwingHigh;
+      }
+      // Enforce minimum distance
+      if (inv - entry < minDistance) {
         inv = entry + minDistance;
       }
     }
@@ -462,58 +494,9 @@ export function runAnalysis(allData, config = {}) {
     steps.push(`Entry: ${entry.toFixed(decimals)} | SL: ${slData ? slData.value.toFixed(decimals) : 'N/A'} | SL%: ${slData ? ((Math.abs(entry - slData.value) / entry) * 100).toFixed(2) + '%' : 'N/A'} | Size: ${posSize} units`);
   }
 
-  // ── TPs — Multi-TF Swing Pool ──────────────────────────────────
-  // FIX #1 & #2: Use swings from ALL available timeframes as TP candidates.
-  // Tag each with its TF label so the UI can show "1H Swing @ 74,500" etc.
-  // Structural levels from primary (nearest) and structure/bias (further out)
-  // give the engine real chart levels to target instead of arithmetic multiples.
-  let tpData = null;
-  if (direction && slData) {
-    const allFVGs = [...fvgsOB, ...fvgsPrimary];
-
-    const tpSwingPool = [
-      ...tagSwings(findSwingPoints(candlesPrimary,   profile.swingLookback    ), profile.primaryKey.toUpperCase()),
-      ...tagSwings(findSwingPoints(candlesStructure, profile.swingLookback + 1), profile.structureKey.toUpperCase()),
-      ...tagSwings(swingsBias,                                                   profile.biasKey.toUpperCase()),
-    ].filter(s => {
-      if (direction === 'long') {
-        return (s.type === 'high' && s.price > entry) || (s.type === 'low' && s.price < entry);
-      } else {
-        return (s.type === 'low' && s.price < entry) || (s.type === 'high' && s.price > entry);
-      }
-    });
-
-    tpData = calculateTPs(
-      entry, slData.value,
-      tpSwingPool, allFVGs,
-      direction,
-      'HIGH',
-      session.name,
-      profile.maxTpPct,
-      profile.primaryKey.toUpperCase(),
-      profile.structureKey.toUpperCase(),
-      profile.biasKey.toUpperCase(),
-      profile.minRrr || 3.0
-    );
-
-    // Attach projected P&L to each TP (reuses outer posSize - L1)
-    tpData.tps.forEach(tp => {
-      const fullPnl       = Math.abs(tp.level - entry) * posSize;
-      tp.projectedProfit  = (fullPnl * ((tp.closePercent || 0) / 100)).toFixed(2);
-    });
-
-    const decimals = ASSETS[symbol]?.decimals ?? 2;
-    steps.push(`TPs: ${tpData.tps.map((t, i) =>
-      `TP${i+1}=$${t.level.toFixed(decimals)} (1:${t.rrr}) ${t.isStructural ? '★' : '⚡'}`
-    ).join(' | ')}`);
-    steps.push(`TP source: ${tpData.tps.map(t => t.reason).join(' → ')}`);
-  }
-
-  // ── Pillar: RRR ────────────────────────────────────────────────
-  const tp1Rrr      = tpData?.tps?.[0]?.rrr ?? 0;
-  const rrrMeetsMin = tp1Rrr >= (profile.minRrr || 3.0);
-
-  // ── Confluence Checks ──────────────────────────────────────────
+  // ── Confluence Checks (pre-RRR) ─────────────────────────────────
+  // Calculate tier BEFORE TPs so we can pass the real tier for scaling.
+  // RRR pillar is added after TPs are computed.
   const trend4HAligned = (direction === 'long'  && trendBias === 'bullish') ||
                          (direction === 'short' && trendBias === 'bearish');
   const dailyAligned   = (direction === 'long'  && dailyBias === 'bullish') ||
@@ -537,12 +520,12 @@ export function runAnalysis(allData, config = {}) {
     ((direction === 'long'  && emaSignalType?.includes('Bullish')) ||
      (direction === 'short' && emaSignalType?.includes('Bearish')));
 
-  const checks = [
+  // Pre-RRR checks (all except the RRR pillar — added after TP calc)
+  const preRrrChecks = [
     { label: `${profile.biasKey.toUpperCase()} Trend Aligned`, met: trend4HAligned,         pillar: true,  weight: 1.5 },
     { label: 'Liquidity Sweep / FVG Fill',                     met: liquidityEvent,           pillar: true,  weight: 1.5 },
     { label: `${profile.primaryKey.toUpperCase()}/${profile.structureKey.toUpperCase()} BOS/CHOCH`, met: structureShift, pillar: true, weight: 1.5 },
     { label: 'Active Trading Session',                         met: sessionOk,                pillar: true,  weight: 1.0 },
-    { label: `RRR ≥ 1:${(profile.minRrr || 3.0).toFixed(0)} (Structural)`, met: rrrMeetsMin, pillar: true, weight: 1.5 },
     { label: 'Daily Bias Aligned (EMA200)',                    met: dailyAligned,             pillar: false, weight: profile.hasEmaSignal ? 0.5 : 1.0 },
     { label: 'RSI Divergence',                                 met: rsiResult.hasDivergence,  pillar: false, weight: 1.0 },
     { label: 'EMA200 Acting as S/R',                          met: ema200Acting,             pillar: false, weight: 1.0 },
@@ -550,6 +533,72 @@ export function runAnalysis(allData, config = {}) {
     ...(profile.hasEmaSignal
       ? [{ label: `EMA Signal: ${emaSignalType || 'None'}`,   met: emaSignalAligned,         pillar: false, weight: 1.0 }]
       : []),
+  ];
+
+  // Estimate tier without RRR pillar (for TP scaling)
+  const preRrrTotalWeight  = preRrrChecks.reduce((s, c) => s + c.weight, 0);
+  const preRrrScoredWeight = preRrrChecks.reduce((s, c) => s + (c.met ? c.weight : 0), 0);
+  const preRrrMax          = preRrrChecks.length;
+  const preRrrNorm         = Math.min(preRrrMax, Math.round((preRrrScoredWeight / preRrrTotalWeight) * preRrrMax));
+  const preRrrTier         = preRrrNorm >= Math.ceil(preRrrMax * 0.73) ? 'EXCEPTIONAL'
+                           : preRrrNorm >= Math.ceil(preRrrMax * 0.55) ? 'HIGH'
+                           : preRrrNorm >= Math.ceil(preRrrMax * 0.36) ? 'MEDIUM'
+                           : 'REJECT';
+
+  // ── TPs — Multi-TF Swing Pool ──────────────────────────────────
+  // FIX #1 & #2: Use swings from ALL available timeframes as TP candidates.
+  // Tag each with its TF label so the UI can show "1H Swing @ 74,500" etc.
+  let tpData = null;
+  if (direction && slData) {
+    const allFVGs = [...fvgsOB, ...fvgsPrimary];
+
+    const tpSwingPool = [
+      ...tagSwings(findSwingPoints(candlesPrimary,   profile.swingLookback    ), profile.primaryKey.toUpperCase()),
+      ...tagSwings(findSwingPoints(candlesStructure, profile.swingLookback + 1), profile.structureKey.toUpperCase()),
+      ...tagSwings(swingsBias,                                                   profile.biasKey.toUpperCase()),
+    ].filter(s => {
+      if (direction === 'long') {
+        return (s.type === 'high' && s.price > entry) || (s.type === 'low' && s.price < entry);
+      } else {
+        return (s.type === 'low' && s.price < entry) || (s.type === 'high' && s.price > entry);
+      }
+    });
+
+    tpData = calculateTPs(
+      entry, slData.value,
+      tpSwingPool, allFVGs,
+      direction,
+      preRrrTier,          // FIX: use actual calculated tier (not hardcoded 'HIGH')
+      session.name,
+      profile.maxTpPct,
+      profile.primaryKey.toUpperCase(),
+      profile.structureKey.toUpperCase(),
+      profile.biasKey.toUpperCase(),
+      profile.minRrr || 3.0,
+      symbol               // FIX: pass symbol for asset-specific decimal precision
+    );
+
+    // Attach projected P&L to each TP (reuses outer posSize - L1)
+    tpData.tps.forEach(tp => {
+      const fullPnl       = Math.abs(tp.level - entry) * posSize;
+      tp.projectedProfit  = (fullPnl * ((tp.closePercent || 0) / 100)).toFixed(2);
+    });
+
+    const tpDecimals = ASSETS[symbol]?.decimals ?? 2;
+    steps.push(`TPs: ${tpData.tps.map((t, i) =>
+      `TP${i+1}=$${t.level.toFixed(tpDecimals)} (1:${t.rrr}) ${t.isStructural ? '★' : '⚡'}`
+    ).join(' | ')}`);
+    steps.push(`TP source: ${tpData.tps.map(t => t.reason).join(' → ')}`);
+  }
+
+  // ── Final Confluence (with RRR pillar) ─────────────────────────
+  const tp1Rrr      = tpData?.tps?.[0]?.rrr ?? 0;
+  const rrrMeetsMin = tp1Rrr >= (profile.minRrr || 3.0);
+
+  // Full check list including the RRR pillar
+  const checks = [
+    ...preRrrChecks,
+    { label: `RRR ≥ 1:${(profile.minRrr || 3.0).toFixed(0)} (Structural)`, met: rrrMeetsMin, pillar: true, weight: 1.5 },
   ];
 
   const totalWeight     = checks.reduce((s, c) => s + c.weight, 0);
@@ -572,6 +621,8 @@ export function runAnalysis(allData, config = {}) {
 
   if (!direction) {
     rejectionReason = `Market ranging — no ${profile.biasKey.toUpperCase()} directional bias`;
+  } else if (!trend4HAligned) {
+    rejectionReason = `${profile.biasKey.toUpperCase()} Trend is not aligned with trade direction (${trendBias.toUpperCase()})`;
   } else if (emaVetoActive) {
     rejectionReason = emaVetoReason;
   } else if (slSideInvalid || !slData) { // H2 validation check

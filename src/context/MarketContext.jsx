@@ -19,6 +19,7 @@ const initialState = {
   error: null,
   backtestMode: false,
   backtestTime: null, // Selected time for historical analysis
+  lastAnalysisTime: null,
 };
 
 function reducer(state, action) {
@@ -56,7 +57,12 @@ function reducer(state, action) {
       return { ...state, candles: { ...state.candles, [key]: updated } };
     }
     case 'SET_ANALYSIS':
-      return { ...state, analysis: action.payload, isAnalyzing: false };
+      return { 
+        ...state, 
+        analysis: action.payload, 
+        isAnalyzing: false, 
+        lastAnalysisTime: action.lastAnalysisTime || state.lastAnalysisTime 
+      };
     case 'SET_ANALYZING':
       return { ...state, isAnalyzing: action.payload };
     case 'SET_ERROR':

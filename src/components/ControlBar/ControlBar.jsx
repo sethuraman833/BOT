@@ -1,12 +1,6 @@
-import { useState } from 'react';
 import { useMarket, useMarketDispatch } from '../../context/MarketContext.jsx';
 import { TIMEFRAMES } from '../../utils/constants.js';
-import { runAnalysis } from '../../engine/tradeAnalyzer.js';
-import { useCandles } from '../../hooks/useCandles.js';
-import { formatUTCTime } from '../../utils/formatters.js';
-import { checkNewsVeto } from '../../engine/newsService.js';
-import { getAccountBalance } from '../../engine/exchangeService.js';
-import { getFrontendAiOpinion } from '../../engine/aiAgent.js';
+import { useAnalyze } from '../../hooks/useAnalyze.js';
 import './ControlBar.css';
 
 // Timeframe mode colors for indicator dot
@@ -26,68 +20,9 @@ const TF_LABELS = {
 };
 
 export default function ControlBar() {
-  const { asset, timeframe, isAnalyzing, backtestMode, backtestTime, analysis } = useMarket();
+  const { timeframe, isAnalyzing, backtestMode, backtestTime, lastAnalysisTime } = useMarket();
   const dispatch = useMarketDispatch();
-  const { loadAllTimeframes } = useCandles();
-  const [lastRun, setLastRun] = useState(null);
-
-  const handleAnalyze = async () => {
-    dispatch({ type: 'SET_ANALYZING', payload: true });
-    try {
-      const freshData = await loadAllTimeframes(asset);
-      if (!freshData) { dispatch({ type: 'SET_ANALYZING', payload: false }); return; }
-
-      // Backtest slice
-      let activeData = freshData;
-      if (backtestMode && backtestTime) {
-        activeData = {};
-        Object.keys(freshData).forEach(tfKey => {
-          activeData[tfKey] = freshData[tfKey].filter(c => c.time <= backtestTime);
-        });
-      }
-
-      // Parallel: balance + news
-      const [balance, newsStatus] = await Promise.all([
-        getAccountBalance(),
-        checkNewsVeto(asset),
-      ]);
-
-      const result = runAnalysis(activeData, {
-        symbol: asset,
-        balance: balance,
-        newsStatus: newsStatus,
-        activeTimeframe: timeframe,   // Adaptive engine per TF
-      });
-
-      // News caution propagation
-      if (newsStatus.caution) {
-        result.newsCaution      = true;
-        result.newsCautionReason = newsStatus.reason;
-        result.analysisSteps    = [
-          ...(result.analysisSteps || []),
-          `⚠️ NEWS CAUTION: ${newsStatus.reason} — Wait for post-event BOS confirmation`,
-        ];
-      }
-
-      dispatch({ type: 'SET_ANALYSIS', payload: result });
-
-      // AI second opinion for high-quality signals
-      if (result.decision === 'TAKE_NOW' || (result.decision === 'WAIT' && result.confluenceScore?.total >= 5)) {
-        const aiResponse = await getFrontendAiOpinion(result);
-        if (aiResponse) {
-          result.aiAnalysis = aiResponse;
-          dispatch({ type: 'SET_ANALYSIS', payload: { ...result } });
-        }
-      }
-
-      setLastRun(formatUTCTime());
-    } catch (err) {
-      console.error(err);
-      dispatch({ type: 'SET_ERROR', payload: 'Analysis failed: ' + err.message });
-    } finally {
-      dispatch({ type: 'SET_ANALYZING', payload: false });
-    }
-  };
+  const { handleAnalyze } = useAnalyze();
 
   const modeColor = TF_COLORS[timeframe] || '#3b8ef0';
   const modeLabel = TF_LABELS[timeframe] || timeframe?.toUpperCase();
@@ -106,6 +41,20 @@ export default function ControlBar() {
             {tf.label}
           </button>
         ))}
+
+        <button
+          className="tf-refresh-btn"
+          onClick={() => window.location.reload()}
+          title="Reload Terminal"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-refresh-cw">
+            <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+            <path d="M3 3v5h5"/>
+            <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/>
+            <path d="M16 16h5v5"/>
+          </svg>
+          <span>REFRESH</span>
+        </button>
 
         <div className="control-divider" />
 
@@ -137,7 +86,7 @@ export default function ControlBar() {
           <div className="mode-dot" style={{ background: modeColor, boxShadow: `0 0 6px ${modeColor}` }} />
           <span className="mode-text">{modeLabel}</span>
         </div>
-        {lastRun && <span className="last-run">{lastRun}</span>}
+        {lastAnalysisTime && <span className="last-run">{lastAnalysisTime}</span>}
       </div>
     </div>
   );

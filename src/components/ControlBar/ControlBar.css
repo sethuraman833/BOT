@@ -70,6 +70,51 @@
   box-shadow: 0 0 10px rgba(0, 212, 255, 0.2);
 }
 
+/* ── TF Refresh Button ────────────────────────────────────── */
+.tf-refresh-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  background: rgba(0, 212, 255, 0.06);
+  border: 1px solid rgba(0, 212, 255, 0.35);
+  color: rgba(0, 212, 255, 0.75);
+  height: 25px;
+  padding: 0 8px;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: var(--font-mono);
+  font-size: 0.60rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  outline: none;
+  flex-shrink: 0;
+}
+
+.tf-refresh-btn:hover {
+  background: rgba(0, 212, 255, 0.14);
+  border-color: rgba(0, 212, 255, 0.75);
+  color: #00d4ff;
+  box-shadow: 0 0 10px rgba(0, 212, 255, 0.25);
+}
+
+.tf-refresh-btn:active {
+  transform: scale(0.95);
+}
+
+.tf-refresh-btn svg {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+  transition: transform 0.45s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.tf-refresh-btn:hover svg {
+  transform: rotate(180deg);
+}
+
 /* ── Backtest Toggle ──────────────────────────────────────── */
 .backtest-toggle {
   background: transparent;

@@ -217,6 +217,7 @@ export function detectSweeps(candles, sweepThreshold = 0.0015, lookback = 3) {
       sweeps.push({
         type: 'bearish',
         sweptLevel: swing.price,
+        wickExtreme: c.high,   // actual high wick of the sweep candle — SL anchor for shorts
         breachPct: (breachPct * 100).toFixed(3) + '%',
         candleIndex: i,
         time: c.time,
@@ -246,6 +247,7 @@ export function detectSweeps(candles, sweepThreshold = 0.0015, lookback = 3) {
       sweeps.push({
         type: 'bullish',
         sweptLevel: swing.price,
+        wickExtreme: c.low,    // actual low wick of the sweep candle — SL anchor for longs
         breachPct: (breachPct * 100).toFixed(3) + '%',
         candleIndex: i,
         time: c.time,
