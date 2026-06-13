@@ -36,8 +36,8 @@ for (const envPath of possiblePaths) {
   }
 }
 
-const token  = process.env.TELEGRAM_BOT_TOKEN;
-const chatId = process.env.TELEGRAM_CHAT_ID;
+const token  = process.env.TELEGRAM_BOT_TOKEN || '7692139204:AAFalwvSeYMunaY_T_zUqQn3rSRWhzo-8N4';
+const chatId = process.env.TELEGRAM_CHAT_ID || '1068346212';
 let bot = null;
 
 if (token && chatId) {

@@ -6,8 +6,8 @@
 import https from 'https';
 
 // ← FILL THESE IN:
-const TOKEN   = process.env.TELEGRAM_BOT_TOKEN || 'YOUR_BOT_TOKEN_HERE';
-const CHAT_ID = process.env.TELEGRAM_CHAT_ID   || 'YOUR_CHAT_ID_HERE';
+const TOKEN   = process.env.TELEGRAM_BOT_TOKEN || '7692139204:AAFalwvSeYMunaY_T_zUqQn3rSRWhzo-8N4';
+const CHAT_ID = process.env.TELEGRAM_CHAT_ID   || '1068346212';
 
 if (TOKEN === 'YOUR_BOT_TOKEN_HERE' || CHAT_ID === 'YOUR_CHAT_ID_HERE') {
   console.error('❌  Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID first!');
