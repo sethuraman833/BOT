@@ -2,16 +2,23 @@ import { useEffect, useState } from 'react';
 import { useMarket, useMarketDispatch } from './context/MarketContext.jsx';
 import { useBinanceWS } from './hooks/useBinanceWS.js';
 import { useCandles, fetchCurrentPrice } from './hooks/useCandles.js';
+import { useAnalyze } from './hooks/useAnalyze.js';
+import { useHotkeys } from './hooks/useHotkeys.js';
 import { formatPrice, formatPercent } from './utils/formatters.js';
+import { recordSignal } from './engine/tradeJournal.js';
 import Header from './components/Header/Header.jsx';
 import ChartPanel from './components/ChartPanel/ChartPanel.jsx';
 import AnalysisSidebar from './components/AnalysisSidebar/AnalysisSidebar.jsx';
 import ControlBar from './components/ControlBar/ControlBar.jsx';
 
 export default function App() {
-  const { asset, timeframe, error, analysis, livePrice, liveChange } = useMarket();
+  const { asset, timeframe, error, analysis, livePrice, liveChange, isAnalyzing } = useMarket();
   const dispatch = useMarketDispatch();
   const { loadAllTimeframes } = useCandles();
+  const { handleAnalyze } = useAnalyze();
+
+  // Hotkey system: 1-5=TF, E=Analyze, B=Backtest, Ctrl+1-7=Asset
+  useHotkeys(dispatch, handleAnalyze, isAnalyzing);
 
   // 'chart' | 'analysis'
   const [mobileTab, setMobileTab] = useState('chart');
@@ -42,6 +49,13 @@ export default function App() {
   useEffect(() => {
     if (analysis && window.innerWidth <= 1024) {
       setMobileTab('analysis');
+    }
+  }, [analysis]);
+
+  // Auto-record trade signals to journal
+  useEffect(() => {
+    if (analysis && analysis.decision === 'TAKE_NOW') {
+      recordSignal(analysis);
     }
   }, [analysis]);
 

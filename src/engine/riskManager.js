@@ -481,3 +481,83 @@ export function calculateBreakevenMove(entry, stopLoss, symbol) {
   const decimals = (symbol && ASSETS[symbol]) ? ASSETS[symbol].decimals : 2;
   return parseFloat((entry + dir * risk * 1.5).toFixed(decimals));
 }
+
+// ─── TRAILING STOP LOGIC ───────────────────────────────────────
+// Dynamic SL movement based on TP hits and ATR-based trailing.
+
+/**
+ * Calculate trailing stop levels as price hits each TP.
+ * Returns a trail schedule: what to set SL to at each milestone.
+ * 
+ * @param {number} entry - Entry price
+ * @param {number} stopLoss - Initial SL
+ * @param {Array} tpLevels - Array of TP price levels [tp1, tp2, tp3]
+ * @param {string} direction - 'long' or 'short'
+ * @param {string} symbol - Trading pair symbol
+ * @returns {Array} Trail schedule: [{ trigger, newSL, label }]
+ */
+export function calculateTrailingSchedule(entry, stopLoss, tpLevels, direction, symbol) {
+  if (!tpLevels || tpLevels.length === 0) return [];
+  const decimals = (symbol && ASSETS[symbol]) ? ASSETS[symbol].decimals : 2;
+  const fmt = v => parseFloat(v.toFixed(decimals));
+
+  const schedule = [];
+
+  // Milestone 1: At 1.5R profit → move SL to breakeven (entry)
+  const risk = Math.abs(entry - stopLoss);
+  const beTrigger = direction === 'long' ? entry + risk * 1.5 : entry - risk * 1.5;
+  schedule.push({
+    trigger: fmt(beTrigger),
+    newSL: fmt(entry),
+    label: 'Move SL to Breakeven (1.5R)',
+  });
+
+  // Milestone 2: TP1 hit → trail SL to entry + 0.5R (lock in small profit)
+  if (tpLevels[0]) {
+    const lockProfit = direction === 'long' ? entry + risk * 0.5 : entry - risk * 0.5;
+    schedule.push({
+      trigger: fmt(tpLevels[0]),
+      newSL: fmt(lockProfit),
+      label: 'TP1 Hit → Trail SL to Entry + 0.5R',
+    });
+  }
+
+  // Milestone 3: TP2 hit → trail SL to TP1
+  if (tpLevels[1] && tpLevels[0]) {
+    schedule.push({
+      trigger: fmt(tpLevels[1]),
+      newSL: fmt(tpLevels[0]),
+      label: 'TP2 Hit → Trail SL to TP1',
+    });
+  }
+
+  // Milestone 4: TP3 (terminal exit — close all)
+  if (tpLevels[2]) {
+    schedule.push({
+      trigger: fmt(tpLevels[2]),
+      newSL: fmt(tpLevels[1] || tpLevels[0]),
+      label: 'TP3 Hit → Close remaining position',
+    });
+  }
+
+  return schedule;
+}
+
+/**
+ * Calculate ATR-based trailing stop.
+ * Trails the SL at a distance of `atrMultiplier × ATR` behind the price.
+ * 
+ * @param {number} currentPrice - Current market price
+ * @param {number} atrValue - Current ATR value
+ * @param {string} direction - 'long' or 'short'
+ * @param {number} atrMultiplier - Multiple of ATR for trail distance (default 2.0)
+ * @returns {number} Trailing stop level
+ */
+export function calculateATRTrailingStop(currentPrice, atrValue, direction, atrMultiplier = 2.0) {
+  if (!atrValue || atrValue <= 0) return 0;
+  const trailDist = atrValue * atrMultiplier;
+  if (direction === 'long') {
+    return currentPrice - trailDist;
+  }
+  return currentPrice + trailDist;
+}

@@ -67,6 +67,11 @@ function calculateATR(candles, period = 14) {
   return atr;
 }
 
+function formatLimitPrice(price, symbol) {
+  const decimals = (symbol && ASSETS[symbol]) ? ASSETS[symbol].decimals : 2;
+  return `$${price.toFixed(decimals)}`;
+}
+
 /**
  * Compute dynamic minimum SL distance for a symbol+timeframe combination.
  * Returns an absolute price distance (not a percentage).
@@ -736,7 +741,15 @@ export function runAnalysis(allData, config = {}) {
   } else if (slSideInvalid || !slData) { // H2 validation check
     rejectionReason = `Invalid Stop Loss placement relative to entry`;
   } else if (entryDistPct > profile.maxEntryDist) {
-    rejectionReason = `Price too far from entry zone: ${(entryDistPct * 100).toFixed(2)}% > ${(profile.maxEntryDist * 100).toFixed(2)}% max for ${profile.label}`;
+    // NEW: Instead of rejecting, suggest a limit order at the OTE/OB level
+    if (normalizedTotal >= profile.minConfluence && pillarsMet >= profile.minPillars && rrrMeetsMin) {
+      decision = 'WAIT';
+      const limitOrderPrice = oteZone?.midpoint || entry;
+      const limitLabel = oteZone ? `Limit @ OTE ${formatLimitPrice(limitOrderPrice, symbol)}` : `Limit @ ${formatLimitPrice(entry, symbol)}`;
+      rejectionReason = `Price ${(entryDistPct * 100).toFixed(2)}% from entry — ${limitLabel}`;
+    } else {
+      rejectionReason = `Price too far from entry zone: ${(entryDistPct * 100).toFixed(2)}% > ${(profile.maxEntryDist * 100).toFixed(2)}% max for ${profile.label}`;
+    }
   } else if (slPct > profile.maxSlPct) {
     rejectionReason = `SL too wide: ${(slPct * 100).toFixed(2)}% > ${(profile.maxSlPct * 100).toFixed(2)}% max for ${profile.label}`;
   } else if (!rrrMeetsMin) {

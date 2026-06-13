@@ -10,6 +10,7 @@ import { formatUTCTime } from '../utils/formatters.js';
 import { checkNewsVeto } from '../engine/newsService.js';
 import { getAccountBalance } from '../engine/exchangeService.js';
 import { getFrontendAiOpinion } from '../engine/aiAgent.js';
+import { playSignalSound, playAnalysisComplete, playRejectSound } from '../utils/sounds.js';
 
 export function useAnalyze() {
   const { asset, timeframe, isAnalyzing, backtestMode, backtestTime } = useMarket();
@@ -59,6 +60,15 @@ export function useAnalyze() {
 
       const utcTime = formatUTCTime();
       dispatch({ type: 'SET_ANALYSIS', payload: result, lastAnalysisTime: utcTime });
+
+      // Sound feedback based on decision
+      if (result.decision === 'TAKE_NOW') {
+        playSignalSound();
+      } else if (result.decision === 'NO_TRADE') {
+        playRejectSound();
+      } else {
+        playAnalysisComplete();
+      }
 
       // AI second opinion for high-quality signals
       if (result.decision === 'TAKE_NOW' || (result.decision === 'WAIT' && result.confluenceScore?.total >= 5)) {
