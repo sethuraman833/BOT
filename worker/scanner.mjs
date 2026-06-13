@@ -1,16 +1,16 @@
 // ─────────────────────────────────────────────────────────
-//  Scanner v9.0 — Dual-TF Scan with Audited Limits & Validation
+//  Scanner v10.0 — All-TF Scan, Parallel, Retry, Deduped
 // ─────────────────────────────────────────────────────────
 
 import { sendTradeAlert } from './telegramBot.mjs';
 import { getAiSecondOpinion } from './aiAgent.mjs';
-import { CANDLE_LIMIT } from '../src/utils/constants.js';
+import { CANDLE_LIMIT, ASSET_LIST, BINANCE_REST } from '../src/utils/constants.js';
 import fs from 'fs';
 import path from 'path';
 
-const REST   = 'https://fapi.binance.com/fapi/v1';
-const ASSETS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 'LINKUSDT'];
-const TFS    = ['1w', '1d', '4h', '1h', '15m', '5m'];  // 1w added for weekly context
+const TFS = ['1w', '1d', '4h', '1h', '15m', '5m'];
+const TFS_TO_SCAN = ['5m', '15m', '1h', '4h', '1d']; // All tradeable timeframes
+const SCAN_CONCURRENCY = 3; // Parallel asset scanning limit
 
 // L11: Track last alert per symbol and persist to a local file
 const ALERT_FILE = path.join(process.cwd(), 'worker', 'lastAlertTime.json');
@@ -35,9 +35,27 @@ function saveAlertTime(symbol, timestamp) {
 
 const ALERT_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour cooldown per symbol
 
-async function getKlines(symbol, interval, limit = CANDLE_LIMIT) { // H7: use CANDLE_LIMIT (1500)
-  const res = await fetch(`${REST}/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`);
-  if (!res.ok) throw new Error(`Binance API error: ${res.status} for ${symbol} ${interval}`);
+/**
+ * Fetch with exponential backoff retry on 429/5xx errors.
+ */
+async function fetchWithRetry(url, maxRetries = 3) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const res = await fetch(url);
+    if (res.ok) return res;
+    if (res.status === 429 || res.status >= 500) {
+      if (attempt < maxRetries) {
+        const delay = Math.pow(2, attempt) * 1000 + Math.random() * 500;
+        console.log(`[SCANNER] Rate limited/error ${res.status}, retrying in ${Math.round(delay)}ms...`);
+        await new Promise(r => setTimeout(r, delay));
+        continue;
+      }
+    }
+    throw new Error(`Binance API error: ${res.status} for ${url}`);
+  }
+}
+
+async function getKlines(symbol, interval, limit = CANDLE_LIMIT) {
+  const res = await fetchWithRetry(`${BINANCE_REST}/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`);
   const raw = await res.json();
   
   // H9: Verify API kline response is array & filter NaN values
@@ -65,67 +83,78 @@ async function getKlines(symbol, interval, limit = CANDLE_LIMIT) { // H7: use CA
     .filter(k => k !== null);
 }
 
+/**
+ * Scan a single asset across all timeframes.
+ */
+async function scanAsset(symbol, runAnalysis) {
+  try {
+    console.log(`\n[SCANNER] Fetching data for ${symbol}...`);
+    const data = {};
+    for (const tf of TFS) {
+      data[tf] = await getKlines(symbol, tf, CANDLE_LIMIT);
+    }
+
+    // Run analysis on ALL tradeable timeframes, pick the best signal
+    let bestResult = null;
+    for (const tf of TFS_TO_SCAN) {
+      const r = runAnalysis(data, { symbol, activeTimeframe: tf });
+      if (!bestResult ||
+          (r.decision === 'TAKE_NOW' && bestResult.decision !== 'TAKE_NOW') ||
+          (r.decision === bestResult.decision && r.confluenceScore.total > bestResult.confluenceScore.total)) {
+        bestResult = r;
+      }
+    }
+    const result = bestResult;
+
+    const { decision, confluenceScore, direction, analysisMode } = result;
+    console.log(`[SCANNER] ${symbol}: ${decision} (${analysisMode}) | Score: ${confluenceScore.total}/${confluenceScore.max} | Pillars: ${confluenceScore.pillarsMet}/${confluenceScore.pillarsTotal} | Dir: ${direction || 'N/A'}`);
+
+    // TAKE_NOW: Send alert if score >= 5 and not sent recently
+    const shouldAlertTakeNow = decision === 'TAKE_NOW' && confluenceScore.total >= 5;
+
+    // WAIT: Send alert if score >= 4 and we have clear trigger levels
+    const shouldAlertWait = decision === 'WAIT' && confluenceScore.total >= 4;
+
+    if (shouldAlertTakeNow || shouldAlertWait) {
+      const lastSent = lastAlertTime[symbol] || 0;
+      const elapsed  = Date.now() - lastSent;
+
+      if (elapsed < ALERT_COOLDOWN_MS) {
+        console.log(`[SCANNER] ${symbol}: Skipping duplicate alert (${Math.round(elapsed / 60000)}m since last alert)`);
+        return;
+      }
+
+      console.log(`[SCANNER] Requesting AI Second Opinion for ${symbol}...`);
+      const aiResponse = await getAiSecondOpinion(result);
+      result.aiAnalysis = aiResponse;
+      console.log(`[SCANNER] AI verdict: ${aiResponse.decision} — ${aiResponse.reasoning?.slice(0, 80)}...`);
+
+      // Only alert if AI doesn't explicitly disagree
+      if (aiResponse.decision !== 'DISAGREE') {
+        await sendTradeAlert(result);
+        saveAlertTime(symbol, Date.now());
+      } else {
+        console.log(`[SCANNER] ${symbol}: AI DISAGREES — alert suppressed.`);
+      }
+    }
+
+  } catch (err) {
+    console.error(`[SCANNER] Error on ${symbol}:`, err.message);
+  }
+}
+
 export async function runScan() {
   console.log(`\n${'═'.repeat(50)}`);
-  console.log(` SMC SCAN v6 — ${new Date().toISOString()}`);
+  console.log(` SMC SCAN v10 — ${new Date().toISOString()}`);
   console.log(`${'═'.repeat(50)}`);
 
   // Dynamic import of the engine (ESM-compatible)
   const { runAnalysis } = await import('../src/engine/tradeAnalyzer.js');
 
-  for (const symbol of ASSETS) {
-    try {
-      console.log(`\n[SCANNER] Fetching data for ${symbol}...`);
-      const data = {};
-      for (const tf of TFS) {
-        data[tf] = await getKlines(symbol, tf, CANDLE_LIMIT); // H7: sync candle limit
-      }
-
-      // Run dual-TF analysis: 15m intraday + 5m scalping
-      const result15m = runAnalysis(data, { symbol, activeTimeframe: '15m' });
-      const result5m  = runAnalysis(data, { symbol, activeTimeframe: '5m' });
-
-      // Pick whichever has a valid signal with higher confluence
-      const result = (
-        result5m.decision !== 'NO_TRADE' &&
-        result5m.confluenceScore.total >= result15m.confluenceScore.total
-      ) ? result5m : result15m;
-
-      const { decision, confluenceScore, direction, entry, analysisMode } = result;
-      console.log(`[SCANNER] ${symbol}: ${decision} (${analysisMode}) | Score: ${confluenceScore.total}/${confluenceScore.max} | Pillars: ${confluenceScore.pillarsMet}/${confluenceScore.pillarsTotal} | Dir: ${direction || 'N/A'}`);
-
-      // TAKE_NOW: Send alert if score >= 5 and not sent recently
-      const shouldAlertTakeNow = decision === 'TAKE_NOW' && confluenceScore.total >= 5;
-
-      // WAIT: Send alert if score >= 4 and we have clear trigger levels
-      const shouldAlertWait = decision === 'WAIT' && confluenceScore.total >= 4;
-
-      if (shouldAlertTakeNow || shouldAlertWait) {
-        const lastSent = lastAlertTime[symbol] || 0;
-        const elapsed  = Date.now() - lastSent;
-
-        if (elapsed < ALERT_COOLDOWN_MS) {
-          console.log(`[SCANNER] ${symbol}: Skipping duplicate alert (${Math.round(elapsed / 60000)}m since last alert)`);
-          continue;
-        }
-
-        console.log(`[SCANNER] Requesting AI Second Opinion for ${symbol}...`);
-        const aiResponse = await getAiSecondOpinion(result);
-        result.aiAnalysis = aiResponse;
-        console.log(`[SCANNER] AI verdict: ${aiResponse.decision} — ${aiResponse.reasoning?.slice(0, 80)}...`);
-
-        // Only alert if AI doesn't explicitly disagree
-        if (aiResponse.decision !== 'DISAGREE') {
-          await sendTradeAlert(result);
-          saveAlertTime(symbol, Date.now()); // L11: save persistent alert time
-        } else {
-          console.log(`[SCANNER] ${symbol}: AI DISAGREES — alert suppressed.`);
-        }
-      }
-
-    } catch (err) {
-      console.error(`[SCANNER] Error on ${symbol}:`, err.message);
-    }
+  // Parallel scanning with concurrency limit
+  for (let i = 0; i < ASSET_LIST.length; i += SCAN_CONCURRENCY) {
+    const batch = ASSET_LIST.slice(i, i + SCAN_CONCURRENCY);
+    await Promise.allSettled(batch.map(symbol => scanAsset(symbol, runAnalysis)));
   }
 
   console.log(`\n[SCANNER] Scan complete — ${new Date().toISOString()}`);

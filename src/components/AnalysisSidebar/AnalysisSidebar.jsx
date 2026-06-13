@@ -82,12 +82,15 @@ function StepAccordion({ steps }) {
 
 function SMCSection({ smcData }) {
   if (!smcData) return null;
-  const { orderBlocks, fvgs, sweeps, structureShifts } = smcData;
+  const { orderBlocks, breakerBlocks, fvgs, sweeps, structureShifts, vwap } = smcData;
+  const activeOBs = (orderBlocks || []).filter(ob => ob.status === 'active');
   const counts = [
-    { label: 'Order Blocks', val: orderBlocks?.length || 0, color: 'var(--accent-purple)' },
+    { label: 'Order Blocks', val: activeOBs.length, color: 'var(--accent-purple)' },
+    { label: 'Breaker Blocks', val: breakerBlocks?.length || 0, color: 'var(--accent-cyan)' },
     { label: 'Active FVGs',  val: fvgs?.length || 0,        color: 'var(--accent-blue)' },
     { label: 'Sweeps',       val: sweeps?.length || 0,       color: 'var(--accent-yellow)' },
     { label: 'BOS / CHOCH',  val: structureShifts?.length || 0, color: 'var(--accent-green)' },
+    ...(vwap ? [{ label: 'VWAP', val: `$${vwap.toFixed(2)}`, color: 'var(--accent-cyan)' }] : []),
   ];
   return (
     <div className="sidebar-section">
@@ -184,7 +187,7 @@ export default function AnalysisSidebar() {
 
   return (
     <aside className="analysis-sidebar">
-      <div className="sidebar-scroll fade-in">
+      <div className="sidebar-scroll fade-in stagger-in">
 
         {/* ── ANALYSIS MODE HEADER ─────────────────────────── */}
         <div className="analysis-mode-header">
@@ -266,7 +269,7 @@ export default function AnalysisSidebar() {
         <StepAccordion steps={analysis.analysisSteps} />
 
         {/* ── FOOTER ────────────────────────────────────────── */}
-        <div className="engine-footer">ENGINE v8.0 · {analysis.symbol} · {analysis.analysisMode}</div>
+        <div className="engine-footer">ENGINE v10.0 · {analysis.symbol} · {analysis.analysisMode}</div>
 
       </div>
     </aside>

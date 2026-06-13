@@ -1,26 +1,103 @@
+/* ═══════════════════════════════════════════════════════════
+   SessionBadge v2.0 — Premium Session + Kill Zone Indicator
+   ═══════════════════════════════════════════════════════════ */
+
 .session-badge {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 12px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--bg-border);
+  padding: 6px 14px;
   border-radius: var(--radius-md);
+  background: var(--bg-card);
+  border: 1px solid var(--bg-border);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  transition: all var(--transition-normal);
+  position: relative;
+  overflow: hidden;
 }
+
+.session-badge::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: var(--session-color, var(--accent-cyan));
+  opacity: 0.6;
+}
+
+.session-badge:hover {
+  border-color: var(--session-color, var(--accent-cyan));
+  box-shadow: 0 0 12px rgba(0,212,255,0.08);
+}
+
 .session-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
+  background: var(--session-color, var(--accent-green));
+  box-shadow: 0 0 8px var(--session-color, var(--accent-green));
+  animation: pulse 2s ease-in-out infinite;
   flex-shrink: 0;
-  animation: livePulse 2s ease-in-out infinite;
 }
+
+.session-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .session-name {
-  font-size: 0.75rem;
+  color: var(--text-primary);
   font-weight: 600;
   white-space: nowrap;
 }
-.session-time {
+
+.session-kz-badge {
+  font-size: 0.55rem;
+  color: var(--accent-yellow);
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.session-countdown {
+  color: var(--text-muted);
+  font-size: 0.6rem;
   font-family: var(--font-mono);
-  font-size: 0.7rem;
-  color: var(--text-dim);
+  opacity: 0.8;
+  white-space: nowrap;
+}
+
+.session-time {
+  color: var(--text-secondary);
+  font-size: 0.6rem;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+/* ── Overlap State (London/NY) ───────────────────────── */
+.session-overlap {
+  background: linear-gradient(135deg, rgba(0,229,180,0.06), rgba(59,142,240,0.06));
+  border-color: rgba(0,229,180,0.3);
+}
+
+/* ── Kill Zone Active State ──────────────────────────── */
+.session-killzone {
+  border-color: rgba(247,201,72,0.4);
+  background: linear-gradient(135deg, rgba(247,201,72,0.04), var(--bg-card));
+}
+.session-killzone .session-dot {
+  background: var(--accent-yellow);
+  box-shadow: 0 0 10px var(--accent-yellow);
+}
+
+@media (max-width: 768px) {
+  .session-badge {
+    padding: 4px 8px;
+    font-size: 0.6rem;
+    gap: 6px;
+  }
+  .session-countdown { display: none; }
+  .session-kz-badge { display: none; }
 }

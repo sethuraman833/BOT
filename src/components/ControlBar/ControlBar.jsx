@@ -28,7 +28,7 @@ export default function ControlBar() {
   const modeLabel = TF_LABELS[timeframe] || timeframe?.toUpperCase();
 
   return (
-    <div className="control-bar">
+    <div className="control-bar" role="toolbar" aria-label="Analysis controls">
       <div className="control-left">
         {TIMEFRAMES.filter(tf => tf.key !== '1w').map(tf => (
           <button

@@ -12,6 +12,7 @@ export default function ChartPanel() {
   const containerRef  = useRef(null);
   const chartRef      = useRef(null);
   const seriesRef     = useRef(null);  // candlestick series
+  const volumeRef     = useRef(null);  // volume histogram series
   const emaRefs       = useRef({});
   const priceLinesRef = useRef([]);
   const backtestLineRef = useRef(null);
@@ -50,12 +51,23 @@ export default function ChartPanel() {
     });
 
     const series = chart.addCandlestickSeries({
-      upColor:        '#00d4aa',
-      downColor:      '#ff4d6a',
-      borderUpColor:  '#00d4aa',
-      borderDownColor:'#ff4d6a',
-      wickUpColor:    '#00d4aa',
-      wickDownColor:  '#ff4d6a',
+      upColor:        '#00e5b4',
+      downColor:      '#ff3f5e',
+      borderUpColor:  '#00e5b4',
+      borderDownColor:'#ff3f5e',
+      wickUpColor:    '#00e5b4',
+      wickDownColor:  '#ff3f5e',
+    });
+
+    // Volume histogram at bottom of chart
+    const volumeSeries = chart.addHistogramSeries({
+      priceFormat: { type: 'volume' },
+      priceScaleId: 'volume',
+      lastValueVisible: false,
+      priceLineVisible: false,
+    });
+    chart.priceScale('volume').applyOptions({
+      scaleMargins: { top: 0.85, bottom: 0 },
     });
 
     const ema20  = chart.addLineSeries({ color: '#f5c842', lineWidth: 1,   priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
@@ -64,6 +76,7 @@ export default function ChartPanel() {
 
     chartRef.current     = chart;
     seriesRef.current    = series;
+    volumeRef.current    = volumeSeries;
     emaRefs.current      = { ema20, ema50, ema200 };
     renderedKeyRef.current  = null;
     renderedDataRef.current = [];
@@ -92,6 +105,7 @@ export default function ChartPanel() {
     // so the old chart doesn't linger while new data loads
     if (renderedKeyRef.current && renderedKeyRef.current !== key) {
       seriesRef.current.setData([]);
+      if (volumeRef.current) volumeRef.current.setData([]);
       emaRefs.current.ema20.setData([]);
       emaRefs.current.ema50.setData([]);
       emaRefs.current.ema200.setData([]);
@@ -123,6 +137,16 @@ export default function ChartPanel() {
     seriesRef.current.setData(clean);
     renderedDataRef.current = clean;
     renderedKeyRef.current  = key;
+
+    // Volume histogram data
+    if (volumeRef.current) {
+      const volData = clean.map(c => ({
+        time: c.time,
+        value: c.volume || 0,
+        color: c.close >= c.open ? 'rgba(0,229,180,0.25)' : 'rgba(255,63,94,0.25)',
+      }));
+      volumeRef.current.setData(volData);
+    }
 
     // EMAs — FIX: calculateEMA() result[j] corresponds to clean[j + period - 1],
     // NOT clean[j]. The old code shifted every EMA left by (period-1) bars.

@@ -1,5 +1,6 @@
 // ─────────────────────────────────────────────────────────
-//  Trade Analyzer v9.0 — All-Bug-Fixed Adaptive Engine
+//  Trade Analyzer v10.0 — Premium/Discount, VWAP, Kill Zones,
+//                        Breaker Blocks, Volume-Weighted OBs
 //
 //  Bug fixes in this version:
 //  #1  TP spacing: anchors 3x/5x/7x (was 3x/3.5x/4x → near-identical)
@@ -13,15 +14,16 @@
 
 import {
   detectOrderBlocks, detectFVGs, detectSweeps, detectStructureShifts,
-  calculateEMA, calculateRSI, detectRSIDivergence, findSwingPoints
+  calculateEMA, calculateRSI, detectRSIDivergence, findSwingPoints,
+  detectBreakerBlocks, calculateVWAP
 } from './smcDetector.js';
-import { calculateOTE, isInOTE } from './oteCalculator.js';
+import { calculateOTE, isInOTE, calculatePremiumDiscount, isInDiscount, isInPremium } from './oteCalculator.js';
 import {
   calculateSmartSL, calculateTPs, calculatePositionSize,
   calculateRRR, calculateBreakevenMove, calculateLeverage,
   estimateLiquidationPrice
 } from './riskManager.js';
-import { getCurrentSession, isSessionValid } from './sessionFilter.js';
+import { getCurrentSession, isSessionValid, getKillZone } from './sessionFilter.js';
 import { RISK_AMOUNT, ASSETS } from '../utils/constants.js';
 
 // ─── ATR-BASED MINIMUM SL DISTANCE ────────────────────────
@@ -214,9 +216,15 @@ export function runAnalysis(allData, config = {}) {
   const profile = TF_PROFILES[activeTimeframe] || TF_PROFILES['15m'];
   const riskAmount = profile.riskAmount || RISK_AMOUNT;
   const steps   = [];
-  steps.push(`Engine v9.0 | ${profile.label} | ${symbol}`);
+  steps.push(`Engine v10.0 | ${profile.label} | ${symbol}`);
   
   let slSideInvalid = false; // H2 validation flag declared early
+
+  // ── Kill Zone detection ────────────────────────────────────────────
+  const killZone = getKillZone();
+  if (killZone.inKillZone) {
+    steps.push(`⚡ Active Kill Zone: ${killZone.killZoneName}`);
+  }
 
   // ── News veto ──────────────────────────────────────────────────
   if (newsStatus.veto) {
@@ -581,9 +589,41 @@ export function runAnalysis(allData, config = {}) {
   // OB proximity: is entry near or inside a valid unmitigated Order Block?
   const nearOB = nearestOB !== null;
 
+  // ── NEW: Premium/Discount Zone Check ─────────────────────────
+  const swingH = swingsBias.filter(s => s.type === 'high').slice(-1)[0];
+  const swingL = swingsBias.filter(s => s.type === 'low').slice(-1)[0];
+  let premiumDiscountZones = null;
+  let inCorrectZone = false;
+  if (swingH && swingL) {
+    premiumDiscountZones = calculatePremiumDiscount(swingH.price, swingL.price);
+    if (direction === 'long') {
+      inCorrectZone = isInDiscount(currentPrice, premiumDiscountZones);
+    } else if (direction === 'short') {
+      inCorrectZone = isInPremium(currentPrice, premiumDiscountZones);
+    }
+    if (inCorrectZone) steps.push(`✓ Entry in ${direction === 'long' ? 'Discount' : 'Premium'} zone`);
+  }
+
+  // ── NEW: VWAP Check ────────────────────────────────────────
+  const vwap = calculateVWAP(candlesPrimary.slice(-100));
+  const vwapAligned = vwap != null && direction && (
+    (direction === 'long' && currentPrice < vwap) ||
+    (direction === 'short' && currentPrice > vwap)
+  );
+  if (vwapAligned) steps.push(`✓ Price on correct side of VWAP ($${vwap?.toFixed(2)})`);
+
+  // ── NEW: Breaker Block Check ───────────────────────────────
+  const breakerBlocks = detectBreakerBlocks(candlesPrimary, currentPrice);
+  const nearBreaker = breakerBlocks.some(bb => {
+    const dist = Math.abs(currentPrice - bb.entryBoundary) / currentPrice;
+    return dist < 0.008; // within 0.8% of a breaker block
+  });
+  if (nearBreaker) steps.push(`✓ Near a Breaker Block (flipped S/R)`);
+
   // Pre-RRR checks (all except the RRR pillar — added after TP calc)
   // PILLARS (4): HTF Trend, Liquidity, BOS/CHOCH, RRR (added later)
-  // NON-PILLARS: Session, Daily Bias, RSI Div, EMA200 S/R, OTE, OB Proximity, EMA Signal
+  // NON-PILLARS: Session, Daily Bias, RSI Div, EMA200 S/R, OTE, OB Proximity, EMA Signal,
+  //              Premium/Discount Zone, VWAP, Kill Zone, Breaker Block
   const preRrrChecks = [
     { label: `${profile.biasKey.toUpperCase()} Trend Aligned`, met: trend4HAligned,         pillar: true,  weight: 1.5 },
     { label: 'Liquidity Sweep / FVG Fill',                     met: liquidityEvent,           pillar: true,  weight: 1.5 },
@@ -594,6 +634,10 @@ export function runAnalysis(allData, config = {}) {
     { label: 'RSI Divergence',                                 met: rsiResult.hasDivergence,  pillar: false, weight: 1.0 },
     { label: 'EMA200 Acting as S/R',                          met: ema200Acting,             pillar: false, weight: 0.75 },
     { label: 'Entry in OTE Zone (61.8–78.6%)',                met: inOTE,                    pillar: false, weight: 1.0 },
+    { label: `Entry in ${direction === 'long' ? 'Discount' : 'Premium'} Zone`, met: inCorrectZone, pillar: false, weight: 1.0 },
+    { label: 'VWAP Aligned',                                   met: vwapAligned,              pillar: false, weight: 0.75 },
+    { label: 'Kill Zone Active',                               met: killZone.inKillZone,      pillar: false, weight: 0.75 },
+    { label: 'Near Breaker Block (Flipped S/R)',               met: nearBreaker,              pillar: false, weight: 0.75 },
     ...(profile.hasEmaSignal
       ? [{ label: `EMA Signal: ${emaSignalType || 'None'}`,   met: emaSignalAligned,         pillar: false, weight: 1.0 }]
       : []),
@@ -752,9 +796,13 @@ export function runAnalysis(allData, config = {}) {
     emaSignal:        emaSignalActive ? { active: true, type: emaSignalType } : null,
     smcData: {
       orderBlocks:     [...obsOB, ...obsPrimary],
+      breakerBlocks:   breakerBlocks,
       fvgs:            [...fvgsOB, ...fvgsPrimary],
       sweeps:          allSweeps,
       structureShifts: allShifts,
+      vwap:            vwap,
     },
+    premiumDiscountZones,
+    killZone,
   };
 }

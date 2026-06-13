@@ -13,6 +13,7 @@
   --bg-card:        #131c2a;
   --bg-border:      #1a2535;
   --bg-border-dim:  #111827;
+  --border-subtle:  #1e2d40;
   --bg-hover:       #162030;
 
   /* ── Text ─────────────────────────────────────────────── */
@@ -56,12 +57,42 @@
   /* ── Transitions ──────────────────────────────────────── */
   --transition:   all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
   --transition-slow: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-fast: all 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-normal: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 
   /* ── Layout ───────────────────────────────────────────── */
   --header-height:  60px;
   --control-height: 58px;
   --nav-height:     68px;
   --sidebar-width:  400px;
+
+  /* ── Spacing Scale (4px base) ── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* ── Z-Index Scale ── */
+  --z-base: 1;
+  --z-dropdown: 10;
+  --z-sticky: 50;
+  --z-header: 100;
+  --z-overlay: 200;
+  --z-modal: 500;
+  --z-tooltip: 1000;
+
+  /* ── Elevation / Shadows ── */
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
+  --shadow-lg: 0 8px 24px rgba(0,0,0,0.5);
+  --shadow-glow-green: 0 0 15px rgba(0,229,180,0.15);
+  --shadow-glow-red: 0 0 15px rgba(255,63,94,0.15);
 }
 
 /* ── Reset ────────────────────────────────────────────────── */
@@ -215,3 +246,71 @@ body {
 }
 .fade-in  { animation: fadeIn  0.3s ease-out; }
 .slide-in { animation: slideIn 0.25s ease-out; }
+
+/* ── Accessibility ── */
+:root { color-scheme: dark; }
+
+*:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ── Number Tick Animation ── */
+@keyframes tickUp {
+  0% { color: var(--accent-green); transform: translateY(-2px); }
+  100% { color: inherit; transform: translateY(0); }
+}
+@keyframes tickDown {
+  0% { color: var(--accent-red); transform: translateY(2px); }
+  100% { color: inherit; transform: translateY(0); }
+}
+.tick-up { animation: tickUp 0.4s var(--ease-out); }
+.tick-down { animation: tickDown 0.4s var(--ease-out); }
+
+/* ── Stagger Animation ── */
+@keyframes staggerIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.stagger-in > * {
+  animation: staggerIn 0.35s var(--ease-out) both;
+}
+.stagger-in > *:nth-child(1) { animation-delay: 0.05s; }
+.stagger-in > *:nth-child(2) { animation-delay: 0.10s; }
+.stagger-in > *:nth-child(3) { animation-delay: 0.15s; }
+.stagger-in > *:nth-child(4) { animation-delay: 0.20s; }
+.stagger-in > *:nth-child(5) { animation-delay: 0.25s; }
+.stagger-in > *:nth-child(6) { animation-delay: 0.30s; }
+.stagger-in > *:nth-child(7) { animation-delay: 0.35s; }
+.stagger-in > *:nth-child(8) { animation-delay: 0.40s; }
+
+/* ── Copy Button Utility ── */
+.copy-btn {
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 0.65rem;
+  font-family: var(--font-mono);
+  transition: all var(--transition-fast);
+  margin-left: var(--space-1);
+}
+.copy-btn:hover {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border-color: var(--accent-cyan);
+}
+.copy-btn.copied {
+  color: var(--accent-green);
+  border-color: var(--accent-green);
+}

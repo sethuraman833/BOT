@@ -1,5 +1,24 @@
+import { useState, useCallback } from 'react';
 import { formatPrice, formatSize } from '../../utils/formatters.js';
 import './TradeBox.css';
+
+// Copy-to-clipboard button component
+function CopyBtn({ value }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = useCallback(() => {
+    if (value == null) return;
+    const raw = typeof value === 'number' ? value.toString() : value;
+    navigator.clipboard.writeText(raw).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }).catch(() => {});
+  }, [value]);
+  return (
+    <button className={`copy-btn ${copied ? 'copied' : ''}`} onClick={handleCopy} title="Copy to clipboard" aria-label="Copy price">
+      {copied ? '✓' : '⧉'}
+    </button>
+  );
+}
 
 export default function TradeBox({ analysis }) {
   if (!analysis || !analysis.direction) {
@@ -58,7 +77,7 @@ export default function TradeBox({ analysis }) {
       {/* ── Entry ──────────────────────────────────────────── */}
       <div className="trade-entry-block">
         <div className="teb-label">Entry Price</div>
-        <div className="teb-price">{formatPrice(entry, symbol)}</div>
+        <div className="teb-price">{formatPrice(entry, symbol)} <CopyBtn value={entry} /></div>
         <div className="teb-sub">
           <div className="teb-sub-item">
             <span className="text-dim">Size:</span>
@@ -84,7 +103,7 @@ export default function TradeBox({ analysis }) {
           <span className="tlr-label">Stop Loss</span>
         </div>
         <div className="tlr-right">
-          <span className="tlr-price text-red mono">{formatPrice(stopLoss?.value, symbol)}</span>
+          <span className="tlr-price text-red mono">{formatPrice(stopLoss?.value, symbol)} <CopyBtn value={stopLoss?.value} /></span>
           <span className="tlr-pct text-red">−{slPct}%</span>
         </div>
       </div>
@@ -101,7 +120,7 @@ export default function TradeBox({ analysis }) {
               <span className="tlr-label">{String(tp.reason || 'Target')}</span>
             </div>
             <div className="tlr-right">
-              <span className="tlr-price text-green mono">{formatPrice(tp.level, symbol)}</span>
+              <span className="tlr-price text-green mono">{formatPrice(tp.level, symbol)} <CopyBtn value={tp.level} /></span>
               <span className="tlr-rrr">{rrrLabel}</span>
               <span className="tlr-pct text-green">+{pctMove}%</span>
               <span className="tlr-close">→{String(tp.closePercent || 0)}%</span>

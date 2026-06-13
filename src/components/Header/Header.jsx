@@ -2,6 +2,7 @@ import { useMarket, useMarketDispatch } from '../../context/MarketContext.jsx';
 import { ASSETS, ASSET_LIST } from '../../utils/constants.js';
 import { formatPrice, formatPercent } from '../../utils/formatters.js';
 import { useAnalyze } from '../../hooks/useAnalyze.js';
+import { useRef, useEffect, useState } from 'react';
 import SessionBadge from '../SessionBadge/SessionBadge.jsx';
 import './Header.css';
 
@@ -11,6 +12,19 @@ export default function Header() {
   const { handleAnalyze } = useAnalyze();
   const isPositive = (liveChange || 0) >= 0;
 
+  // Bloomberg-style tick animation
+  const prevPrice = useRef(livePrice);
+  const [tickClass, setTickClass] = useState('');
+  useEffect(() => {
+    if (prevPrice.current != null && livePrice != null && livePrice !== prevPrice.current) {
+      setTickClass(livePrice > prevPrice.current ? 'tick-up' : 'tick-down');
+      const t = setTimeout(() => setTickClass(''), 400);
+      prevPrice.current = livePrice;
+      return () => clearTimeout(t);
+    }
+    prevPrice.current = livePrice;
+  }, [livePrice]);
+
   return (
     <header className="header">
       <div className="header-left">
@@ -18,7 +32,7 @@ export default function Header() {
           <div className="brand-icon">T</div>
           <div>
             <h1 className="header-title">TERMINUS</h1>
-            <span className="header-subtitle">SMC INTELLIGENCE v8</span>
+            <span className="header-subtitle">SMC INTELLIGENCE v10</span>
           </div>
         </div>
       </div>
@@ -38,7 +52,7 @@ export default function Header() {
       <div className="header-right">
         {livePrice != null && (
           <div className="live-price-group">
-            <span className="live-price mono">{formatPrice(livePrice, asset)}</span>
+            <span className={`live-price mono ${tickClass}`}>{formatPrice(livePrice, asset)}</span>
             <span className={`live-change mono ${isPositive ? 'positive' : 'negative'}`}>
               {isPositive ? '+' : ''}{formatPercent(liveChange)}
             </span>

@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────
-//  SMC Detector v8.0 — Fully Audited SMC Detection Engine
+//  SMC Detector v9.0 — Breaker Blocks, VWAP, Volume-Weighted OBs
 // ─────────────────────────────────────────────────────────
 
 /**
@@ -30,12 +30,17 @@ export function findSwingPoints(candles, lookback = 5) {
 }
 
 /**
- * Detect Order Blocks (v6: requires 2.5x impulse ratio, body validation, recency cap 50 bars).
+ * Detect Order Blocks (v7: breaker blocks, volume weighting).
+ * When an OB is mitigated, it becomes a "breaker block" — flipped S/R.
  */
 export function detectOrderBlocks(candles, currentPrice) {
   if (!candles || candles.length === 0) return []; // L6 null guard
   const obs = [];
   const recencyCutoff = candles.length - 50;
+
+  // Pre-calculate average volume for volume weighting
+  const recentCandles = candles.slice(-20);
+  const avgVolume = recentCandles.reduce((s, c) => s + (c.volume || 0), 0) / recentCandles.length;
 
   for (let i = 0; i < candles.length - 1; i++) { // start at 0 (M7)
     const ob = candles[i];
@@ -44,6 +49,9 @@ export function detectOrderBlocks(candles, currentPrice) {
     const obBody = Math.abs(ob.close - ob.open);
     const impulseBody = Math.abs(impulse.close - impulse.open);
     if (obBody === 0) continue; // skip doji
+
+    // Volume weight multiplier (impulse volume vs average)
+    const volMult = (avgVolume > 0 && impulse.volume) ? Math.max(0.5, impulse.volume / avgVolume) : 1.0;
 
     // Demand OB: bearish candle followed by strong bullish impulse
     if (ob.close < ob.open && impulse.close > impulse.open && impulseBody >= obBody * 2.5) {
@@ -55,6 +63,7 @@ export function detectOrderBlocks(candles, currentPrice) {
           break;
         }
       }
+      const baseStrength = (impulseBody / obBody) * volMult;
       if (!mitigated && i >= recencyCutoff) {
         obs.push({
           type: 'demand',
@@ -63,7 +72,20 @@ export function detectOrderBlocks(candles, currentPrice) {
           entryBoundary: ob.high,
           slBoundary: ob.low,
           status: 'active',
-          strength: impulseBody / obBody,
+          strength: baseStrength,
+          candleIndex: i,
+          time: ob.time,
+        });
+      } else if (mitigated && i >= recencyCutoff) {
+        // Breaker block: mitigated demand OB becomes supply (resistance)
+        obs.push({
+          type: 'supply',
+          upperBound: ob.high,
+          lowerBound: ob.low,
+          entryBoundary: ob.low,
+          slBoundary: ob.high,
+          status: 'breaker',
+          strength: baseStrength * 0.7, // breakers are slightly weaker than fresh OBs
           candleIndex: i,
           time: ob.time,
         });
@@ -80,6 +102,7 @@ export function detectOrderBlocks(candles, currentPrice) {
           break;
         }
       }
+      const baseStrength = (impulseBody / obBody) * volMult;
       if (!mitigated && i >= recencyCutoff) {
         obs.push({
           type: 'supply',
@@ -88,7 +111,20 @@ export function detectOrderBlocks(candles, currentPrice) {
           entryBoundary: ob.low,
           slBoundary: ob.high,
           status: 'active',
-          strength: impulseBody / obBody,
+          strength: baseStrength,
+          candleIndex: i,
+          time: ob.time,
+        });
+      } else if (mitigated && i >= recencyCutoff) {
+        // Breaker block: mitigated supply OB becomes demand (support)
+        obs.push({
+          type: 'demand',
+          upperBound: ob.high,
+          lowerBound: ob.low,
+          entryBoundary: ob.high,
+          slBoundary: ob.low,
+          status: 'breaker',
+          strength: baseStrength * 0.7,
           candleIndex: i,
           time: ob.time,
         });
@@ -96,14 +132,23 @@ export function detectOrderBlocks(candles, currentPrice) {
     }
   }
 
-  // Sort by proximity to price, strongest first, limit to 5
+  // Sort by proximity to price, strongest first, limit to 8 (increased for breakers)
   return obs
     .sort((a, b) => {
       const distA = Math.abs(a.entryBoundary - (currentPrice || 0));
       const distB = Math.abs(b.entryBoundary - (currentPrice || 0));
       return distA - distB;
     })
-    .slice(0, 5);
+    .slice(0, 8);
+}
+
+/**
+ * Detect only Breaker Blocks — mitigated Order Blocks with flipped type.
+ * Convenience wrapper around detectOrderBlocks.
+ */
+export function detectBreakerBlocks(candles, currentPrice) {
+  const allOBs = detectOrderBlocks(candles, currentPrice);
+  return allOBs.filter(ob => ob.status === 'breaker');
 }
 
 /**
@@ -430,4 +475,23 @@ export function detectRSIDivergence(candles, direction, period = 14) {
   }
 
   return { rsiValue, hasDivergence, detail, isOverbought, isOversold };
+}
+
+/**
+ * Calculate VWAP (Volume-Weighted Average Price).
+ * VWAP = Σ(typical_price × volume) / Σ(volume)
+ * Used as an institutional reference level for premium/discount.
+ */
+export function calculateVWAP(candles) {
+  if (!candles || candles.length === 0) return null;
+  let cumTypVolume = 0;
+  let cumVolume = 0;
+  for (const c of candles) {
+    const typicalPrice = (c.high + c.low + c.close) / 3;
+    const vol = c.volume || 0;
+    cumTypVolume += typicalPrice * vol;
+    cumVolume += vol;
+  }
+  if (cumVolume === 0) return null;
+  return cumTypVolume / cumVolume;
 }
