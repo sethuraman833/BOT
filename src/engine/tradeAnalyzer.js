@@ -120,7 +120,7 @@ const TF_PROFILES = {
     biasKey:             '4h',
     obKey:               '4h',
     swingLookback:       3,
-    minPillars:          4, // all 4 core pillars required
+    minPillars:          3, // lowered from 4 to prevent overly restrictive setups
     minConfluence:       6, // recalibrated: ~7/11 → 6/9 (count-based scale)
     maxSlPct:            0.020,  // 2% max SL
     maxTpPct:            0.07,   // 7% max TP range
@@ -142,7 +142,7 @@ const TF_PROFILES = {
     biasKey:             '1d',
     obKey:               '4h',
     swingLookback:       3,
-    minPillars:          4, // all 4 core pillars required
+    minPillars:          3, // lowered from 4 to prevent overly restrictive setups
     minConfluence:       7, // recalibrated: ~8/11 → 7/9 (count-based scale)
     maxSlPct:            0.025,
     maxTpPct:            0.12,   // 12% max TP range
@@ -164,7 +164,7 @@ const TF_PROFILES = {
     biasKey:             '1w',
     obKey:               '1d',
     swingLookback:       5,
-    minPillars:          4, // all 4 core pillars required
+    minPillars:          3, // lowered from 4 to prevent overly restrictive setups
     minConfluence:       7, // recalibrated: ~8/11 → 7/9 (count-based scale)
     maxSlPct:            0.030,
     maxTpPct:            0.20,   // 20% max TP range
@@ -186,7 +186,7 @@ const TF_PROFILES = {
     biasKey:             '1w',
     obKey:               '1w',
     swingLookback:       7,
-    minPillars:          4, // lowered from 5 to make achievable (Flaw 13)
+    minPillars:          3, // lowered from 4 to prevent overly restrictive setups
     minConfluence:       5, // recalibrated: ~6/11 → 5/9 (count-based scale)
     maxSlPct:            0.050,
     maxTpPct:            0.30,
