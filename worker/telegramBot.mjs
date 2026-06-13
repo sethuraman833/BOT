@@ -3,6 +3,38 @@
 // ─────────────────────────────────────────────────────────
 
 import TelegramBot from 'node-telegram-bot-api';
+import fs from 'fs';
+import path from 'path';
+
+// Programmatic .env loader for local development
+const possiblePaths = [
+  path.join(process.cwd(), '.env'),
+  path.join(process.cwd(), '..', '.env'),
+  path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([a-zA-Z]:)/, '$1')), '.env'),
+  path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([a-zA-Z]:)/, '$1')), '..', '.env'),
+];
+
+for (const envPath of possiblePaths) {
+  if (fs.existsSync(envPath)) {
+    try {
+      const content = fs.readFileSync(envPath, 'utf8');
+      content.split('\n').forEach(line => {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) return;
+        const eqIdx = trimmed.indexOf('=');
+        if (eqIdx === -1) return;
+        const key = trimmed.slice(0, eqIdx).trim();
+        const val = trimmed.slice(eqIdx + 1).trim();
+        if (key && !process.env[key]) {
+          process.env[key] = val.replace(/^["']|["']$/g, '');
+        }
+      });
+      break;
+    } catch (err) {
+      // silent fallback
+    }
+  }
+}
 
 const token  = process.env.TELEGRAM_BOT_TOKEN;
 const chatId = process.env.TELEGRAM_CHAT_ID;
