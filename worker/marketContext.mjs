@@ -5,6 +5,7 @@
 
 import fetch from 'node-fetch';
 import { sendDailyContext } from './telegramBot.mjs';
+import { ASSET_LIST } from '../src/utils/constants.js';
 
 const REST = 'https://fapi.binance.com/fapi/v1';
 
@@ -41,10 +42,9 @@ export async function sendDailyReport() {
   const dateStr = now.toISOString().split('T')[0];
 
   try {
-    const assets = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 'LINKUSDT'];
     let report = `📊 *MARKET CONTEXT REPORT — ${dateStr}*\n━━━━━━━━━━━━━━━━━━━━━━\n`;
 
-    for (const symbol of assets) {
+    for (const symbol of ASSET_LIST) {
       const daily = await getKlines(symbol, '1d', 7);
       const h4 = await getKlines(symbol, '4h', 200);
 

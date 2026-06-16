@@ -45,7 +45,6 @@ const ATR_TF_MULT = {
   '5m': 1.0, '15m': 1.2, '1h': 1.5, '4h': 2.0, '1d': 2.5,
 };
 const ATR_SYMBOL_SCALE = {
-  XRPUSDT: 1.2, ADAUSDT: 1.2, LINKUSDT: 1.1,
 };
 
 function calculateATR(candles, period = 14) {

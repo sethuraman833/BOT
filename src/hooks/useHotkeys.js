@@ -3,6 +3,7 @@
 // ─────────────────────────────────────────────────────────
 
 import { useEffect, useCallback } from 'react';
+import { ASSET_LIST } from '../utils/constants.js';
 
 /**
  * Hook to register global keyboard shortcuts.
@@ -54,13 +55,12 @@ export function useHotkeys(dispatch, handleAnalyze, isAnalyzing = false) {
       return;
     }
 
-    // Asset switching: Ctrl+1 through Ctrl+7
-    if (e.ctrlKey && key >= '1' && key <= '7') {
+    // Asset switching: Ctrl+1 through Ctrl+9
+    if (e.ctrlKey && key >= '1' && key <= '9') {
       e.preventDefault();
-      const ASSET_KEYS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 'LINKUSDT'];
       const idx = parseInt(key) - 1;
-      if (idx < ASSET_KEYS.length) {
-        dispatch({ type: 'SET_ASSET', payload: ASSET_KEYS[idx] });
+      if (idx < ASSET_LIST.length) {
+        dispatch({ type: 'SET_ASSET', payload: ASSET_LIST[idx] });
       }
       return;
     }
