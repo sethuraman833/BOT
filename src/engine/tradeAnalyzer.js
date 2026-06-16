@@ -458,20 +458,24 @@ export function runAnalysis(allData, config = {}) {
 
   if (direction) {
     const allOBs    = [...obsOB, ...obsPrimary];
+    const activeOBs = allOBs.filter(o => o.status === 'active');
+
     nearestOB = direction === 'long'
-      ? allOBs.filter(o => o.type === 'demand' && o.entryBoundary <= currentPrice).sort((a,b) => b.entryBoundary - a.entryBoundary)[0]
-      : allOBs.filter(o => o.type === 'supply' && o.entryBoundary >= currentPrice).sort((a,b) => a.entryBoundary - b.entryBoundary)[0];
+      ? activeOBs.filter(o => o.type === 'demand' && currentPrice >= o.lowerBound).sort((a,b) => b.entryBoundary - a.entryBoundary)[0]
+      : activeOBs.filter(o => o.type === 'supply' && currentPrice <= o.upperBound).sort((a,b) => a.entryBoundary - b.entryBoundary)[0];
+
+    const insideOB = nearestOB && (
+      direction === 'long'
+        ? (currentPrice <= nearestOB.entryBoundary && currentPrice >= nearestOB.lowerBound)
+        : (currentPrice >= nearestOB.entryBoundary && currentPrice <= nearestOB.upperBound)
+    );
 
     if (inOTE && oteZone) {
-      entry = direction === 'long'
-        ? Math.min(oteZone.midpoint, currentPrice)
-        : Math.max(oteZone.midpoint, currentPrice);
+      entry = currentPrice;
+    } else if (insideOB) {
+      entry = currentPrice;
     } else if (nearestOB) {
-      const obEntry = nearestOB.entryBoundary;
-      if ((direction === 'long' && obEntry <= currentPrice) ||
-          (direction === 'short' && obEntry >= currentPrice)) {
-        entry = obEntry;
-      }
+      entry = nearestOB.entryBoundary;
     }
 
     // Compute ATR-based minimum SL distance for this symbol+timeframe
