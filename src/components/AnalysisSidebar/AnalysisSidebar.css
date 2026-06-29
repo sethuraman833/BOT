@@ -655,3 +655,97 @@
   padding: 8px 0;
   opacity: 0.8;
 }
+
+/* Detail info for filled rows */
+.cme-filled-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 0.62rem;
+  color: var(--text-secondary);
+}
+
+.cme-filled-age {
+  font-size: 0.58rem;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+.cme-filled-time {
+  font-size: 0.58rem;
+  color: var(--accent-cyan);
+  background: rgba(0, 212, 255, 0.08);
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+/* This Week's Gap indicator */
+.cme-this-week {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 10px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+.cme-this-week.filled {
+  background: rgba(0, 229, 180, 0.05);
+  border: 1px dashed rgba(0, 229, 180, 0.2);
+  color: var(--accent-green);
+}
+.cme-this-week.open {
+  background: rgba(255, 193, 7, 0.05);
+  border: 1px dashed rgba(255, 193, 7, 0.2);
+  color: var(--accent-yellow);
+}
+.cme-tw-label {
+  color: var(--text-secondary);
+}
+.cme-tw-status {
+  font-family: var(--font-mono);
+}
+
+/* Stats dashboard */
+.cme-stats-bar {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--bg-border-dim);
+}
+
+/* Handle streak grid column spacing if 4 items exist */
+.cme-stats-bar:has(.cme-stat-item:nth-child(4)) {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.cme-stat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.015);
+  padding: 4px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.02);
+}
+
+.cme-stat-val {
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+.cme-stat-lbl {
+  font-size: 0.55rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  margin-top: 2px;
+  letter-spacing: 0.3px;
+}
+

@@ -225,19 +225,78 @@ function CMEGapSection({ cmeGapData }) {
       {cmeGapData.filledGaps && cmeGapData.filledGaps.length > 0 && (
         <div className="cme-filled-section">
           <div className="cme-filled-header">Recently Filled</div>
-          {cmeGapData.filledGaps.map((g, i) => (
-            <div className="cme-filled-row" key={i}>
-              <span className="cme-filled-icon">✓</span>
-              <span className="cme-filled-range mono">${g.gapLower.toFixed(0)}–${g.gapUpper.toFixed(0)}</span>
-              <span className="cme-filled-dir">{g.direction === 'up' ? '↑' : '↓'}</span>
-            </div>
-          ))}
+          {cmeGapData.filledGaps.map((g, i) => {
+            const ageStr = (() => {
+              if (g.ageHours < 24) return `${g.ageHours}h ago`;
+              const days = Math.round(g.ageHours / 24);
+              if (days < 7) return `${days}d ago`;
+              const weeks = days / 7;
+              return (weeks % 1 === 0 ? `${weeks}w` : `${weeks.toFixed(1)}w`) + ' ago';
+            })();
+            const fillStr = g.timeToFillHours != null
+              ? (g.timeToFillHours < 24 ? `${g.timeToFillHours}h` : `${Math.round(g.timeToFillHours / 24)}d`)
+              : null;
+            return (
+              <div className="cme-filled-row" key={i}>
+                <span className="cme-filled-icon">✓</span>
+                <span className="cme-filled-range mono">${g.gapLower.toFixed(0)}–${g.gapUpper.toFixed(0)}</span>
+                <span className="cme-filled-dir">{g.direction === 'up' ? '↑' : '↓'}</span>
+                <span className="cme-filled-age">{ageStr}</span>
+                {fillStr && <span className="cme-filled-time">⏱ {fillStr}</span>}
+              </div>
+            );
+          })}
         </div>
       )}
 
       {!cmeGapData.hasUnfilledGaps && (
         <div className="cme-all-filled">✓ All CME gaps filled</div>
       )}
+
+      {/* This Week's Gap status */}
+      {cmeGapData.stats?.thisWeekGap && (
+        <div className={`cme-this-week ${cmeGapData.stats.thisWeekFilled ? 'filled' : 'open'}`}>
+          <span className="cme-tw-label">This Week's Gap</span>
+          <span className="cme-tw-status">
+            {cmeGapData.stats.thisWeekFilled
+              ? '✓ FILLED'
+              : `⬤ OPEN ${cmeGapData.stats.thisWeekGap.direction === 'up' ? '↑' : '↓'} ${cmeGapData.stats.thisWeekGap.gapPct.toFixed(2)}%`}
+          </span>
+        </div>
+      )}
+
+      {/* Stats bar */}
+      {cmeGapData.stats && cmeGapData.stats.totalGaps > 0 && (
+        <div className="cme-stats-bar">
+          <div className="cme-stat-item">
+            <span className="cme-stat-val">{cmeGapData.stats.fillRate}%</span>
+            <span className="cme-stat-lbl">Fill Rate</span>
+          </div>
+          <div className="cme-stat-item">
+            <span className="cme-stat-val">{cmeGapData.stats.totalFilled}/{cmeGapData.stats.totalGaps}</span>
+            <span className="cme-stat-lbl">Gaps Filled</span>
+          </div>
+          {cmeGapData.stats.avgFillTimeHours != null && (
+            <div className="cme-stat-item">
+              <span className="cme-stat-val">
+                {cmeGapData.stats.avgFillTimeHours < 24
+                  ? `${cmeGapData.stats.avgFillTimeHours}h`
+                  : `${Math.round(cmeGapData.stats.avgFillTimeHours / 24)}d`}
+              </span>
+              <span className="cme-stat-lbl">Avg Fill</span>
+            </div>
+          )}
+          {cmeGapData.stats.consecutiveDir && cmeGapData.stats.consecutiveCount >= 2 && (
+            <div className="cme-stat-item">
+              <span className="cme-stat-val" style={{ color: cmeGapData.stats.consecutiveDir === 'up' ? 'var(--accent-green)' : 'var(--accent-red)' }}>
+                {cmeGapData.stats.consecutiveCount}× {cmeGapData.stats.consecutiveDir === 'up' ? '↑' : '↓'}
+              </span>
+              <span className="cme-stat-lbl">Streak</span>
+            </div>
+          )}
+        </div>
+      )}
+
     </div>
   );
 }

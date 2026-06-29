@@ -122,6 +122,11 @@ export function detectCMEGaps(candles1h, currentPrice, maxGaps = 8) {
           ? (currentPrice - gapLower) / currentPrice   // How far below current price is the gap floor
           : (gapUpper - currentPrice) / currentPrice;   // How far above current price is the gap ceiling
 
+        // Time it took to fill (only for filled gaps)
+        const timeToFillHours = (filled && filledTime)
+          ? Math.round((filledTime - c.time) / 3600)
+          : null;
+
         gaps.push({
           fridayClose,
           sundayOpen,
@@ -135,6 +140,7 @@ export function detectCMEGaps(candles1h, currentPrice, maxGaps = 8) {
           filled,
           filledAt,
           filledTime,
+          timeToFillHours,
           partialFillPct: Math.round(partialFillPct),
           distToGapPct: distToGap * 100,
           ageHours: Math.round((currentPrice ? (Date.now() / 1000 - c.time) : 0) / 3600),
@@ -299,6 +305,36 @@ export function analyzeCMEGaps(gaps, direction, trendBias, orderBlocks, currentP
     summary = `${analyzed.length} unfilled gaps — nearest: $${nearestGap.gapLower.toFixed(0)}–$${nearestGap.gapUpper.toFixed(0)} (${nearestGap.fillProbability}%)`;
   }
 
+  // ── Stats: historical fill rate ──────────────────────────
+  const totalGaps = gaps.length;
+  const totalFilled = gaps.filter(g => g.filled).length;
+  const fillRate = totalGaps > 0 ? Math.round((totalFilled / totalGaps) * 100) : 0;
+
+  // ── Stats: average time to fill ─────────────────────────
+  const fillTimes = gaps.filter(g => g.filled && g.timeToFillHours != null).map(g => g.timeToFillHours);
+  const avgFillTimeHours = fillTimes.length > 0
+    ? Math.round(fillTimes.reduce((s, t) => s + t, 0) / fillTimes.length)
+    : null;
+
+  // ── This week's gap detection ───────────────────────────
+  // Find gap from the most recent weekend (ageHours < 168 = 1 week)
+  const thisWeekGap = gaps.find(g => g.ageHours < 168) || null;
+  const thisWeekFilled = thisWeekGap ? thisWeekGap.filled : null;
+
+  // ── Consecutive gap direction streak ────────────────────
+  // If recent gaps all point the same direction, institutional positioning signal
+  let consecutiveDir = null;
+  let consecutiveCount = 0;
+  const recentGaps = gaps.filter(g => g.ageHours < 672); // last ~4 weeks
+  if (recentGaps.length >= 2) {
+    consecutiveDir = recentGaps[0].direction;
+    for (const g of recentGaps) {
+      if (g.direction === consecutiveDir) consecutiveCount++;
+      else break;
+    }
+    if (consecutiveCount < 2) { consecutiveDir = null; consecutiveCount = 0; }
+  }
+
   return {
     hasUnfilledGaps: analyzed.length > 0,
     unfilledGaps: analyzed,
@@ -306,5 +342,15 @@ export function analyzeCMEGaps(gaps, direction, trendBias, orderBlocks, currentP
     nearestGap,
     gapFillBias,
     summary,
+    stats: {
+      totalGaps,
+      totalFilled,
+      fillRate,
+      avgFillTimeHours,
+      thisWeekGap,
+      thisWeekFilled,
+      consecutiveDir,
+      consecutiveCount,
+    },
   };
 }
