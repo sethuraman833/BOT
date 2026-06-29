@@ -184,7 +184,15 @@ function CMEGapSection({ cmeGapData }) {
               </div>
               <div className="cme-gap-meta">
                 <span>Dist: {g.distToGapPct.toFixed(1)}%</span>
-                <span>Age: {g.ageHours < 24 ? `${g.ageHours}h` : `${Math.round(g.ageHours / 24)}d`}</span>
+                <span>
+                  Age: {(() => {
+                    if (g.ageHours < 24) return `${g.ageHours}h`;
+                    const days = Math.round(g.ageHours / 24);
+                    if (days < 7) return `${days}d`;
+                    const weeks = days / 7;
+                    return weeks % 1 === 0 ? `${weeks}w` : `${weeks.toFixed(1)}w`;
+                  })()}
+                </span>
                 <span>Fill: {g.partialFillPct}%</span>
               </div>
               {/* Fill probability bar */}
