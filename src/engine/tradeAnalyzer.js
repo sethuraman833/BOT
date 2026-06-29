@@ -24,6 +24,7 @@ import {
   estimateLiquidationPrice
 } from './riskManager.js';
 import { getCurrentSession, isSessionValid, getKillZone } from './sessionFilter.js';
+import { detectCMEGaps, analyzeCMEGaps } from './cmeGapAnalyzer.js';
 import { RISK_AMOUNT, ASSETS } from '../utils/constants.js';
 
 // ─── ATR-BASED MINIMUM SL DISTANCE ────────────────────────
@@ -248,6 +249,7 @@ export function runAnalysis(allData, config = {}) {
   const candlesBias      = allData[profile.biasKey]      || [];
   const candlesOB        = allData[profile.obKey]        || [];
   const candles1d        = allData['1d']                 || [];
+  const candles1h        = allData['1h']                 || [];
 
   const candlesForBias = candlesBias.length > 20   ? candlesBias
     : candlesStructure.length > 20                 ? candlesStructure
@@ -820,5 +822,12 @@ export function runAnalysis(allData, config = {}) {
     },
     premiumDiscountZones,
     killZone,
+    cmeGapData: (() => {
+      const gapCandles = candles1h.length > 48 ? candles1h : candlesPrimary;
+      const rawGaps = detectCMEGaps(gapCandles, currentPrice);
+      const result = analyzeCMEGaps(rawGaps, direction, trendBias, [...obsOB, ...obsPrimary], currentPrice);
+      if (result.hasUnfilledGaps) steps.push(`CME Gap: ${result.summary}`);
+      return result;
+    })(),
   };
 }

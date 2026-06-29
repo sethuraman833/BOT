@@ -144,6 +144,96 @@ function AIOpinion({ aiAnalysis }) {
   );
 }
 
+function CMEGapSection({ cmeGapData }) {
+  if (!cmeGapData || (!cmeGapData.hasUnfilledGaps && (!cmeGapData.filledGaps || cmeGapData.filledGaps.length === 0))) return null;
+
+  const tierColor = (tier) => {
+    if (tier === 'VERY_HIGH') return 'var(--accent-green)';
+    if (tier === 'HIGH') return 'var(--accent-blue)';
+    if (tier === 'MODERATE') return 'var(--accent-yellow)';
+    return 'var(--accent-red)';
+  };
+
+  return (
+    <div className="sidebar-section">
+      <div className="section-header">📊 CME Gap Analysis</div>
+
+      {cmeGapData.gapFillBias && (
+        <div className="cme-bias-pill" style={{
+          background: cmeGapData.gapFillBias === 'bullish' ? 'rgba(0,212,100,0.12)' : 'rgba(255,63,94,0.12)',
+          color: cmeGapData.gapFillBias === 'bullish' ? 'var(--accent-green)' : 'var(--accent-red)',
+          border: `1px solid ${cmeGapData.gapFillBias === 'bullish' ? 'var(--accent-green)' : 'var(--accent-red)'}30`,
+        }}>
+          Gap Fill Bias: {cmeGapData.gapFillBias === 'bullish' ? '↑ BULLISH' : '↓ BEARISH'}
+        </div>
+      )}
+
+      {/* Unfilled gaps */}
+      {cmeGapData.unfilledGaps && cmeGapData.unfilledGaps.length > 0 && (
+        <div className="cme-gaps-list">
+          {cmeGapData.unfilledGaps.map((g, i) => (
+            <div className="cme-gap-card" key={i}>
+              <div className="cme-gap-header">
+                <span className={`cme-gap-dir ${g.direction}`}>
+                  {g.direction === 'up' ? '⬆' : '⬇'} Gap {g.direction.toUpperCase()}
+                </span>
+                <span className="cme-gap-pct">{g.gapPct.toFixed(2)}%</span>
+              </div>
+              <div className="cme-gap-range mono">
+                ${g.gapLower.toFixed(2)} — ${g.gapUpper.toFixed(2)}
+              </div>
+              <div className="cme-gap-meta">
+                <span>Dist: {g.distToGapPct.toFixed(1)}%</span>
+                <span>Age: {g.ageHours < 24 ? `${g.ageHours}h` : `${Math.round(g.ageHours / 24)}d`}</span>
+                <span>Fill: {g.partialFillPct}%</span>
+              </div>
+              {/* Fill probability bar */}
+              <div className="cme-prob-row">
+                <span className="cme-prob-label">Fill Probability</span>
+                <div className="cme-prob-track">
+                  <div
+                    className="cme-prob-fill"
+                    style={{
+                      width: `${g.fillProbability}%`,
+                      background: tierColor(g.fillTier),
+                      boxShadow: `0 0 6px ${tierColor(g.fillTier)}40`,
+                    }}
+                  />
+                </div>
+                <span className="cme-prob-pct" style={{ color: tierColor(g.fillTier) }}>{g.fillProbability}%</span>
+              </div>
+              {/* Prediction factors */}
+              {g.factors && g.factors.length > 0 && (
+                <ul className="cme-factors">
+                  {g.factors.map((f, fi) => <li key={fi}>{f}</li>)}
+                </ul>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Recently filled gaps */}
+      {cmeGapData.filledGaps && cmeGapData.filledGaps.length > 0 && (
+        <div className="cme-filled-section">
+          <div className="cme-filled-header">Recently Filled</div>
+          {cmeGapData.filledGaps.map((g, i) => (
+            <div className="cme-filled-row" key={i}>
+              <span className="cme-filled-icon">✓</span>
+              <span className="cme-filled-range mono">${g.gapLower.toFixed(0)}–${g.gapUpper.toFixed(0)}</span>
+              <span className="cme-filled-dir">{g.direction === 'up' ? '↑' : '↓'}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!cmeGapData.hasUnfilledGaps && (
+        <div className="cme-all-filled">✓ All CME gaps filled</div>
+      )}
+    </div>
+  );
+}
+
 // Colour per TF mode
 const MODE_COLORS = {
   '5m':  '#00d4ff',
@@ -264,6 +354,9 @@ export default function AnalysisSidebar() {
 
         {/* ── SMC COUNTS ────────────────────────────────────── */}
         <SMCSection smcData={analysis.smcData} />
+
+        {/* ── CME GAP ANALYSIS ────────────────────────────────── */}
+        <CMEGapSection cmeGapData={analysis.cmeGapData} />
 
         {/* ── STEPS LOG ─────────────────────────────────────── */}
         <StepAccordion steps={analysis.analysisSteps} />
