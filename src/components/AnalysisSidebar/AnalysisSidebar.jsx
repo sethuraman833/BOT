@@ -255,13 +255,25 @@ function CMEGapSection({ cmeGapData }) {
 
       {/* This Week's Gap status */}
       {cmeGapData.stats?.thisWeekGap && (
-        <div className={`cme-this-week ${cmeGapData.stats.thisWeekFilled ? 'filled' : 'open'}`}>
-          <span className="cme-tw-label">This Week's Gap</span>
-          <span className="cme-tw-status">
-            {cmeGapData.stats.thisWeekFilled
-              ? '✓ FILLED'
-              : `⬤ OPEN ${cmeGapData.stats.thisWeekGap.direction === 'up' ? '↑' : '↓'} ${cmeGapData.stats.thisWeekGap.gapPct.toFixed(2)}%`}
-          </span>
+        <div className={`cme-this-week-card ${cmeGapData.stats.thisWeekFilled ? 'filled' : 'open'}`}>
+          <div className="cme-tw-header">
+            <span className="cme-tw-label">This Week's Gap</span>
+            <span className="cme-tw-status-badge">
+              {cmeGapData.stats.thisWeekFilled ? '✓ FILLED' : '⬤ OPEN'}
+            </span>
+          </div>
+          <div className="cme-tw-price mono">
+            ${cmeGapData.stats.thisWeekGap.gapLower.toFixed(2)} — ${cmeGapData.stats.thisWeekGap.gapUpper.toFixed(2)}
+          </div>
+          <div className="cme-tw-meta">
+            <span className={cmeGapData.stats.thisWeekGap.direction}>
+              {cmeGapData.stats.thisWeekGap.direction === 'up' ? '⬆ Gap Up' : '⬇ Gap Down'}
+            </span>
+            <span>Size: {cmeGapData.stats.thisWeekGap.gapPct.toFixed(2)}%</span>
+            {cmeGapData.stats.thisWeekGap.timeToFillHours && (
+              <span>⏱ {cmeGapData.stats.thisWeekGap.timeToFillHours < 24 ? `${cmeGapData.stats.thisWeekGap.timeToFillHours}h` : `${Math.round(cmeGapData.stats.thisWeekGap.timeToFillHours / 24)}d`}</span>
+            )}
+          </div>
         </div>
       )}
 

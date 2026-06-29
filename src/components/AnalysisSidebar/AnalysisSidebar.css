@@ -681,31 +681,62 @@
 }
 
 /* This Week's Gap indicator */
-.cme-this-week {
+.cme-this-week-card {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 0.68rem;
+  background: rgba(255, 255, 255, 0.015);
+  border: 1px solid var(--bg-border-dim);
+}
+.cme-this-week-card.filled {
+  border-color: rgba(0, 229, 180, 0.15);
+  background: rgba(0, 229, 180, 0.03);
+}
+.cme-this-week-card.open {
+  border-color: rgba(255, 193, 7, 0.15);
+  background: rgba(255, 193, 7, 0.03);
+}
+.cme-tw-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-top: 10px;
-  padding: 6px 10px;
-  border-radius: 6px;
-  font-size: 0.68rem;
-  font-weight: 600;
-}
-.cme-this-week.filled {
-  background: rgba(0, 229, 180, 0.05);
-  border: 1px dashed rgba(0, 229, 180, 0.2);
-  color: var(--accent-green);
-}
-.cme-this-week.open {
-  background: rgba(255, 193, 7, 0.05);
-  border: 1px dashed rgba(255, 193, 7, 0.2);
-  color: var(--accent-yellow);
+  margin-bottom: 6px;
 }
 .cme-tw-label {
+  font-weight: 700;
   color: var(--text-secondary);
 }
-.cme-tw-status {
-  font-family: var(--font-mono);
+.cme-tw-status-badge {
+  font-weight: 800;
+  font-size: 0.62rem;
+  letter-spacing: 0.5px;
+}
+.cme-this-week-card.filled .cme-tw-status-badge {
+  color: var(--accent-green);
+}
+.cme-this-week-card.open .cme-tw-status-badge {
+  color: var(--accent-yellow);
+}
+.cme-tw-price {
+  font-size: 0.75rem;
+  color: var(--text-primary);
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.cme-tw-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 0.6rem;
+  color: var(--text-dim);
+}
+.cme-tw-meta .up {
+  color: var(--accent-green);
+  font-weight: 600;
+}
+.cme-tw-meta .down {
+  color: var(--accent-red);
+  font-weight: 600;
 }
 
 /* Stats dashboard */
