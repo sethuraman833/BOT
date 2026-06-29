@@ -379,6 +379,14 @@ export function runAnalysis(allData, config = {}) {
 
   steps.push(`Direction: ${direction || 'RANGING'} | Bull: ${upProb}% Bear: ${downProb}%`);
 
+  // ── CME Gap detection (Run early for Risk Shield and TP Target injection) ──
+  const gapCandles = candles1h.length > 48 ? candles1h : candlesPrimary;
+  const rawGaps = detectCMEGaps(gapCandles, currentPrice);
+  const cmeGapData = analyzeCMEGaps(rawGaps, direction, trendBias, [...obsOB, ...obsPrimary], currentPrice);
+  if (cmeGapData.hasUnfilledGaps) {
+    steps.push(`CME Gap Draw: ${cmeGapData.summary}`);
+  }
+
   // ── Primary Timeframe EMA Trend Veto ───────────────────────────
   const primEma20_arr  = calculateEMA(candlesPrimary, 20);
   const primEma50_arr  = calculateEMA(candlesPrimary, 50);
@@ -564,10 +572,28 @@ export function runAnalysis(allData, config = {}) {
       if (direction === 'short' && slData.value <= entry) slSideInvalid = true;
     }
 
+    // ── CME Gap Risk Shield ──────────────────────────────────
+    let adjustedRiskAmount = riskAmount;
+    let cmeRiskShieldActive = false;
+    if (cmeGapData.hasUnfilledGaps && cmeGapData.nearestGap) {
+      const nearest = cmeGapData.nearestGap;
+      const opposing = (direction === 'long' && nearest.direction === 'up') ||
+                       (direction === 'short' && nearest.direction === 'down');
+      if (opposing && nearest.distToGapPct < 3.0) {
+        adjustedRiskAmount = riskAmount * 0.5; // Cut risk by 50%
+        cmeRiskShieldActive = true;
+      }
+    }
+
     const decimals = ASSETS[symbol]?.decimals ?? 2;
     // Compute position size once (L1) and pass symbol for step rounding (C6)
-    posSize = (slData && !slSideInvalid) ? calculatePositionSize(entry, slData.value, riskAmount, symbol) : 0;
+    posSize = (slData && !slSideInvalid) ? calculatePositionSize(entry, slData.value, adjustedRiskAmount, symbol) : 0;
+    
     steps.push(`Entry: ${entry.toFixed(decimals)} | SL: ${slData ? slData.value.toFixed(decimals) : 'N/A'} | SL%: ${slData ? ((Math.abs(entry - slData.value) / entry) * 100).toFixed(2) + '%' : 'N/A'} | Size: ${posSize} units`);
+    
+    if (cmeRiskShieldActive) {
+      steps.push(`⚠️ CME Risk Shield Active: Opposing gap sits within 3%. Reducing risk by 50% ($${adjustedRiskAmount.toFixed(2)}).`);
+    }
   }
 
   // ── Confluence Checks (pre-RRR) ─────────────────────────────────
@@ -634,6 +660,10 @@ export function runAnalysis(allData, config = {}) {
   // PILLARS (4): HTF Trend, Liquidity, BOS/CHOCH, RRR (added later)
   // NON-PILLARS: Session, Daily Bias, RSI Div, EMA200 S/R, OTE, OB Proximity, EMA Signal,
   //              Premium/Discount Zone, VWAP, Kill Zone, Breaker Block
+  const cmeGapAligned = !cmeGapData.hasUnfilledGaps || 
+                        !cmeGapData.gapFillBias || 
+                        (direction && cmeGapData.gapFillBias === (direction === 'long' ? 'bullish' : 'bearish'));
+
   const preRrrChecks = [
     { label: `${profile.biasKey.toUpperCase()} Trend Aligned`, met: trend4HAligned,         pillar: true,  weight: 1.5 },
     { label: 'Liquidity Sweep / FVG Fill',                     met: liquidityEvent,           pillar: true,  weight: 1.5 },
@@ -648,6 +678,7 @@ export function runAnalysis(allData, config = {}) {
     { label: 'VWAP Aligned',                                   met: vwapAligned,              pillar: false, weight: 0.75 },
     { label: 'Kill Zone Active',                               met: killZone.inKillZone,      pillar: false, weight: 0.75 },
     { label: 'Near Breaker Block (Flipped S/R)',               met: nearBreaker,              pillar: false, weight: 0.75 },
+    { label: 'CME Gap Bias Aligned',                           met: cmeGapAligned,            pillar: false, weight: 0.75 },
     ...(profile.hasEmaSignal
       ? [{ label: `EMA Signal: ${emaSignalType || 'None'}`,   met: emaSignalAligned,         pillar: false, weight: 1.0 }]
       : []),
@@ -670,17 +701,40 @@ export function runAnalysis(allData, config = {}) {
   if (direction && slData) {
     const allFVGs = [...fvgsOB, ...fvgsPrimary];
 
-    const tpSwingPool = [
+    const rawSwings = [
       ...tagSwings(findSwingPoints(candlesPrimary,   profile.swingLookback    ), profile.primaryKey.toUpperCase()),
       ...tagSwings(findSwingPoints(candlesStructure, profile.swingLookback + 1), profile.structureKey.toUpperCase()),
       ...tagSwings(swingsBias,                                                   profile.biasKey.toUpperCase()),
-    ].filter(s => {
+    ];
+
+    const tpSwingPool = rawSwings.filter(s => {
       if (direction === 'long') {
         return (s.type === 'high' && s.price > entry) || (s.type === 'low' && s.price < entry);
       } else {
         return (s.type === 'low' && s.price < entry) || (s.type === 'high' && s.price > entry);
       }
     });
+
+    // Inject CME Gap Targets
+    if (cmeGapData.hasUnfilledGaps) {
+      cmeGapData.unfilledGaps.forEach(gap => {
+        const gapAligned = (direction === 'long' && gap.direction === 'down') ||
+                           (direction === 'short' && gap.direction === 'up');
+        if (gapAligned) {
+          const isValidTarget = (direction === 'long' && gap.fridayClose > entry) ||
+                                (direction === 'short' && gap.fridayClose < entry);
+          if (isValidTarget) {
+            tpSwingPool.push({
+              price: gap.fridayClose,
+              type: direction === 'long' ? 'high' : 'low',
+              reason: `CME Gap Target (${gap.gapPct.toFixed(1)}%)`,
+              tf: 'CME'
+            });
+            steps.push(`CME Target Injected: $${gap.fridayClose.toFixed(2)} (${gap.gapPct.toFixed(1)}% gap)`);
+          }
+        }
+      });
+    }
 
     tpData = calculateTPs(
       entry, slData.value,
@@ -822,12 +876,6 @@ export function runAnalysis(allData, config = {}) {
     },
     premiumDiscountZones,
     killZone,
-    cmeGapData: (() => {
-      const gapCandles = candles1h.length > 48 ? candles1h : candlesPrimary;
-      const rawGaps = detectCMEGaps(gapCandles, currentPrice);
-      const result = analyzeCMEGaps(rawGaps, direction, trendBias, [...obsOB, ...obsPrimary], currentPrice);
-      if (result.hasUnfilledGaps) steps.push(`CME Gap: ${result.summary}`);
-      return result;
-    })(),
+    cmeGapData,
   };
 }
