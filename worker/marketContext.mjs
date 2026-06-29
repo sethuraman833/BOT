@@ -71,7 +71,7 @@ export async function sendDailyReport() {
       const ema200val = calcEMA(h4, Math.min(200, h4.length));
       const ema200 = ema200val ? ema200val.toFixed(2) : '—';
 
-      const icon = symbol === 'BTCUSDT' ? '₿' : 'Ξ';
+      const icon = symbol === 'BTCUSDT' ? '₿' : symbol === 'ETHUSDT' ? 'Ξ' : '👑';
       report += `\n${icon} *${symbol}*\n`;
       report += `• PDH: $${pdh}\n• PDL: $${pdl}\n`;
       report += `• Asian High: $${asianHigh}\n• Asian Low: $${asianLow}\n`;
