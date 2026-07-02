@@ -467,6 +467,7 @@ export function runAnalysis(allData, config = {}) {
   let slData = null;
   let posSize = 0;
   let nearestOB = null;
+  const allFVGs = [...fvgsOB, ...fvgsPrimary];
 
   if (direction) {
     const allOBs    = [...obsOB, ...obsPrimary];
@@ -566,8 +567,7 @@ export function runAnalysis(allData, config = {}) {
       }
     }
 
-    const allFVGs = [...fvgsOB, ...fvgsPrimary];
-    slData = calculateSmartSL(inv, direction, allFVGs, symbol); // pass symbol for decimals (M11)
+      slData = calculateSmartSL(inv, direction, allFVGs, symbol); // pass symbol for decimals (M11)
     
     // Stop Loss side validation (H2)
     if (slData) {
