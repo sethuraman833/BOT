@@ -10,6 +10,7 @@ import Header from './components/Header/Header.jsx';
 import ChartPanel from './components/ChartPanel/ChartPanel.jsx';
 import AnalysisSidebar from './components/AnalysisSidebar/AnalysisSidebar.jsx';
 import ControlBar from './components/ControlBar/ControlBar.jsx';
+import ErrorBoundary from './components/ErrorBoundary.jsx';
 
 export default function App() {
   const { asset, timeframe, error, analysis, livePrice, liveChange, isAnalyzing } = useMarket();
@@ -64,7 +65,7 @@ export default function App() {
       <Header />
       
       <ChartPanel />
-      <AnalysisSidebar />
+      <ErrorBoundary><AnalysisSidebar /></ErrorBoundary>
 
       <ControlBar />
 
@@ -88,7 +89,7 @@ export default function App() {
       </nav>
 
       {error && (
-        <div className="error-banner-fixed">
+        <div className="error-banner-fixed" role="alert" aria-live="assertive">
           <span>⚠ {error}</span>
           <button onClick={() => dispatch({ type: 'CLEAR_ERROR' })}>✕</button>
         </div>

@@ -224,6 +224,7 @@ export function runAnalysis(allData, config = {}) {
   steps.push(`Engine v10.0 | ${profile.label} | ${symbol}`);
   
   let slSideInvalid = false; // H2 validation flag declared early
+  let adjustedRiskAmount = riskAmount; // C5: hoisted to outer scope for return object
 
   // ── Kill Zone detection ────────────────────────────────────────────
   const killZone = getKillZone();
@@ -364,7 +365,7 @@ export function runAnalysis(allData, config = {}) {
   }
 
   // FIX #7: calculate actual ranging probability
-  const rangeProbability = direction === null ? 50 : Math.max(0, 100 - upProb - downProb);
+  let rangeProbability = direction === null ? 50 : Math.max(0, 100 - upProb - downProb);
 
   // 5m: EMA signal can provide direction when bias is ranging
   if (profile.isScalping && emaSignalActive && direction === null) {
@@ -375,6 +376,8 @@ export function runAnalysis(allData, config = {}) {
       direction = 'short'; downProb = 58; upProb = 30;
       steps.push('5m EMA override: direction = SHORT (EMA signal below EMA200)');
     }
+    // Recalculate rangeProbability after EMA override changes probabilities
+    rangeProbability = direction === null ? 50 : Math.max(0, 100 - upProb - downProb);
   }
 
   steps.push(`Direction: ${direction || 'RANGING'} | Bull: ${upProb}% Bear: ${downProb}%`);
@@ -573,7 +576,7 @@ export function runAnalysis(allData, config = {}) {
     }
 
     // ── CME Gap Risk Shield ──────────────────────────────────
-    let adjustedRiskAmount = riskAmount;
+    adjustedRiskAmount = riskAmount;
     let cmeRiskShieldActive = false;
     if (cmeGapData.hasUnfilledGaps && cmeGapData.nearestGap) {
       const nearest = cmeGapData.nearestGap;
@@ -662,6 +665,7 @@ export function runAnalysis(allData, config = {}) {
   //              Premium/Discount Zone, VWAP, Kill Zone, Breaker Block
   const cmeGapAligned = !cmeGapData.hasUnfilledGaps || 
                         !cmeGapData.gapFillBias || 
+                        direction === null ||
                         (direction && cmeGapData.gapFillBias === (direction === 'long' ? 'bullish' : 'bearish'));
 
   const preRrrChecks = [
@@ -699,7 +703,6 @@ export function runAnalysis(allData, config = {}) {
   // Tag each with its TF label so the UI can show "1H Swing @ 74,500" etc.
   let tpData = null;
   if (direction && slData) {
-    const allFVGs = [...fvgsOB, ...fvgsPrimary];
 
     const rawSwings = [
       ...tagSwings(findSwingPoints(candlesPrimary,   profile.swingLookback    ), profile.primaryKey.toUpperCase()),
@@ -859,7 +862,7 @@ export function runAnalysis(allData, config = {}) {
     symbol,
     balance,
     timeCap:          profile.timeCap,
-    riskAmount:       riskAmount,
+    riskAmount:       adjustedRiskAmount,
     // Mode metadata
     analysisMode:     profile.label,
     modeColor:        profile.modeColor,

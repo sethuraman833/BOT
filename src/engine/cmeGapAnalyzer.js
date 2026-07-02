@@ -118,9 +118,9 @@ export function detectCMEGaps(candles1h, currentPrice, maxGaps = 8) {
         }
 
         // Distance from current price to gap edges
-        const distToGap = gapDirection === 'up'
+        const distToGap = Math.abs(gapDirection === 'up'
           ? (currentPrice - gapLower) / currentPrice   // How far below current price is the gap floor
-          : (gapUpper - currentPrice) / currentPrice;   // How far above current price is the gap ceiling
+          : (gapUpper - currentPrice) / currentPrice);  // How far above current price is the gap ceiling
 
         // Time it took to fill (only for filled gaps)
         const timeToFillHours = (filled && filledTime)
@@ -143,7 +143,7 @@ export function detectCMEGaps(candles1h, currentPrice, maxGaps = 8) {
           timeToFillHours,
           partialFillPct: Math.round(partialFillPct),
           distToGapPct: distToGap * 100,
-          ageHours: Math.round((currentPrice ? (Date.now() / 1000 - c.time) : 0) / 3600),
+          ageHours: Math.round((Date.now() / 1000 - c.time) / 3600),
         });
       }
 
@@ -260,12 +260,12 @@ export function analyzeCMEGaps(gaps, direction, trendBias, orderBlocks, currentP
     }
 
     // Factor 6: Age penalty — very old unfilled gaps less likely
-    if (gap.ageHours > 336) { // > 2 weeks
-      probability -= 8;
-      factors.push('Gap older than 2 weeks (-8%)');
-    } else if (gap.ageHours > 672) { // > 4 weeks
+    if (gap.ageHours > 672) { // > 4 weeks
       probability -= 15;
       factors.push('Gap older than 4 weeks (-15%)');
+    } else if (gap.ageHours > 336) { // > 2 weeks
+      probability -= 8;
+      factors.push('Gap older than 2 weeks (-8%)');
     }
 
     // Clamp

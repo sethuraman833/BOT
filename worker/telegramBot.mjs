@@ -77,7 +77,7 @@ export async function sendTradeAlert(analysis) {
     : `🚨 *HIGH-PROBABILITY SETUP — ${symbol}*`;
 
   const waitNote = isWait
-    ? `\n⏳ _${waitCondition}_\n`
+    ? `\n⏳ _${waitCondition || 'Awaiting confirmation'}_\n`
     : '';
 
   // TP Lines from tpDetails
@@ -111,11 +111,11 @@ export async function sendTradeAlert(analysis) {
 
   // CME Gap section (if data available)
   let cmeSection = '';
-  if (analysis.cmeGapData && analysis.cmeGapData.hasUnfilledGaps) {
+  if (analysis.cmeGapData && analysis.cmeGapData.hasUnfilledGaps && analysis.cmeGapData.nearestGap) {
     const nearest = analysis.cmeGapData.nearestGap;
     cmeSection = `\n📊 *CME GAP*\n`;
-    cmeSection += `${nearest.direction === 'up' ? '⬆' : '⬇'} Gap $${nearest.gapLower.toFixed(0)}–$${nearest.gapUpper.toFixed(0)} (${nearest.gapPct.toFixed(1)}%)\n`;
-    cmeSection += `Fill: ${nearest.fillProbability}% ${nearest.fillTier}\n`;
+    cmeSection += `${nearest.direction === 'up' ? '⬆' : '⬇'} Gap $${nearest.gapLower?.toFixed(0) ?? '—'}–$${nearest.gapUpper?.toFixed(0) ?? '—'} (${nearest.gapPct?.toFixed(1) ?? '—'}%)\n`;
+    cmeSection += `Fill: ${nearest.fillProbability ?? '—'}% ${nearest.fillTier ?? ''}\n`;
     if (analysis.cmeGapData.gapFillBias) {
       cmeSection += `Bias: ${analysis.cmeGapData.gapFillBias === 'bullish' ? '↑ Bullish' : '↓ Bearish'}\n`;
     }
@@ -127,17 +127,17 @@ ${dirEmoji} | Confluence ${confEmoji} ${confluenceScore.total}/10 (${confluenceS
 Session   : ${session?.name || 'N/A'}
 Probability: ↑${upProbability}% ↓${downProbability}%
 
-📍 Entry     : $${entry?.toFixed(2)}
-🛑 Stop Loss : $${stopLoss?.value?.toFixed(2)} (${slPct}% risk)
+📍 Entry     : $${entry?.toFixed(2) ?? '—'}
+🛑 Stop Loss : $${stopLoss?.value?.toFixed(2) ?? '—'} (${slPct ?? '—'}% risk)
 ${tpLines}
 ${managementRules}
 ${aiSection}${cmeSection}
-📦 Size      : ${positionSize?.toFixed(4)} units
+📦 Size      : ${positionSize?.toFixed(4) ?? '—'} units
 💰 Max Risk  : $${(riskAmount || 5).toFixed(2)} USDT
-⚡ Breakeven : $${breakevenMove?.toFixed(2)}
+⚡ Breakeven : $${breakevenMove?.toFixed(2) ?? '—'}
 
-⚠️ Key Risk  : ${keyRisk}
-❌ Invalidate: ${invalidationLevel}
+⚠️ Key Risk  : ${keyRisk || 'None'}
+❌ Invalidate: ${invalidationLevel ?? '—'}
 
 #${symbol} #SMC #InstitutionalSetup`;
 

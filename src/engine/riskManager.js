@@ -51,7 +51,8 @@ export function calculatePositionSize(entry, stopLoss, customRiskAmount, symbol)
 export function calculateLeverage(positionSize, entryPrice, balance) {
   if (!balance || balance <= 0) return 1;
   const notionalValue = positionSize * entryPrice;
-  return parseFloat((notionalValue / balance).toFixed(1));
+  const leverage = notionalValue / balance;
+  return parseFloat(Math.min(125, Math.max(1, leverage)).toFixed(1));
 }
 
 /**
@@ -62,7 +63,7 @@ export function estimateLiquidationPrice(entry, direction, leverage, mmr = 0.005
   if (direction === 'long') {
     return parseFloat((entry * (1 - 1 / leverage + mmr)).toFixed(4));
   } else {
-    return parseFloat((entry * (1 + 1 / leverage - mmr)).toFixed(4));
+    return parseFloat((entry * (1 + 1 / leverage + mmr)).toFixed(4));
   }
 }
 
@@ -86,8 +87,7 @@ export function calculateSmartSL(invalidationLevel, direction, fvgs, symbol) {
   let bufferPct = 0.0025; // default 0.25%
   if (symbol && ASSETS[symbol]) {
     const decimals = ASSETS[symbol].decimals;
-    if (decimals === 2) bufferPct = 0.0015; // tighter for BTC/ETH/SOL/BNB
-    else if (decimals >= 4) bufferPct = 0.004; // wider for XRP/ADA
+    if (decimals === 2) bufferPct = 0.0015; // tighter for BTC/ETH/XAU
   }
   
   // Layer 2: buffer above/below Layer 1
@@ -95,27 +95,32 @@ export function calculateSmartSL(invalidationLevel, direction, fvgs, symbol) {
     ? layer1 * (1 - bufferPct)
     : layer1 * (1 + bufferPct);
 
-  // Layer 3: Imbalance Void Check
+  // Layer 3: Imbalance Void Check — pick FVG with best avoidance
   let layer3 = layer2;
   if (fvgs && fvgs.length > 0) {
     if (direction === 'long') {
-      const fvg = fvgs.find(f => f.type === 'bullish' && f.upper > layer2 && f.lower < layer2);
-      if (fvg) {
-        layer3 = fvg.lower;
+      const nearbyFvgs = fvgs.filter(f => f.type === 'bullish' && f.upper > layer2 && f.lower < layer2);
+      if (nearbyFvgs.length > 0) {
+        // Best avoidance for longs = lowest f.lower (furthest push down)
+        const bestFvg = nearbyFvgs.reduce((best, f) => f.lower < best.lower ? f : best);
+        layer3 = bestFvg.lower;
       }
     } else {
-      const fvg = fvgs.find(f => f.type === 'bearish' && f.lower < layer2 && f.upper > layer2);
-      if (fvg) {
-        layer3 = fvg.upper;
+      const nearbyFvgs = fvgs.filter(f => f.type === 'bearish' && f.lower < layer2 && f.upper > layer2);
+      if (nearbyFvgs.length > 0) {
+        // Best avoidance for shorts = highest f.upper (furthest push up)
+        const bestFvg = nearbyFvgs.reduce((best, f) => f.upper > best.upper ? f : best);
+        layer3 = bestFvg.upper;
       }
     }
   }
 
-  // Cap: prevent FVG from widening SL more than the buffer percentage beyond Layer 2
-  if (direction === 'long' && layer3 < layer2 * (1 - bufferPct)) {
-    layer3 = layer2 * (1 - bufferPct);
-  } else if (direction !== 'long' && layer3 > layer2 * (1 + bufferPct)) {
-    layer3 = layer2 * (1 + bufferPct);
+  // Cap: FVG-adjusted SL cannot be more than 1.5x the original SL distance from entry
+  const maxDisplacement = Math.abs(invalidationLevel - layer2) * 1.5;
+  if (direction === 'long' && layer2 - layer3 > maxDisplacement) {
+    layer3 = layer2 - maxDisplacement;
+  } else if (direction !== 'long' && layer3 - layer2 > maxDisplacement) {
+    layer3 = layer2 + maxDisplacement;
   }
 
   const priceDecimals = (symbol && ASSETS[symbol]) ? ASSETS[symbol].decimals : 4;

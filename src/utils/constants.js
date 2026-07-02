@@ -3,9 +3,9 @@
 // ─────────────────────────────────────────────────────────
 
 export const ASSETS = {
-  BTCUSDT: { label: 'BTC/USDT', symbol: 'BTCUSDT', decimals: 2, minQty: 0.001 },
-  ETHUSDT: { label: 'ETH/USDT', symbol: 'ETHUSDT', decimals: 2, minQty: 0.01 },
-  XAUUSDT: { label: 'XAU/USDT', symbol: 'XAUUSDT', decimals: 2, minQty: 0.001 },
+  BTCUSDT: { label: 'BTC/USDT', symbol: 'BTCUSDT', decimals: 2, minQty: 0.001, stepSize: 0.001 },
+  ETHUSDT: { label: 'ETH/USDT', symbol: 'ETHUSDT', decimals: 2, minQty: 0.01,  stepSize: 0.01  },
+  XAUUSDT: { label: 'XAU/USDT', symbol: 'XAUUSDT', decimals: 2, minQty: 0.01,  stepSize: 0.01  },
 };
 
 export const ASSET_LIST = Object.keys(ASSETS);

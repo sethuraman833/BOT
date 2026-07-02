@@ -52,7 +52,15 @@ function reducer(state, action) {
         }
         if (updated.length > CANDLE_LIMIT) updated.shift();
       } else {
-        updated[updated.length - 1] = action.candle;
+        // Real-time update: only overwrite if timestamps match
+        const lastCandle = updated[updated.length - 1];
+        if (lastCandle && lastCandle.time === action.candle.time) {
+          updated[updated.length - 1] = action.candle;
+        } else {
+          // New candle started — push it
+          updated.push(action.candle);
+          if (updated.length > CANDLE_LIMIT) updated.shift();
+        }
       }
       return { ...state, candles: { ...state.candles, [key]: updated } };
     }

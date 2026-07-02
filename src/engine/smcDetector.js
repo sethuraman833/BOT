@@ -36,7 +36,7 @@ export function findSwingPoints(candles, lookback = 5) {
 export function detectOrderBlocks(candles, currentPrice) {
   if (!candles || candles.length === 0) return []; // L6 null guard
   const obs = [];
-  const recencyCutoff = candles.length - 50;
+  const recencyCutoff = Math.max(0, candles.length - 50);
 
   // Pre-calculate average volume for volume weighting
   const recentCandles = candles.slice(-20);
@@ -58,7 +58,7 @@ export function detectOrderBlocks(candles, currentPrice) {
       // H5: Historical mitigation check (loop from i+2 to now)
       let mitigated = false;
       for (let k = i + 2; k < candles.length; k++) {
-        if (candles[k].low <= ob.high) {
+        if (candles[k].low <= ob.low) {
           mitigated = true;
           break;
         }
@@ -82,8 +82,8 @@ export function detectOrderBlocks(candles, currentPrice) {
           type: 'supply',
           upperBound: ob.high,
           lowerBound: ob.low,
-          entryBoundary: ob.low,
-          slBoundary: ob.high,
+          entryBoundary: ob.high,
+          slBoundary: ob.low,
           status: 'breaker',
           strength: baseStrength * 0.7, // breakers are slightly weaker than fresh OBs
           candleIndex: i,
@@ -97,7 +97,7 @@ export function detectOrderBlocks(candles, currentPrice) {
       // H5: Historical mitigation check (loop from i+2 to now)
       let mitigated = false;
       for (let k = i + 2; k < candles.length; k++) {
-        if (candles[k].high >= ob.low) {
+        if (candles[k].high >= ob.high) {
           mitigated = true;
           break;
         }
@@ -121,8 +121,8 @@ export function detectOrderBlocks(candles, currentPrice) {
           type: 'demand',
           upperBound: ob.high,
           lowerBound: ob.low,
-          entryBoundary: ob.high,
-          slBoundary: ob.low,
+          entryBoundary: ob.low,
+          slBoundary: ob.high,
           status: 'breaker',
           strength: baseStrength * 0.7,
           candleIndex: i,
@@ -157,7 +157,7 @@ export function detectBreakerBlocks(candles, currentPrice) {
 export function detectFVGs(candles, currentPrice) {
   if (!candles || candles.length === 0) return []; // L6 null guard
   const fvgs = [];
-  const recencyCutoff = candles.length - 60;
+  const recencyCutoff = Math.max(0, candles.length - 60);
   const minGapPct = 0.001; // 0.1% minimum gap size
 
   for (let i = 1; i < candles.length - 1; i++) {
@@ -318,23 +318,32 @@ export function detectStructureShifts(candles, minAge = 1, lookback = 3) {
   const last = candles[candles.length - 1];
   if (!last) return [];
 
-  // Age gate: check a candle `minAge` positions before the latest
-  const ageIdx = candles.length - 1 - minAge;
-  const ageCandle = (minAge > 0 && ageIdx >= 0) ? candles[ageIdx] : last;
+  // H8: Scan last 5 candles backwards for structure breaks
+  const scanCount = Math.min(5, candles.length);
 
   if (highs.length >= 2) {
     const prevHigh = highs[highs.length - 2];
     const lastHigh = highs[highs.length - 1];
 
     // BOS Bullish: price closes above previous HH
-    if (ageCandle.close > prevHigh.price && last.close > prevHigh.price) {
-      shifts.push({ type: 'BOS', direction: 'bullish', level: prevHigh.price, time: last.time });
+    for (let s = candles.length - scanCount; s < candles.length; s++) {
+      const c = candles[s];
+      if (c && c.close > prevHigh.price) {
+        shifts.push({ type: 'BOS', direction: 'bullish', level: prevHigh.price, time: c.time });
+        break;
+      }
     }
     // CHOCH Bearish: price closes below a recent HL after uptrend
     if (lows.length >= 2) {
       const lastLow = lows[lows.length - 1];
-      if (lastHigh.price > prevHigh.price && ageCandle.close < lastLow.price && last.close < lastLow.price) {
-        shifts.push({ type: 'CHOCH', direction: 'bearish', level: lastLow.price, time: last.time });
+      if (lastHigh.price > prevHigh.price) {
+        for (let s = candles.length - scanCount; s < candles.length; s++) {
+          const c = candles[s];
+          if (c && c.close < lastLow.price) {
+            shifts.push({ type: 'CHOCH', direction: 'bearish', level: lastLow.price, time: c.time });
+            break;
+          }
+        }
       }
     }
   }
@@ -344,14 +353,24 @@ export function detectStructureShifts(candles, minAge = 1, lookback = 3) {
     const lastLow = lows[lows.length - 1];
 
     // BOS Bearish: price closes below previous LL
-    if (ageCandle.close < prevLow.price && last.close < prevLow.price) {
-      shifts.push({ type: 'BOS', direction: 'bearish', level: prevLow.price, time: last.time });
+    for (let s = candles.length - scanCount; s < candles.length; s++) {
+      const c = candles[s];
+      if (c && c.close < prevLow.price) {
+        shifts.push({ type: 'BOS', direction: 'bearish', level: prevLow.price, time: c.time });
+        break;
+      }
     }
     // CHOCH Bullish: price closes above a recent LH after downtrend
     if (highs.length >= 2) {
       const lastHigh = highs[highs.length - 1];
-      if (lastLow.price < prevLow.price && ageCandle.close > lastHigh.price && last.close > lastHigh.price) {
-        shifts.push({ type: 'CHOCH', direction: 'bullish', level: lastHigh.price, time: last.time });
+      if (lastLow.price < prevLow.price) {
+        for (let s = candles.length - scanCount; s < candles.length; s++) {
+          const c = candles[s];
+          if (c && c.close > lastHigh.price) {
+            shifts.push({ type: 'CHOCH', direction: 'bullish', level: lastHigh.price, time: c.time });
+            break;
+          }
+        }
       }
     }
   }
