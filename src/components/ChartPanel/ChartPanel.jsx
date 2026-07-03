@@ -75,6 +75,7 @@ export default function ChartPanel() {
       borderDownColor:'#ff3f5e',
       wickUpColor:    '#00e5b4',
       wickDownColor:  '#ff3f5e',
+      lastPriceAnimation: 1, // Add native pulsing animation
     });
 
     const volumeSeries = chart.addHistogramSeries({
@@ -270,17 +271,19 @@ export default function ChartPanel() {
     if (!data || data.length === 0) return;
     const last = data[data.length - 1];
 
-    // Update last candle with live price
-    const updatedCandle = {
-      time:  last.time,
-      open:  last.open,
-      high:  Math.max(last.high,  livePrice),
-      low:   Math.min(last.low,   livePrice),
-      close: livePrice,
-    };
+    // Mutate the local reference so new highs/lows aren't lost on the next tick
+    last.high = Math.max(last.high, livePrice);
+    last.low  = Math.min(last.low, livePrice);
+    last.close = livePrice;
 
     try {
-      seriesRef.current.update(updatedCandle);
+      seriesRef.current.update({
+        time: last.time,
+        open: last.open,
+        high: last.high,
+        low: last.low,
+        close: last.close,
+      });
     } catch (_) {}
   }, [livePrice, backtestMode]);
 
