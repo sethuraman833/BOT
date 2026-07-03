@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { createChart, CrosshairMode } from 'lightweight-charts';
 import { useMarket, useMarketDispatch } from '../../context/MarketContext.jsx';
 import { calculateEMA } from '../../engine/smcDetector.js';
@@ -263,6 +263,9 @@ export default function ChartPanel() {
     }
   }, [asset, timeframe, candles]);
 
+  // Debug state to surface errors to the UI
+  const [debugMsg, setDebugMsg] = useState('');
+  
   // ── 3. Live tick — update last candle + live price line ──
   useEffect(() => {
     if (!seriesRef.current || !livePrice || backtestMode) return;
@@ -284,7 +287,10 @@ export default function ChartPanel() {
         low: last.low,
         close: last.close,
       });
-    } catch (_) {}
+      setDebugMsg(`Tick OK: ${livePrice}`);
+    } catch (err) {
+      setDebugMsg(`Tick Err: ${err.message}`);
+    }
   }, [livePrice, backtestMode]);
 
   // ── 4. Chart Clicks for Backtest ────────────────────────
@@ -361,6 +367,7 @@ export default function ChartPanel() {
   return (
     <div className="chart-panel">
       <div className="chart-legend">
+        <span className="legend-item" style={{ color: debugMsg.includes('Err') ? 'red' : 'gray' }}>{debugMsg}</span>
         <span className="legend-item"><span className="legend-dot" style={{ background: '#f5c842' }} /> EMA 20</span>
         <span className="legend-item"><span className="legend-dot" style={{ background: '#3d9cf0' }} /> EMA 50</span>
         <span className="legend-item"><span className="legend-dot" style={{ background: '#9b6dff' }} /> EMA 200</span>
