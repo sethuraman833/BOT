@@ -14,6 +14,7 @@
   gap: 16px;
   padding: 6px 14px;
   justify-content: flex-end;
+  align-items: center;
   flex-shrink: 0;
   border-bottom: 1px solid var(--bg-border);
   background: var(--bg-panel);
@@ -29,6 +30,36 @@
 }
 .legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 
+/* ── Live Price in Legend ── */
+.legend-live {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 2px 10px;
+  background: rgba(0, 229, 180, 0.06);
+  border: 1px solid rgba(0, 229, 180, 0.15);
+  border-radius: 12px;
+}
+.live-pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #00e5b4;
+  box-shadow: 0 0 8px rgba(0, 229, 180, 0.6);
+  animation: livePulse 1.5s ease-in-out infinite;
+}
+@keyframes livePulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.7); }
+}
+.legend-price {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+}
+
 .chart-container {
   flex: 1 1 0;
   min-height: 0;
@@ -38,7 +69,7 @@
 /* ── Trade Ribbon ────────────────────────────────────────── */
 .trade-ribbon {
   position: absolute;
-  top: 42px; /* below legend */
+  top: 42px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;

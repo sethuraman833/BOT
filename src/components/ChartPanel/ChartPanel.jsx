@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react';
-import { createChart } from 'lightweight-charts';
+import { useEffect, useRef, useCallback } from 'react';
+import { createChart, CrosshairMode } from 'lightweight-charts';
 import { useMarket, useMarketDispatch } from '../../context/MarketContext.jsx';
 import { calculateEMA } from '../../engine/smcDetector.js';
 import { ASSETS } from '../../utils/constants.js';
@@ -11,15 +11,15 @@ export default function ChartPanel() {
   const dispatch = useMarketDispatch();
   const containerRef  = useRef(null);
   const chartRef      = useRef(null);
-  const seriesRef     = useRef(null);  // candlestick series
-  const volumeRef     = useRef(null);  // volume histogram series
+  const seriesRef     = useRef(null);
+  const volumeRef     = useRef(null);
   const emaRefs       = useRef({});
   const priceLinesRef = useRef([]);
   const backtestLineRef = useRef(null);
+  const liveLineRef   = useRef(null);   // live price horizontal line
+  const crosshairDataRef = useRef(null); // crosshair OHLCV tooltip data
 
-  // The key we've currently rendered (asset_timeframe)
   const renderedKeyRef  = useRef(null);
-  // Cache of last rendered clean candle array (avoids re-sorting every tick)
   const renderedDataRef = useRef([]);
 
   // ── 1. Create chart once ────────────────────────────────
@@ -39,15 +39,33 @@ export default function ChartPanel() {
         vertLines: { color: 'rgba(30,39,51,0.5)' },
         horzLines: { color: 'rgba(30,39,51,0.5)' },
       },
-      crosshair: { mode: 0 },
-      rightPriceScale: { borderColor: '#1e2733' },
-      timeScale:       { 
-        borderColor: '#1e2733', 
-        timeVisible: true, 
+      crosshair: {
+        mode: CrosshairMode.Normal,
+        vertLine: {
+          color: 'rgba(122, 138, 154, 0.3)',
+          width: 1,
+          style: 3,
+          labelBackgroundColor: '#1e2733',
+        },
+        horzLine: {
+          color: 'rgba(122, 138, 154, 0.3)',
+          width: 1,
+          style: 3,
+          labelBackgroundColor: '#1e2733',
+        },
+      },
+      rightPriceScale: {
+        borderColor: '#1e2733',
+        scaleMargins: { top: 0.05, bottom: 0.15 },
+      },
+      timeScale: {
+        borderColor: '#1e2733',
+        timeVisible: true,
         secondsVisible: false,
         barSpacing: 7,
-        rightOffset: 8,
+        rightOffset: 12,
       },
+      handleScroll: { vertTouchDrag: false },
     });
 
     const series = chart.addCandlestickSeries({
@@ -59,7 +77,6 @@ export default function ChartPanel() {
       wickDownColor:  '#ff3f5e',
     });
 
-    // Volume histogram at bottom of chart
     const volumeSeries = chart.addHistogramSeries({
       priceFormat: { type: 'volume' },
       priceScaleId: 'volume',
@@ -81,6 +98,18 @@ export default function ChartPanel() {
     renderedKeyRef.current  = null;
     renderedDataRef.current = [];
 
+    // ResizeObserver for responsive chart sizing
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (width > 0 && height > 0) {
+          chart.applyOptions({ width, height });
+        }
+      }
+    });
+    ro.observe(containerRef.current);
+
+    // Fallback window resize
     const onResize = () => {
       if (containerRef.current) {
         chart.applyOptions({
@@ -90,19 +119,22 @@ export default function ChartPanel() {
       }
     };
     window.addEventListener('resize', onResize);
-    return () => { window.removeEventListener('resize', onResize); chart.remove(); };
+
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', onResize);
+      chart.remove();
+    };
   }, []);
 
   // ── 2. Load historical data when asset OR timeframe changes ─
-  // This fires ONLY when we intentionally switch symbol/timeframe
   useEffect(() => {
     const key  = `${asset}_${timeframe}`;
     const data = candles[key];
 
     if (!seriesRef.current) return;
 
-    // If the key changed (different symbol or TF), immediately clear stale data
-    // so the old chart doesn't linger while new data loads
+    // Clear stale data on key change
     if (renderedKeyRef.current && renderedKeyRef.current !== key) {
       seriesRef.current.setData([]);
       if (volumeRef.current) volumeRef.current.setData([]);
@@ -110,12 +142,16 @@ export default function ChartPanel() {
       emaRefs.current.ema50.setData([]);
       emaRefs.current.ema200.setData([]);
       renderedDataRef.current = [];
-      renderedKeyRef.current = null; // Mark as "awaiting new data"
+      renderedKeyRef.current = null;
+      // Remove live price line
+      if (liveLineRef.current) {
+        try { seriesRef.current.removePriceLine(liveLineRef.current); } catch (_) {}
+        liveLineRef.current = null;
+      }
     }
 
     if (!data || data.length < 5) return;
 
-    // Apply dynamic decimal precision based on the asset ticker size
     const decimals = ASSETS[asset]?.decimals ?? 2;
     seriesRef.current.applyOptions({
       priceFormat: {
@@ -125,7 +161,6 @@ export default function ChartPanel() {
       },
     });
 
-    // If this key is already rendered, skip full reload (WS handled by #2b)
     if (renderedKeyRef.current === key) return;
 
     // De-dup + sort
@@ -138,7 +173,7 @@ export default function ChartPanel() {
     renderedDataRef.current = clean;
     renderedKeyRef.current  = key;
 
-    // Volume histogram data
+    // Volume histogram
     if (volumeRef.current) {
       const volData = clean.map(c => ({
         time: c.time,
@@ -148,8 +183,7 @@ export default function ChartPanel() {
       volumeRef.current.setData(volData);
     }
 
-    // EMAs — FIX: calculateEMA() result[j] corresponds to clean[j + period - 1],
-    // NOT clean[j]. The old code shifted every EMA left by (period-1) bars.
+    // EMAs
     const e20  = calculateEMA(clean, 20);
     const e50  = calculateEMA(clean, 50);
     const e200 = calculateEMA(clean, 200);
@@ -164,30 +198,23 @@ export default function ChartPanel() {
     emaRefs.current.ema50.setData(mapEMA(e50,  50));
     emaRefs.current.ema200.setData(mapEMA(e200, 200));
 
+    // Auto-scroll to latest data
     const timeScale = chartRef.current?.timeScale();
     if (timeScale && clean.length > 0) {
       timeScale.applyOptions({
-        barSpacing: 7, // Makes candles thick and visually appealing
-        rightOffset: 8, // Leave comfortable margins on the right
+        barSpacing: 7,
+        rightOffset: 12,
       });
-      timeScale.setVisibleLogicalRange({
-        from: clean.length - 110,
-        to: clean.length + 3,
-      });
+      timeScale.scrollToRealTime();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [asset, timeframe, candles]);
-  // Note: candles is in deps so we reload when fresh historical fetch completes.
-  // We guard against tick-only updates with the renderedKeyRef check above.
 
-  // ── 2b. Sync live WS candle updates to the chart ──────────
-  // The historical loader above only runs on full reload (new key).
-  // This effect watches for incremental candle updates from WebSocket
-  // and efficiently pushes new closed candles + updates the forming candle.
+  // ── 2b. Sync live WS candle updates ──────────
   useEffect(() => {
     if (!seriesRef.current) return;
     const key  = `${asset}_${timeframe}`;
-    if (renderedKeyRef.current !== key) return; // Not yet loaded
+    if (renderedKeyRef.current !== key) return;
 
     const data = candles[key];
     if (!data || data.length < 5) return;
@@ -195,30 +222,45 @@ export default function ChartPanel() {
     const rendered = renderedDataRef.current;
     if (!rendered || rendered.length === 0) return;
 
-    const lastRendered = rendered[rendered.length - 1];
-    const lastData     = data[data.length - 1];
-
-    // New candle arrived (kline closed) — push it to the chart
+    // New closed candle(s) arrived — push to chart
     if (data.length > rendered.length) {
       const newCandles = data.slice(rendered.length);
       for (const c of newCandles) {
         try {
           seriesRef.current.update(c);
+          // Also update volume for new candle
+          if (volumeRef.current) {
+            volumeRef.current.update({
+              time: c.time,
+              value: c.volume || 0,
+              color: c.close >= c.open ? 'rgba(0,229,180,0.25)' : 'rgba(255,63,94,0.25)',
+            });
+          }
           rendered.push(c);
         } catch (_) {}
       }
     }
 
     // Update the forming (last) candle in-place
+    const lastRendered = rendered[rendered.length - 1];
+    const lastData     = data[data.length - 1];
     if (lastData && lastRendered && lastData.time === lastRendered.time) {
       try {
         seriesRef.current.update(lastData);
+        // Update volume bar for forming candle
+        if (volumeRef.current) {
+          volumeRef.current.update({
+            time: lastData.time,
+            value: lastData.volume || 0,
+            color: lastData.close >= lastData.open ? 'rgba(0,229,180,0.25)' : 'rgba(255,63,94,0.25)',
+          });
+        }
         rendered[rendered.length - 1] = lastData;
       } catch (_) {}
     }
   }, [asset, timeframe, candles]);
 
-  // ── 3. Live tick — cheaply update ONLY the last candle ──
+  // ── 3. Live tick — update last candle + live price line ──
   useEffect(() => {
     if (!seriesRef.current || !livePrice || backtestMode) return;
 
@@ -226,15 +268,35 @@ export default function ChartPanel() {
     if (!data || data.length === 0) return;
     const last = data[data.length - 1];
 
+    // Update last candle with live price
+    const updatedCandle = {
+      time:  last.time,
+      open:  last.open,
+      high:  Math.max(last.high,  livePrice),
+      low:   Math.min(last.low,   livePrice),
+      close: livePrice,
+    };
+
     try {
-      seriesRef.current.update({
-        time:  last.time,
-        open:  last.open,
-        high:  Math.max(last.high,  livePrice),
-        low:   Math.min(last.low,   livePrice),
-        close: livePrice,
+      seriesRef.current.update(updatedCandle);
+    } catch (_) {}
+
+    // Dynamic live price line
+    try {
+      if (liveLineRef.current) {
+        seriesRef.current.removePriceLine(liveLineRef.current);
+      }
+      const priceUp = livePrice >= last.open;
+      liveLineRef.current = seriesRef.current.createPriceLine({
+        price: livePrice,
+        color: priceUp ? '#00e5b4' : '#ff3f5e',
+        lineWidth: 1,
+        lineStyle: 2, // dashed
+        axisLabelVisible: true,
+        title: '',
+        lineVisible: true,
       });
-    } catch (_) { /* chart may not be ready yet */ }
+    } catch (_) {}
   }, [livePrice, backtestMode]);
 
   // ── 4. Chart Clicks for Backtest ────────────────────────
@@ -250,7 +312,7 @@ export default function ChartPanel() {
     return () => chartRef.current?.unsubscribeClick(clickHandler);
   }, [backtestMode, dispatch]);
 
-  // ── 4. Draw analysis price lines ────────────────────────
+  // ── 5. Draw analysis price lines ────────────────────────
   useEffect(() => {
     priceLinesRef.current.forEach(pl => {
       try { seriesRef.current?.removePriceLine(pl); } catch (_) {}
@@ -263,12 +325,6 @@ export default function ChartPanel() {
     }
 
     if (!seriesRef.current) return;
-
-    // Draw Backtest Vertical Line (as a high price line for now, 
-    // lightweight-charts doesn't have vertical lines easily, 
-    // so we'll use a marker or custom series, 
-    // but for simplicity we'll just use the time in the Ribbon)
-    
     if (!analysis) return;
     if (analysis.decision === 'NO_TRADE' && !backtestMode) return;
 
@@ -291,6 +347,27 @@ export default function ChartPanel() {
     }
   }, [analysis, backtestMode]);
 
+  // ── Crosshair OHLCV tooltip ──────────────────────────────
+  useEffect(() => {
+    if (!chartRef.current || !seriesRef.current) return;
+
+    const handler = (param) => {
+      if (!param.time || !param.seriesData) {
+        crosshairDataRef.current = null;
+        return;
+      }
+      const candleData = param.seriesData.get(seriesRef.current);
+      if (candleData) {
+        crosshairDataRef.current = candleData;
+      }
+    };
+
+    chartRef.current.subscribeCrosshairMove(handler);
+    return () => {
+      try { chartRef.current?.unsubscribeCrosshairMove(handler); } catch (_) {}
+    };
+  }, []);
+
   const showRibbon = analysis && analysis.decision !== 'NO_TRADE' && analysis.entry;
 
   return (
@@ -299,6 +376,12 @@ export default function ChartPanel() {
         <span className="legend-item"><span className="legend-dot" style={{ background: '#f5c842' }} /> EMA 20</span>
         <span className="legend-item"><span className="legend-dot" style={{ background: '#3d9cf0' }} /> EMA 50</span>
         <span className="legend-item"><span className="legend-dot" style={{ background: '#9b6dff' }} /> EMA 200</span>
+        {livePrice && (
+          <span className="legend-live">
+            <span className="live-pulse" />
+            <span className="legend-price mono">{formatPrice(livePrice, asset)}</span>
+          </span>
+        )}
       </div>
 
       {showRibbon && (
@@ -307,7 +390,7 @@ export default function ChartPanel() {
             <div className="ribbon-sec backtest">
               <span className="ribbon-label">BACKTEST POINT</span>
               <span className="ribbon-val mono text-yellow">
-                {new Date(backtestTime * 1000).toLocaleString()}
+                {backtestTime ? new Date(backtestTime * 1000).toLocaleString() : '—'}
               </span>
             </div>
           )}
@@ -315,7 +398,7 @@ export default function ChartPanel() {
           {analysis.newsCaution && (
             <div className="ribbon-sec news">
               <span className="ribbon-label">ECON CAUTION</span>
-              <span className="ribbon-val mono text-yellow">{analysis.newsCaution}</span>
+              <span className="ribbon-val mono text-yellow">{analysis.newsCautionReason || 'Active'}</span>
             </div>
           )}
 
@@ -327,7 +410,7 @@ export default function ChartPanel() {
             <span className="ribbon-label">STOP LOSS</span>
             <span className="ribbon-val mono text-red">
               {formatPrice(analysis.stopLoss?.value, asset)} 
-              <small style={{ marginLeft: '4px', opacity: 0.8 }}>(-${analysis.projectedLoss})</small>
+              <small style={{ marginLeft: '4px', opacity: 0.8 }}>(-${analysis.projectedLoss ?? '—'})</small>
             </span>
           </div>
           {analysis.tpDetails?.map((tp, i) => (
@@ -335,7 +418,7 @@ export default function ChartPanel() {
               <span className="ribbon-label">TP{i + 1} ({tp.closePercent}%)</span>
               <span className="ribbon-val mono text-green">
                 {formatPrice(tp.level, asset)}
-                <small style={{ marginLeft: '4px', opacity: 0.8 }}>(+${tp.projectedProfit})</small>
+                <small style={{ marginLeft: '4px', opacity: 0.8 }}>(+${tp.projectedProfit ?? '—'})</small>
               </span>
             </div>
           ))}
