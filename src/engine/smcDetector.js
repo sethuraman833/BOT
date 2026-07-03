@@ -514,3 +514,684 @@ export function calculateVWAP(candles) {
   if (cumVolume === 0) return null;
   return cumTypVolume / cumVolume;
 }
+
+// ═══════════════════════════════════════════════════════════════
+//  MODULE 1 — CANDLESTICK PATTERN RECOGNITION
+//  Detects 18 high-probability reversal & continuation patterns.
+//  Call at key levels (OB/FVG/swing) for maximum confluence.
+// ═══════════════════════════════════════════════════════════════
+export function detectCandlePatterns(candles) {
+  if (!candles || candles.length < 3) return [];
+  const patterns = [];
+  const n = candles.length;
+
+  for (let i = 2; i < n; i++) {
+    const c0 = candles[i - 2]; // 3 candles ago
+    const c1 = candles[i - 1]; // previous candle
+    const c2 = candles[i];     // current / signal candle
+
+    const body2    = Math.abs(c2.close - c2.open);
+    const range2   = c2.high - c2.low;
+    const body1    = Math.abs(c1.close - c1.open);
+    const range1   = c1.high - c1.low;
+    const body0    = Math.abs(c0.close - c0.open);
+    const isBull2  = c2.close > c2.open;
+    const isBear2  = c2.close < c2.open;
+    const isBull1  = c1.close > c1.open;
+    const isBear1  = c1.close < c1.open;
+    const upperWick2 = c2.high - Math.max(c2.open, c2.close);
+    const lowerWick2 = Math.min(c2.open, c2.close) - c2.low;
+    const upperWick1 = c1.high - Math.max(c1.open, c1.close);
+    const lowerWick1 = Math.min(c1.open, c1.close) - c1.low;
+
+    // DOJI — body ≤ 10% of range, indecision
+    if (range2 > 0 && body2 / range2 < 0.1) {
+      patterns.push({ index: i, name: 'Doji', direction: 'neutral', strength: 0.5, time: c2.time });
+    }
+
+    // HAMMER — bullish reversal: small body at top, long lower wick ≥ 2× body, tiny upper wick
+    if (range2 > 0 && lowerWick2 >= body2 * 2 && upperWick2 <= body2 * 0.3 && body2 / range2 < 0.4) {
+      patterns.push({ index: i, name: 'Hammer', direction: 'bullish', strength: 1.0, time: c2.time });
+    }
+
+    // SHOOTING STAR — bearish reversal: small body at bottom, long upper wick ≥ 2× body
+    if (range2 > 0 && upperWick2 >= body2 * 2 && lowerWick2 <= body2 * 0.3 && body2 / range2 < 0.4) {
+      patterns.push({ index: i, name: 'Shooting Star', direction: 'bearish', strength: 1.0, time: c2.time });
+    }
+
+    // MARUBOZU — full momentum candle, no wicks (body ≥ 85% of range)
+    if (range2 > 0 && body2 / range2 >= 0.85) {
+      patterns.push({ index: i, name: isBull2 ? 'Bullish Marubozu' : 'Bearish Marubozu',
+        direction: isBull2 ? 'bullish' : 'bearish', strength: 1.5, time: c2.time });
+    }
+
+    // BULLISH ENGULFING — bearish c1 engulfed by larger bullish c2
+    if (isBear1 && isBull2 && c2.open <= c1.close && c2.close >= c1.open && body2 > body1) {
+      patterns.push({ index: i, name: 'Bullish Engulfing', direction: 'bullish', strength: 1.5, time: c2.time });
+    }
+
+    // BEARISH ENGULFING — bullish c1 engulfed by larger bearish c2
+    if (isBull1 && isBear2 && c2.open >= c1.close && c2.close <= c1.open && body2 > body1) {
+      patterns.push({ index: i, name: 'Bearish Engulfing', direction: 'bearish', strength: 1.5, time: c2.time });
+    }
+
+    // BULLISH HARAMI — large bearish c1 contains small bullish c2 (indecision after sell-off)
+    if (isBear1 && isBull2 && c2.open > c1.close && c2.close < c1.open && body2 < body1 * 0.5) {
+      patterns.push({ index: i, name: 'Bullish Harami', direction: 'bullish', strength: 0.75, time: c2.time });
+    }
+
+    // BEARISH HARAMI — large bullish c1 contains small bearish c2
+    if (isBull1 && isBear2 && c2.open < c1.close && c2.close > c1.open && body2 < body1 * 0.5) {
+      patterns.push({ index: i, name: 'Bearish Harami', direction: 'bearish', strength: 0.75, time: c2.time });
+    }
+
+    // PIERCING LINE — bearish c1, bullish c2 opens below c1.low, closes above c1 midpoint
+    const c1Mid = (c1.open + c1.close) / 2;
+    if (isBear1 && isBull2 && c2.open < c1.low && c2.close > c1Mid && c2.close < c1.open) {
+      patterns.push({ index: i, name: 'Piercing Line', direction: 'bullish', strength: 1.0, time: c2.time });
+    }
+
+    // DARK CLOUD COVER — bullish c1, bearish c2 opens above c1.high, closes below c1 midpoint
+    if (isBull1 && isBear2 && c2.open > c1.high && c2.close < c1Mid && c2.close > c1.close) {
+      patterns.push({ index: i, name: 'Dark Cloud Cover', direction: 'bearish', strength: 1.0, time: c2.time });
+    }
+
+    // TWEEZER BOTTOM — two candles with same/near-same low (within 0.1%) → bullish reversal
+    if (Math.abs(c1.low - c2.low) / c2.low < 0.001 && isBear1 && isBull2) {
+      patterns.push({ index: i, name: 'Tweezer Bottom', direction: 'bullish', strength: 1.0, time: c2.time });
+    }
+
+    // TWEEZER TOP — two candles with same/near-same high → bearish reversal
+    if (Math.abs(c1.high - c2.high) / c2.high < 0.001 && isBull1 && isBear2) {
+      patterns.push({ index: i, name: 'Tweezer Top', direction: 'bearish', strength: 1.0, time: c2.time });
+    }
+
+    // MORNING STAR — 3-candle bullish reversal: bearish c0, small/doji c1, bullish c2 above c0 midpoint
+    const c0Mid = (c0.open + c0.close) / 2;
+    if (isBear1 === false && i >= 2) {
+      const isBear0 = c0.close < c0.open;
+      const isBull3 = c2.close > c2.open;
+      const smallBody1 = body1 < body0 * 0.5;
+      if (isBear0 && smallBody1 && isBull3 && c2.close > c0Mid) {
+        patterns.push({ index: i, name: 'Morning Star', direction: 'bullish', strength: 2.0, time: c2.time });
+      }
+    }
+
+    // EVENING STAR — 3-candle bearish reversal: bullish c0, small c1, bearish c2 below c0 midpoint
+    if (i >= 2) {
+      const isBull0 = c0.close > c0.open;
+      const isBear3 = c2.close < c2.open;
+      const smallBody1 = body1 < body0 * 0.5;
+      if (isBull0 && smallBody1 && isBear3 && c2.close < c0Mid) {
+        patterns.push({ index: i, name: 'Evening Star', direction: 'bearish', strength: 2.0, time: c2.time });
+      }
+    }
+  }
+
+  // THREE WHITE SOLDIERS — 3 consecutive strong bullish candles
+  if (n >= 3) {
+    const last3 = candles.slice(-3);
+    const allBull = last3.every(c => c.close > c.open);
+    const consecutive = last3[1].close > last3[0].close && last3[2].close > last3[1].close;
+    const strongBodies = last3.every(c => Math.abs(c.close - c.open) / (c.high - c.low) > 0.6);
+    if (allBull && consecutive && strongBodies) {
+      patterns.push({ index: n - 1, name: 'Three White Soldiers', direction: 'bullish', strength: 2.0, time: candles[n-1].time });
+    }
+  }
+
+  // THREE BLACK CROWS — 3 consecutive strong bearish candles
+  if (n >= 3) {
+    const last3 = candles.slice(-3);
+    const allBear = last3.every(c => c.close < c.open);
+    const consecutive = last3[1].close < last3[0].close && last3[2].close < last3[1].close;
+    const strongBodies = last3.every(c => Math.abs(c.close - c.open) / (c.high - c.low) > 0.6);
+    if (allBear && consecutive && strongBodies) {
+      patterns.push({ index: n - 1, name: 'Three Black Crows', direction: 'bearish', strength: 2.0, time: candles[n-1].time });
+    }
+  }
+
+  // Return only the last 5 recent patterns (most relevant)
+  return patterns.slice(-5);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  MODULE 2 — FIBONACCI RETRACEMENT & GOLDEN POCKET
+//  Computes key fib levels from the most recent significant swing.
+//  Golden Pocket (0.618–0.705) is the highest-probability reversal zone.
+// ═══════════════════════════════════════════════════════════════
+export function calculateFibonacci(swingHigh, swingLow, direction) {
+  if (!swingHigh || !swingLow || swingHigh <= swingLow) return null;
+  const range = swingHigh - swingLow;
+  const levels = {};
+  
+  if (direction === 'long') {
+    // For longs: retrace DOWN from high to low, then bounce
+    levels['0.0']   = swingHigh;
+    levels['0.236'] = swingHigh - range * 0.236;
+    levels['0.382'] = swingHigh - range * 0.382;
+    levels['0.5']   = swingHigh - range * 0.5;
+    levels['0.618'] = swingHigh - range * 0.618; // Golden ratio
+    levels['0.705'] = swingHigh - range * 0.705; // OTE zone top
+    levels['0.786'] = swingHigh - range * 0.786;
+    levels['1.0']   = swingLow;
+    // Extensions (TP targets)
+    levels['1.272'] = swingLow - range * 0.272;
+    levels['1.618'] = swingLow - range * 0.618;
+    levels['2.0']   = swingLow - range;
+    levels['2.618'] = swingLow - range * 1.618;
+  } else {
+    // For shorts: retrace UP from low to high, then fall
+    levels['0.0']   = swingLow;
+    levels['0.236'] = swingLow + range * 0.236;
+    levels['0.382'] = swingLow + range * 0.382;
+    levels['0.5']   = swingLow + range * 0.5;
+    levels['0.618'] = swingLow + range * 0.618;
+    levels['0.705'] = swingLow + range * 0.705;
+    levels['0.786'] = swingLow + range * 0.786;
+    levels['1.0']   = swingHigh;
+    levels['1.272'] = swingHigh + range * 0.272;
+    levels['1.618'] = swingHigh + range * 0.618;
+    levels['2.0']   = swingHigh + range;
+    levels['2.618'] = swingHigh + range * 1.618;
+  }
+
+  // Golden Pocket = 0.618 to 0.705
+  const gpHigh = Math.max(levels['0.618'], levels['0.705']);
+  const gpLow  = Math.min(levels['0.618'], levels['0.705']);
+
+  return {
+    levels,
+    goldenPocket: { high: gpHigh, low: gpLow },
+    swingHigh, swingLow, direction,
+    range,
+  };
+}
+
+export function isInGoldenPocket(price, fibData) {
+  if (!fibData || !fibData.goldenPocket) return false;
+  return price >= fibData.goldenPocket.low && price <= fibData.goldenPocket.high;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  MODULE 3 — BOLLINGER BANDS + KELTNER SQUEEZE DETECTION
+//  Squeeze = explosive move imminent; Band walk = strong trend
+// ═══════════════════════════════════════════════════════════════
+export function calculateBollingerBands(candles, period = 20, stdDevMult = 2.0) {
+  if (!candles || candles.length < period) return null;
+  const closes = candles.map(c => c.close);
+  const results = [];
+
+  for (let i = period - 1; i < closes.length; i++) {
+    const slice = closes.slice(i - period + 1, i + 1);
+    const mean = slice.reduce((a, b) => a + b, 0) / period;
+    const variance = slice.reduce((s, v) => s + (v - mean) ** 2, 0) / period;
+    const std = Math.sqrt(variance);
+    results.push({
+      middle: mean,
+      upper: mean + std * stdDevMult,
+      lower: mean - std * stdDevMult,
+      bandwidth: (std * stdDevMult * 2) / mean, // normalized bandwidth
+      std,
+    });
+  }
+
+  if (results.length === 0) return null;
+
+  // Keltner Channel for squeeze detection
+  const lastIdx = candles.length - 1;
+  const ema20 = calculateEMA(candles.slice(-period * 2), period);
+  const lastEma = ema20[ema20.length - 1];
+  let atrSum = 0;
+  const atrPeriod = Math.min(period, candles.length - 1);
+  for (let i = lastIdx - atrPeriod + 1; i <= lastIdx; i++) {
+    if (i <= 0) continue;
+    atrSum += Math.max(
+      candles[i].high - candles[i].low,
+      Math.abs(candles[i].high - candles[i-1].close),
+      Math.abs(candles[i].low  - candles[i-1].close)
+    );
+  }
+  const atr = atrSum / atrPeriod;
+  const kcUpper = lastEma + atr * 1.5;
+  const kcLower = lastEma - atr * 1.5;
+
+  const last = results[results.length - 1];
+  const prev = results[results.length - 2];
+
+  // Squeeze: BB inside Keltner Channel = compressed volatility, explosive move coming
+  const isSqueeze = last.upper < kcUpper && last.lower > kcLower;
+  // Squeeze release: was squeezing, now expanding
+  const wasSqueezing = prev && prev.upper < kcUpper && prev.lower > kcLower;
+  const isSqueezeRelease = wasSqueezing && !isSqueeze;
+  
+  const currentPrice = candles[lastIdx].close;
+  // BB walk = price touching/outside the band on successive candles
+  const isBullWalk = currentPrice >= last.upper;
+  const isBearWalk = currentPrice <= last.lower;
+  // Bandwidth expanding vs contracting
+  const bandwidthExpanding = prev && last.bandwidth > prev.bandwidth * 1.05;
+
+  return {
+    current: last,
+    previous: prev,
+    isSqueeze,
+    isSqueezeRelease,
+    isBullWalk,
+    isBearWalk,
+    bandwidthExpanding,
+    keltner: { upper: kcUpper, lower: kcLower, mid: lastEma },
+    allBands: results,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  MODULE 4 — MACD (Moving Average Convergence Divergence)
+//  Standard (12, 26, 9). Most powerful momentum indicator.
+// ═══════════════════════════════════════════════════════════════
+export function calculateMACD(candles, fastPeriod = 12, slowPeriod = 26, signalPeriod = 9) {
+  if (!candles || candles.length < slowPeriod + signalPeriod) return null;
+
+  const fastEMA  = calculateEMA(candles, fastPeriod);
+  const slowEMA  = calculateEMA(candles, slowPeriod);
+
+  // MACD line = fast EMA - slow EMA (aligned to slow length)
+  const diff = slowPeriod - fastPeriod;
+  const macdLine = [];
+  for (let i = 0; i < slowEMA.length; i++) {
+    const fastVal = fastEMA[i + diff];
+    if (fastVal == null || slowEMA[i] == null) continue;
+    macdLine.push(fastVal - slowEMA[i]);
+  }
+
+  if (macdLine.length < signalPeriod) return null;
+
+  // Signal line = EMA of MACD line
+  const macdCandles = macdLine.map((v, i) => ({ close: v, time: i, open: v, high: v, low: v, volume: 1 }));
+  const signalArr = calculateEMA(macdCandles, signalPeriod);
+
+  const last     = macdLine.length - 1;
+  const macdNow  = macdLine[last];
+  const macdPrev = macdLine[last - 1];
+  const sigNow   = signalArr[signalArr.length - 1];
+  const sigPrev  = signalArr[signalArr.length - 2];
+  const histNow  = macdNow  - sigNow;
+  const histPrev = macdPrev - (sigPrev ?? 0);
+
+  // Crossovers
+  const bullCross = macdPrev <= sigPrev && macdNow > sigNow;  // MACD crossed above signal
+  const bearCross = macdPrev >= sigPrev && macdNow < sigNow;  // MACD crossed below signal
+  // Zero-line crossovers (stronger signal)
+  const zeroLineBull = macdPrev <= 0 && macdNow > 0;
+  const zeroLineBear = macdPrev >= 0 && macdNow < 0;
+  // Histogram momentum
+  const histGrowing   = histNow > histPrev;   // momentum accelerating
+  const histShrinking = histNow < histPrev;   // momentum waning (early warning)
+
+  return {
+    macd: macdNow,
+    signal: sigNow,
+    histogram: histNow,
+    bullCross,
+    bearCross,
+    zeroLineBull,
+    zeroLineBear,
+    histGrowing,
+    histShrinking,
+    isAboveZero: macdNow > 0,
+    isBelowZero: macdNow < 0,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  MODULE 5 — STOCHASTIC RSI (14, 3, 3)
+//  More sensitive than RSI alone. Great for timing precise entries.
+// ═══════════════════════════════════════════════════════════════
+export function calculateStochRSI(candles, rsiPeriod = 14, stochPeriod = 14, smoothK = 3, smoothD = 3) {
+  if (!candles || candles.length < rsiPeriod + stochPeriod + smoothK + smoothD) return null;
+
+  // Step 1: RSI values series
+  const closes = candles.map(c => c.close);
+  const rsiValues = [];
+  for (let i = rsiPeriod; i < closes.length; i++) {
+    const slice = closes.slice(i - rsiPeriod, i + 1);
+    let gains = 0, losses = 0;
+    for (let j = 1; j < slice.length; j++) {
+      const diff = slice[j] - slice[j-1];
+      if (diff > 0) gains += diff; else losses -= diff;
+    }
+    const avgGain = gains / rsiPeriod;
+    const avgLoss = losses / rsiPeriod;
+    if (avgLoss === 0) { rsiValues.push(100); continue; }
+    const rs = avgGain / avgLoss;
+    rsiValues.push(100 - (100 / (1 + rs)));
+  }
+
+  if (rsiValues.length < stochPeriod) return null;
+
+  // Step 2: Stochastic of RSI
+  const stochK = [];
+  for (let i = stochPeriod - 1; i < rsiValues.length; i++) {
+    const slice = rsiValues.slice(i - stochPeriod + 1, i + 1);
+    const minRsi = Math.min(...slice);
+    const maxRsi = Math.max(...slice);
+    if (maxRsi === minRsi) { stochK.push(50); continue; }
+    stochK.push(((rsiValues[i] - minRsi) / (maxRsi - minRsi)) * 100);
+  }
+
+  // Step 3: Smooth K and D
+  const smoothKline = [];
+  for (let i = smoothK - 1; i < stochK.length; i++) {
+    smoothKline.push(stochK.slice(i - smoothK + 1, i + 1).reduce((a, b) => a + b, 0) / smoothK);
+  }
+  const smoothDline = [];
+  for (let i = smoothD - 1; i < smoothKline.length; i++) {
+    smoothDline.push(smoothKline.slice(i - smoothD + 1, i + 1).reduce((a, b) => a + b, 0) / smoothD);
+  }
+
+  if (smoothKline.length === 0 || smoothDline.length === 0) return null;
+
+  const kNow  = smoothKline[smoothKline.length - 1];
+  const dNow  = smoothDline[smoothDline.length - 1];
+  const kPrev = smoothKline[smoothKline.length - 2] ?? kNow;
+  const dPrev = smoothDline[smoothDline.length - 2] ?? dNow;
+
+  return {
+    k: kNow, d: dNow,
+    isOversold:  kNow < 20,
+    isOverbought: kNow > 80,
+    // Bullish: K crosses above D from oversold
+    bullCrossOversold:  kPrev <= dPrev && kNow > dNow && kNow < 40,
+    // Bearish: K crosses below D from overbought
+    bearCrossOverbought: kPrev >= dPrev && kNow < dNow && kNow > 60,
+    bullCross: kPrev <= dPrev && kNow > dNow,
+    bearCross: kPrev >= dPrev && kNow < dNow,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  MODULE 6 — VOLUME PROFILE / POINT OF CONTROL (POC)
+//  Identifies price level with the highest traded volume (POC)
+//  and Value Area High/Low (VAH/VAL = 70% of volume).
+// ═══════════════════════════════════════════════════════════════
+export function calculateVolumeProfile(candles, numBins = 30) {
+  if (!candles || candles.length < 10) return null;
+
+  const highs  = candles.map(c => c.high);
+  const lows   = candles.map(c => c.low);
+  const priceHigh = Math.max(...highs);
+  const priceLow  = Math.min(...lows);
+  const range = priceHigh - priceLow;
+  if (range === 0) return null;
+
+  const binSize = range / numBins;
+  const bins = Array.from({ length: numBins }, (_, i) => ({
+    low:    priceLow + i * binSize,
+    high:   priceLow + (i + 1) * binSize,
+    mid:    priceLow + (i + 0.5) * binSize,
+    volume: 0,
+  }));
+
+  // Distribute volume across price bins proportionally by overlap
+  for (const c of candles) {
+    const vol = c.volume || 0;
+    if (vol === 0) continue;
+    const candleRange = c.high - c.low;
+    if (candleRange === 0) continue;
+    for (const bin of bins) {
+      const overlap = Math.max(0, Math.min(c.high, bin.high) - Math.max(c.low, bin.low));
+      bin.volume += vol * (overlap / candleRange);
+    }
+  }
+
+  // POC = highest volume bin
+  const poc = bins.reduce((a, b) => (b.volume > a.volume ? b : a), bins[0]);
+
+  // Value Area: 70% of total volume centered around POC
+  const totalVol = bins.reduce((s, b) => s + b.volume, 0);
+  const targetVol = totalVol * 0.70;
+  let accumulated = poc.volume;
+  let vaLow = poc.low, vaHigh = poc.high;
+  let lo = bins.indexOf(poc) - 1, hi = bins.indexOf(poc) + 1;
+  while (accumulated < targetVol && (lo >= 0 || hi < bins.length)) {
+    const addLow  = lo >= 0 ? bins[lo].volume : 0;
+    const addHigh = hi < bins.length ? bins[hi].volume : 0;
+    if (addLow >= addHigh && lo >= 0) {
+      accumulated += addLow;
+      vaLow = bins[lo].low;
+      lo--;
+    } else if (hi < bins.length) {
+      accumulated += addHigh;
+      vaHigh = bins[hi].high;
+      hi++;
+    } else { break; }
+  }
+
+  return {
+    poc: poc.mid,
+    valueAreaHigh: vaHigh,
+    valueAreaLow:  vaLow,
+    priceHigh, priceLow,
+    bins,
+    // Price at POC = institutions actively traded here = strong support/resistance
+    isAtPOC: (price) => Math.abs(price - poc.mid) / poc.mid < 0.003, // within 0.3%
+    isInValueArea: (price) => price >= vaLow && price <= vaHigh,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  MODULE 7 — WYCKOFF MARKET PHASE DETECTION
+//  Detects Accumulation (Spring) and Distribution (Upthrust)
+//  phases — the highest-quality institutional reversal signals.
+// ═══════════════════════════════════════════════════════════════
+export function detectWyckoffPhase(candles, lookback = 50) {
+  if (!candles || candles.length < lookback) return null;
+  const slice = candles.slice(-lookback);
+  const n = slice.length;
+
+  // Step 1: Find trading range (compression zone)
+  const rangeHigh = Math.max(...slice.map(c => c.high));
+  const rangeLow  = Math.min(...slice.map(c => c.low));
+  const rangeSize = rangeHigh - rangeLow;
+  const midPrice  = (rangeHigh + rangeLow) / 2;
+
+  // Step 2: Measure how "compressed" we are (BB bandwidth proxy)
+  const firstHalf  = slice.slice(0, Math.floor(n / 2));
+  const secondHalf = slice.slice(Math.floor(n / 2));
+  const firstRange  = Math.max(...firstHalf.map(c => c.high)) - Math.min(...firstHalf.map(c => c.low));
+  const secondRange = Math.max(...secondHalf.map(c => c.high)) - Math.min(...secondHalf.map(c => c.low));
+  const isConsolidating = secondRange < firstRange * 0.65; // Range contracting
+
+  const last = slice[n - 1];
+  const currentPrice = last.close;
+
+  // Step 3: Detect Spring (false breakdown → bullish reversal)
+  // Price dips below the range low but closes back above it
+  const recentLow  = slice.slice(-5).reduce((min, c) => Math.min(min, c.low), Infinity);
+  const springDetected = recentLow < rangeLow && currentPrice > rangeLow + rangeSize * 0.05;
+
+  // Step 4: Detect Upthrust (false breakout → bearish reversal)
+  const recentHigh = slice.slice(-5).reduce((max, c) => Math.max(max, c.high), -Infinity);
+  const upthrustDetected = recentHigh > rangeHigh && currentPrice < rangeHigh - rangeSize * 0.05;
+
+  // Step 5: Assess volume on the spring/upthrust (high volume spring = institutional buying)
+  const avgVol = slice.reduce((s, c) => s + (c.volume || 0), 0) / n;
+  const recentVol = slice.slice(-3).reduce((s, c) => s + (c.volume || 0), 0) / 3;
+  const highVolumeEvent = recentVol > avgVol * 1.3;
+
+  // Phase determination
+  let phase = 'RANGING';
+  let signal = null;
+  let description = '';
+
+  if (springDetected && isConsolidating) {
+    phase  = 'ACCUMULATION';
+    signal = 'bullish';
+    description = highVolumeEvent
+      ? '🔥 High-Volume Spring: Institutional Accumulation — Strong Bullish Signal'
+      : 'Spring Detected: False breakdown below range — Potential accumulation';
+  } else if (upthrustDetected && isConsolidating) {
+    phase  = 'DISTRIBUTION';
+    signal = 'bearish';
+    description = highVolumeEvent
+      ? '🔥 High-Volume Upthrust: Institutional Distribution — Strong Bearish Signal'
+      : 'Upthrust Detected: False breakout above range — Potential distribution';
+  } else if (currentPrice > rangeHigh * 1.005) {
+    phase = 'MARKUP';
+    signal = 'bullish';
+    description = 'Markup Phase: Price escaping range to the upside';
+  } else if (currentPrice < rangeLow * 0.995) {
+    phase = 'MARKDOWN';
+    signal = 'bearish';
+    description = 'Markdown Phase: Price escaping range to the downside';
+  } else {
+    description = 'Consolidating inside range — no clear Wyckoff signal yet';
+  }
+
+  return {
+    phase, signal, description,
+    springDetected, upthrustDetected,
+    rangeHigh, rangeLow, midPrice,
+    isConsolidating, highVolumeEvent,
+    strength: (springDetected || upthrustDetected) && highVolumeEvent ? 2.0 : 1.0,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  MODULE 8 — OBV DIVERGENCE (On-Balance Volume)
+//  OBV rising while price falls = smart money accumulating.
+//  OBV falling while price rises = distribution, reversal near.
+// ═══════════════════════════════════════════════════════════════
+export function calculateOBVDivergence(candles, lookback = 30) {
+  if (!candles || candles.length < lookback + 5) return null;
+  const slice = candles.slice(-lookback);
+
+  // Calculate OBV
+  const obv = [0];
+  for (let i = 1; i < slice.length; i++) {
+    const prev = obv[i - 1];
+    const vol  = slice[i].volume || 0;
+    if      (slice[i].close > slice[i-1].close) obv.push(prev + vol);
+    else if (slice[i].close < slice[i-1].close) obv.push(prev - vol);
+    else                                          obv.push(prev);
+  }
+
+  const firstPrice = slice[0].close;
+  const lastPrice  = slice[slice.length - 1].close;
+  const firstOBV   = obv[0];
+  const lastOBV    = obv[obv.length - 1];
+
+  const priceRising = lastPrice > firstPrice;
+  const priceFalling = lastPrice < firstPrice;
+  const obvRising  = lastOBV > firstOBV;
+  const obvFalling = lastOBV < firstOBV;
+
+  // Bearish divergence: price makes new high but OBV doesn't confirm (distribution)
+  const bearishDiv = priceRising && obvFalling;
+  // Bullish divergence: price makes new low but OBV doesn't confirm (accumulation)
+  const bullishDiv = priceFalling && obvRising;
+
+  const obvTrend = obvRising ? 'rising' : obvFalling ? 'falling' : 'flat';
+
+  return {
+    obv: lastOBV,
+    obvTrend,
+    bullishDivergence: bullishDiv,
+    bearishDivergence: bearishDiv,
+    hasDivergence: bullishDiv || bearishDiv,
+    divergenceType: bullishDiv ? 'bullish' : bearishDiv ? 'bearish' : null,
+    description: bullishDiv
+      ? '📈 OBV Bullish Divergence: Smart money accumulating while price falls'
+      : bearishDiv
+      ? '📉 OBV Bearish Divergence: Distribution detected while price rises'
+      : 'OBV confirming price trend',
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  MODULE 9 — HIDDEN DIVERGENCE DETECTOR
+//  Hidden Bull: Price HL, RSI LL → trend continuation UP
+//  Hidden Bear: Price LH, RSI HH → trend continuation DOWN
+//  More reliable than regular divergence in trending markets.
+// ═══════════════════════════════════════════════════════════════
+export function detectHiddenDivergence(candles, direction, period = 14) {
+  if (!candles || candles.length < period * 3) return { hasHiddenDiv: false };
+  
+  const rsiValues = calculateRSI(candles, period);
+  if (!rsiValues || rsiValues.length < 10) return { hasHiddenDiv: false };
+
+  // Find swing lows in price and RSI (for bullish hidden div)
+  const slice = candles.slice(-40);
+  const rsiSlice = rsiValues.slice(-40);
+  const n = Math.min(slice.length, rsiSlice.length);
+
+  let hasHiddenDiv = false;
+  let divType = null;
+  let description = '';
+
+  if (direction === 'long') {
+    // Hidden Bullish: price makes higher low (HL) but RSI makes lower low (LL)
+    // Find two recent swing lows
+    let swingLow1Idx = -1, swingLow2Idx = -1;
+    for (let i = n - 2; i >= 2; i--) {
+      if (slice[i].low < slice[i-1].low && slice[i].low < slice[i+1].low) {
+        if (swingLow2Idx === -1) swingLow2Idx = i;
+        else if (swingLow1Idx === -1) { swingLow1Idx = i; break; }
+      }
+    }
+    if (swingLow1Idx >= 0 && swingLow2Idx >= 0) {
+      const priceHL = slice[swingLow2Idx].low > slice[swingLow1Idx].low; // Higher low in price
+      const rsiLL   = rsiSlice[swingLow2Idx] < rsiSlice[swingLow1Idx];   // Lower low in RSI
+      if (priceHL && rsiLL) {
+        hasHiddenDiv = true;
+        divType = 'bullish';
+        description = '🔮 Hidden Bullish Divergence: Price HL + RSI LL → Trend continuation UP';
+      }
+    }
+  } else if (direction === 'short') {
+    // Hidden Bearish: price makes lower high (LH) but RSI makes higher high (HH)
+    let swingHigh1Idx = -1, swingHigh2Idx = -1;
+    for (let i = n - 2; i >= 2; i--) {
+      if (slice[i].high > slice[i-1].high && slice[i].high > slice[i+1].high) {
+        if (swingHigh2Idx === -1) swingHigh2Idx = i;
+        else if (swingHigh1Idx === -1) { swingHigh1Idx = i; break; }
+      }
+    }
+    if (swingHigh1Idx >= 0 && swingHigh2Idx >= 0) {
+      const priceLH = slice[swingHigh2Idx].high < slice[swingHigh1Idx].high; // Lower high in price
+      const rsiHH   = rsiSlice[swingHigh2Idx] > rsiSlice[swingHigh1Idx];     // Higher high in RSI
+      if (priceLH && rsiHH) {
+        hasHiddenDiv = true;
+        divType = 'bearish';
+        description = '🔮 Hidden Bearish Divergence: Price LH + RSI HH → Trend continuation DOWN';
+      }
+    }
+  }
+
+  return { hasHiddenDiv, divType, description };
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  MODULE 10 — WEEKLY OPEN & SESSION RANGE TRACKER
+//  Price above/below weekly open = strong directional bias.
+//  Asian range breakout = key entry signal for London session.
+// ═══════════════════════════════════════════════════════════════
+export function getWeeklyOpenBias(candles, currentPrice) {
+  if (!candles || candles.length < 7) return null;
+  // Find the most recent Monday candle (day of week from timestamp)
+  // Timestamps are Unix seconds; Monday = 1
+  for (let i = candles.length - 1; i >= Math.max(0, candles.length - 10); i--) {
+    const date = new Date(candles[i].time * 1000);
+    if (date.getUTCDay() === 1) { // Monday
+      const weeklyOpen = candles[i].open;
+      return {
+        weeklyOpen,
+        bias: currentPrice > weeklyOpen ? 'bullish' : 'bearish',
+        distancePct: ((currentPrice - weeklyOpen) / weeklyOpen) * 100,
+        description: currentPrice > weeklyOpen
+          ? `↑ Price above Weekly Open ($${weeklyOpen.toFixed(2)}) — Bullish week bias`
+          : `↓ Price below Weekly Open ($${weeklyOpen.toFixed(2)}) — Bearish week bias`,
+      };
+    }
+  }
+  return null;
+}

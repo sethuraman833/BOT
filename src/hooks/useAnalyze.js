@@ -41,7 +41,7 @@ export function useAnalyze() {
         checkNewsVeto(asset),
       ]);
 
-      const result = runAnalysis(activeData, {
+      const result = await runAnalysis(activeData, {
         symbol: asset,
         balance: balance,
         newsStatus: newsStatus,

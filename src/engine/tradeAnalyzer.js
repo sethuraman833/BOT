@@ -15,7 +15,12 @@
 import {
   detectOrderBlocks, detectFVGs, detectSweeps, detectStructureShifts,
   calculateEMA, calculateRSI, detectRSIDivergence, findSwingPoints,
-  detectBreakerBlocks, calculateVWAP
+  detectBreakerBlocks, calculateVWAP,
+  // ── NEW AI Modules ──────────────────────────────────────────
+  detectCandlePatterns, calculateFibonacci, isInGoldenPocket,
+  calculateBollingerBands, calculateMACD, calculateStochRSI,
+  calculateVolumeProfile, detectWyckoffPhase,
+  calculateOBVDivergence, detectHiddenDivergence, getWeeklyOpenBias,
 } from './smcDetector.js';
 import { calculateOTE, isInOTE, calculatePremiumDiscount, isInDiscount, isInPremium } from './oteCalculator.js';
 import {
@@ -25,6 +30,7 @@ import {
 } from './riskManager.js';
 import { getCurrentSession, isSessionValid, getKillZone } from './sessionFilter.js';
 import { detectCMEGaps, analyzeCMEGaps } from './cmeGapAnalyzer.js';
+import { getFundingOISentiment } from './fundingRate.js';
 import { RISK_AMOUNT, ASSETS } from '../utils/constants.js';
 
 // ─── ATR-BASED MINIMUM SL DISTANCE ────────────────────────
@@ -46,6 +52,9 @@ const ATR_TF_MULT = {
   '5m': 1.0, '15m': 1.2, '1h': 1.5, '4h': 2.0, '1d': 2.5,
 };
 const ATR_SYMBOL_SCALE = {
+  BTCUSDT: 1.0,   // BTC — tight, liquid
+  ETHUSDT: 1.05,  // ETH — slightly more volatile than BTC
+  XAUUSDT: 1.15,  // Gold — wider spreads, erratic moves
 };
 
 function calculateATR(candles, period = 14) {
@@ -210,7 +219,7 @@ function tagSwings(swings, tfLabel) {
   return swings.map(s => ({ ...s, tfLabel }));
 }
 
-export function runAnalysis(allData, config = {}) {
+export async function runAnalysis(allData, config = {}) {
   const {
     symbol          = 'BTCUSDT',
     balance         = 10000,
@@ -342,6 +351,35 @@ export function runAnalysis(allData, config = {}) {
   const allShifts       = [...shiftsPrimary, ...shiftsStructure];
 
   steps.push(`OBs: ${obsOB.length + obsPrimary.length} | FVGs: ${fvgsOB.length + fvgsPrimary.length} | Sweeps: ${allSweeps.length} | Shifts: ${allShifts.length}`);
+
+  // ── AI Module Detections ───────────────────────────────────────
+  const candlePatterns  = detectCandlePatterns(candlesPrimary.slice(-10));
+  const bollingerBands  = calculateBollingerBands(candlesPrimary);
+  const macdData        = calculateMACD(candlesPrimary);
+  const stochRSI        = calculateStochRSI(candlesPrimary);
+  const volumeProfile   = calculateVolumeProfile(candlesPrimary.slice(-100));
+  const wyckoffPhase    = detectWyckoffPhase(candlesPrimary.slice(-60));
+  const obvDivergence   = calculateOBVDivergence(candlesPrimary);
+  const weeklyBias      = getWeeklyOpenBias(candles1d.length > 7 ? candles1d : candlesPrimary, currentPrice);
+
+  // Fetch funding rate and OI (non-blocking — default to neutral if network fails)
+  let fundingSentiment = { aligned: false, confluenceWeight: 0, sentiment: 'neutral', fundingRatePct: 0 };
+  try {
+    fundingSentiment = await getFundingOISentiment(symbol) ?? fundingSentiment;
+  } catch (_) {}
+
+  if (candlePatterns.length > 0) {
+    steps.push(`Candle Patterns: ${candlePatterns.map(p => p.name).join(', ')}`);
+  }
+  if (bollingerBands?.isSqueeze)        steps.push(`🟡 BB Squeeze: Explosive move imminent`);
+  if (bollingerBands?.isSqueezeRelease) steps.push(`🚀 BB Squeeze Release: Move started!`);
+  if (macdData?.bullCross)              steps.push(`📈 MACD Bullish Crossover`);
+  if (macdData?.bearCross)              steps.push(`📉 MACD Bearish Crossover`);
+  if (macdData?.zeroLineBull)           steps.push(`📈 MACD Zero-Line Bull Cross (strong)`);
+  if (macdData?.zeroLineBear)           steps.push(`📉 MACD Zero-Line Bear Cross (strong)`);
+  if (wyckoffPhase?.signal)             steps.push(`Wyckoff: ${wyckoffPhase.description}`);
+  if (obvDivergence?.hasDivergence)     steps.push(obvDivergence.description);
+  if (weeklyBias)                       steps.push(`Weekly: ${weeklyBias.description}`);
 
   // ── Session ────────────────────────────────────────────────────
   const session   = getCurrentSession();
@@ -660,31 +698,109 @@ export function runAnalysis(allData, config = {}) {
   if (nearBreaker) steps.push(`✓ Near a Breaker Block (flipped S/R)`);
 
   // Pre-RRR checks (all except the RRR pillar — added after TP calc)
-  // PILLARS (4): HTF Trend, Liquidity, BOS/CHOCH, RRR (added later)
-  // NON-PILLARS: Session, Daily Bias, RSI Div, EMA200 S/R, OTE, OB Proximity, EMA Signal,
-  //              Premium/Discount Zone, VWAP, Kill Zone, Breaker Block
   const cmeGapAligned = !cmeGapData.hasUnfilledGaps || 
                         !cmeGapData.gapFillBias || 
                         direction === null ||
                         (direction && cmeGapData.gapFillBias === (direction === 'long' ? 'bullish' : 'bearish'));
 
+  // ── NEW AI Confluence Calculations ─────────────────────────────
+  // Fibonacci Golden Pocket
+  const htfSwingH = swingsBias.filter(s => s.type === 'high').slice(-1)[0];
+  const htfSwingL = swingsBias.filter(s => s.type === 'low').slice(-1)[0];
+  let fibData = null;
+  let inGoldenPocket = false;
+  if (htfSwingH && htfSwingL) {
+    fibData = calculateFibonacci(htfSwingH.price, htfSwingL.price, direction);
+    inGoldenPocket = isInGoldenPocket(currentPrice, fibData);
+    if (inGoldenPocket) steps.push(`✓ Entry in Fibonacci Golden Pocket (0.618–0.705)`);
+  }
+
+  // Hidden Divergence
+  const hiddenDiv = direction ? detectHiddenDivergence(candlesPrimary, direction) : { hasHiddenDiv: false };
+  if (hiddenDiv.hasHiddenDiv) steps.push(hiddenDiv.description);
+
+  // Candlestick pattern at key level
+  const alignedPatterns = candlePatterns.filter(p =>
+    p.direction === direction || p.direction === 'neutral'
+  );
+  const hasBullishPattern = alignedPatterns.some(p => p.direction === 'bullish') && direction === 'long';
+  const hasBearishPattern = alignedPatterns.some(p => p.direction === 'bearish') && direction === 'short';
+  const hasCandlePattern  = hasBullishPattern || hasBearishPattern;
+
+  // MACD confluence
+  const macdAligned = macdData && direction && (
+    (direction === 'long'  && (macdData.bullCross || macdData.zeroLineBull || (macdData.isAboveZero && macdData.histGrowing))) ||
+    (direction === 'short' && (macdData.bearCross || macdData.zeroLineBear || (macdData.isBelowZero && macdData.histGrowing)))
+  );
+
+  // Stochastic RSI confluence
+  const stochAligned = stochRSI && direction && (
+    (direction === 'long'  && (stochRSI.bullCrossOversold || stochRSI.isOversold)) ||
+    (direction === 'short' && (stochRSI.bearCrossOverbought || stochRSI.isOverbought))
+  );
+
+  // Bollinger Bands confluence
+  const bbAligned = bollingerBands && direction && (
+    (direction === 'long'  && (bollingerBands.isSqueezeRelease || bollingerBands.isBullWalk)) ||
+    (direction === 'short' && (bollingerBands.isSqueezeRelease || bollingerBands.isBearWalk))
+  );
+
+  // Volume Profile / POC
+  const atPOC = volumeProfile ? volumeProfile.isAtPOC(currentPrice) : false;
+  if (atPOC) steps.push(`✓ Price at Volume POC ($${volumeProfile.poc.toFixed(2)}) — High-volume node`);
+
+  // Wyckoff phase alignment
+  const wyckoffAligned = wyckoffPhase && direction &&
+    wyckoffPhase.signal === direction;
+
+  // OBV divergence alignment
+  const obvAligned = obvDivergence && direction && (
+    (direction === 'long'  && obvDivergence.bullishDivergence) ||
+    (direction === 'short' && obvDivergence.bearishDivergence)
+  );
+
+  // Funding rate aligned (contrarian: overleveraged longs → short, overleveraged shorts → long)
+  const fundingAligned = fundingSentiment.aligned && direction && (
+    (direction === 'long'  && fundingSentiment.sentiment === 'overleveraged_shorts') ||
+    (direction === 'short' && fundingSentiment.sentiment === 'overleveraged_longs')
+  );
+  if (fundingAligned) steps.push(`✓ Funding Rate: ${fundingSentiment.fundingRatePct?.toFixed(4)}% — Crowd ${fundingSentiment.sentiment === 'overleveraged_longs' ? 'long' : 'short'} (Contrarian ${direction})`);
+
+  // Weekly Open bias
+  const weeklyBiasAligned = weeklyBias && direction &&
+    weeklyBias.bias === direction;
+
   const preRrrChecks = [
-    { label: `${profile.biasKey.toUpperCase()} Trend Aligned`, met: trend4HAligned,         pillar: true,  weight: 1.5 },
-    { label: 'Liquidity Sweep / FVG Fill',                     met: liquidityEvent,           pillar: true,  weight: 1.5 },
-    { label: `${profile.primaryKey.toUpperCase()}/${profile.structureKey.toUpperCase()} BOS/CHOCH`, met: structureShift, pillar: true, weight: 1.5 },
-    { label: 'Active Trading Session',                         met: sessionOk,                pillar: false, weight: 0.75 },
-    { label: 'Near Valid Order Block',                          met: nearOB,                   pillar: false, weight: 1.0 },
-    { label: 'Daily Bias Aligned (EMA200)',                    met: dailyAligned,             pillar: false, weight: 1.0 },
-    { label: 'RSI Divergence',                                 met: rsiResult.hasDivergence,  pillar: false, weight: 1.0 },
-    { label: 'EMA200 Acting as S/R',                          met: ema200Acting,             pillar: false, weight: 0.75 },
-    { label: 'Entry in OTE Zone (61.8–78.6%)',                met: inOTE,                    pillar: false, weight: 1.0 },
-    { label: `Entry in ${direction === 'long' ? 'Discount' : 'Premium'} Zone`, met: inCorrectZone, pillar: false, weight: 1.0 },
-    { label: 'VWAP Aligned',                                   met: vwapAligned,              pillar: false, weight: 0.75 },
-    { label: 'Kill Zone Active',                               met: killZone.inKillZone,      pillar: false, weight: 0.75 },
-    { label: 'Near Breaker Block (Flipped S/R)',               met: nearBreaker,              pillar: false, weight: 0.75 },
-    { label: 'CME Gap Bias Aligned',                           met: cmeGapAligned,            pillar: false, weight: 0.75 },
+    // PILLARS (core — must all be met)
+    { label: `${profile.biasKey.toUpperCase()} Trend Aligned`,                                      met: trend4HAligned,          pillar: true,  weight: 1.5 },
+    { label: 'Liquidity Sweep / FVG Fill',                                                            met: liquidityEvent,           pillar: true,  weight: 1.5 },
+    { label: `${profile.primaryKey.toUpperCase()}/${profile.structureKey.toUpperCase()} BOS/CHOCH`, met: structureShift,           pillar: true,  weight: 1.5 },
+    // NON-PILLARS (existing)
+    { label: 'Active Trading Session',                                                                met: sessionOk,                pillar: false, weight: 0.75 },
+    { label: 'Near Valid Order Block',                                                                met: nearOB,                   pillar: false, weight: 1.0 },
+    { label: 'Daily Bias Aligned (EMA200)',                                                           met: dailyAligned,             pillar: false, weight: 1.0 },
+    { label: 'RSI Divergence',                                                                        met: rsiResult.hasDivergence,  pillar: false, weight: 1.0 },
+    { label: 'EMA200 Acting as S/R',                                                                 met: ema200Acting,             pillar: false, weight: 0.75 },
+    { label: 'Entry in OTE Zone (61.8–78.6%)',                                                       met: inOTE,                    pillar: false, weight: 1.0 },
+    { label: `Entry in ${direction === 'long' ? 'Discount' : 'Premium'} Zone`,                      met: inCorrectZone,            pillar: false, weight: 1.0 },
+    { label: 'VWAP Aligned',                                                                          met: vwapAligned,              pillar: false, weight: 0.75 },
+    { label: 'Kill Zone Active',                                                                      met: killZone.inKillZone,      pillar: false, weight: 0.75 },
+    { label: 'Near Breaker Block (Flipped S/R)',                                                      met: nearBreaker,              pillar: false, weight: 0.75 },
+    { label: 'CME Gap Bias Aligned',                                                                  met: cmeGapAligned,            pillar: false, weight: 0.75 },
+    // ── NEW AI Confluence Checks ─────────────────────────────────
+    { label: 'Fibonacci Golden Pocket (0.618–0.705)',                                                 met: inGoldenPocket,           pillar: false, weight: 1.25 },
+    { label: 'Candlestick Pattern Confirmed',                                                         met: hasCandlePattern,         pillar: false, weight: 1.0  },
+    { label: 'MACD Momentum Aligned',                                                                 met: !!macdAligned,            pillar: false, weight: 1.0  },
+    { label: 'Stochastic RSI Extreme (OS/OB)',                                                        met: !!stochAligned,           pillar: false, weight: 1.0  },
+    { label: 'Bollinger Band Signal',                                                                 met: !!bbAligned,              pillar: false, weight: 0.75 },
+    { label: 'Volume POC Confluence',                                                                 met: atPOC,                    pillar: false, weight: 1.0  },
+    { label: `Wyckoff ${wyckoffPhase?.phase || ''} Signal`,                                          met: !!wyckoffAligned,         pillar: false, weight: 1.5  },
+    { label: 'OBV Smart Money Divergence',                                                            met: !!obvAligned,             pillar: false, weight: 1.0  },
+    { label: 'Hidden Divergence (Trend Continuation)',                                                met: hiddenDiv.hasHiddenDiv,   pillar: false, weight: 1.0  },
+    { label: 'Funding Rate Contrarian Signal',                                                        met: fundingAligned,           pillar: false, weight: 0.75 },
+    { label: 'Weekly Open Bias Aligned',                                                              met: !!weeklyBiasAligned,      pillar: false, weight: 0.75 },
     ...(profile.hasEmaSignal
-      ? [{ label: `EMA Signal: ${emaSignalType || 'None'}`,   met: emaSignalAligned,         pillar: false, weight: 1.0 }]
+      ? [{ label: `EMA Signal: ${emaSignalType || 'None'}`,                                          met: emaSignalAligned,         pillar: false, weight: 1.0  }]
       : []),
   ];
 
@@ -847,12 +963,17 @@ export function runAnalysis(allData, config = {}) {
       total: normalizedTotal, max, tier: finalTier,
       checks, pillarsMet, pillarsTotal,
       pillarsAllMet: pillarsMet === pillarsTotal,
+      // AI Confidence Score: percentage of weighted checks met
+      aiConfidence: Math.round((scoredWeight / totalWeight) * 100),
+      aiGrade: scoredWeight / totalWeight >= 0.85 ? 'ELITE'
+             : scoredWeight / totalWeight >= 0.70 ? 'STRONG'
+             : scoredWeight / totalWeight >= 0.55 ? 'MODERATE'
+             : 'SKIP',
     },
     session,
-    // FIX #3: downProbability was `100-upProb` (wrong for shorts) — now uses downProb
     upProbability:    upProb,
     downProbability:  downProb,
-    rangeProbability, // FIX #7: was always hardcoded 0
+    rangeProbability,
     rejectionReason,
     waitCondition:    null,
     keyRisk: ema200Acting ? 'EMA200 Resistance / Support' : slPct > 0.012 ? 'Wide SL — size reduced automatically' : 'Market Volatility',
@@ -876,6 +997,20 @@ export function runAnalysis(allData, config = {}) {
       sweeps:          allSweeps,
       structureShifts: allShifts,
       vwap:            vwap,
+    },
+    // AI Intelligence Data
+    aiModules: {
+      candlePatterns,
+      bollingerBands:  bollingerBands ? { isSqueeze: bollingerBands.isSqueeze, isSqueezeRelease: bollingerBands.isSqueezeRelease, isBullWalk: bollingerBands.isBullWalk, isBearWalk: bollingerBands.isBearWalk, current: bollingerBands.current } : null,
+      macd:            macdData ? { macd: macdData.macd, signal: macdData.signal, histogram: macdData.histogram, bullCross: macdData.bullCross, bearCross: macdData.bearCross } : null,
+      stochRSI:        stochRSI ? { k: stochRSI.k, d: stochRSI.d, isOversold: stochRSI.isOversold, isOverbought: stochRSI.isOverbought } : null,
+      volumeProfile:   volumeProfile ? { poc: volumeProfile.poc, valueAreaHigh: volumeProfile.valueAreaHigh, valueAreaLow: volumeProfile.valueAreaLow } : null,
+      wyckoffPhase,
+      obvDivergence,
+      hiddenDivergence: hiddenDiv,
+      fibonacciData:   fibData ? { goldenPocket: fibData.goldenPocket, levels: fibData.levels } : null,
+      fundingSentiment,
+      weeklyBias,
     },
     premiumDiscountZones,
     killZone,
