@@ -18,16 +18,15 @@ function PillarDots({ checks }) {
 
 function ConfluenceSection({ score }) {
   if (!score) return null;
-  const pct = (score.total / score.max) * 100;
-  const barColor = pct >= 72 ? 'var(--accent-green)' : pct >= 50 ? 'var(--accent-blue)' : pct >= 36 ? 'var(--accent-yellow)' : 'var(--accent-red)';
+  const pct = score.aiConfidence || 0;
+  const barColor = pct >= 85 ? 'var(--accent-green)' : pct >= 70 ? 'var(--accent-blue)' : pct >= 55 ? 'var(--accent-yellow)' : 'var(--accent-red)';
   return (
     <div className="sidebar-section">
       <div className="section-header">Confluence Score</div>
       <div className="score-display">
-        <span className="score-number mono">{score.total}</span>
-        <span className="score-divider">/</span>
-        <span className="score-max mono">{score.max}</span>
-        <span className={`score-tier ${score.tier.toLowerCase()}`}>{score.tier}</span>
+        <span className="score-number mono">{pct}</span>
+        <span className="score-divider" style={{ fontSize: '18px' }}>%</span>
+        <span className={`score-tier ${score.aiGrade?.toLowerCase() || 'skip'}`}>{score.aiGrade || 'SKIP'}</span>
       </div>
       <div className="score-bar-track">
         <div className="score-bar-fill" style={{ width: `${pct}%`, background: barColor, boxShadow: `0 0 8px ${barColor}50` }} />
