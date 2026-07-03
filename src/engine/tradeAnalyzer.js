@@ -402,6 +402,34 @@ export async function runAnalysis(allData, config = {}) {
     downProb = 25;
   }
 
+  // ── AI Consensus Override (Forces direction if SMC is ranging/conflicted) ──
+  let isAiOverride = false;
+  let aiBullScore = 0;
+  let aiBearScore = 0;
+
+  if (macdData?.bullCross || macdData?.zeroLineBull || (macdData?.isAboveZero && macdData?.histGrowing)) aiBullScore++;
+  if (macdData?.bearCross || macdData?.zeroLineBear || (macdData?.isBelowZero && macdData?.histGrowing)) aiBearScore++;
+  if (wyckoffPhase?.signal === 'long') aiBullScore += 1.5;
+  if (wyckoffPhase?.signal === 'short') aiBearScore += 1.5;
+  if (obvDivergence?.bullishDivergence) aiBullScore++;
+  if (obvDivergence?.bearishDivergence) aiBearScore++;
+  if (weeklyBias?.bias === 'long') aiBullScore++;
+  if (weeklyBias?.bias === 'short') aiBearScore++;
+  if (fundingSentiment?.aligned) {
+    if (fundingSentiment.sentiment === 'overleveraged_shorts') aiBullScore++;
+    if (fundingSentiment.sentiment === 'overleveraged_longs') aiBearScore++;
+  }
+
+  if (direction === null) {
+    if (aiBullScore >= 2.5 && aiBullScore > aiBearScore * 2) {
+      direction = 'long'; upProb = 55; downProb = 35; isAiOverride = true;
+      steps.push(`🤖 AI Consensus Override: direction = LONG (AI Bull Score: ${aiBullScore.toFixed(1)})`);
+    } else if (aiBearScore >= 2.5 && aiBearScore > aiBullScore * 2) {
+      direction = 'short'; downProb = 55; upProb = 35; isAiOverride = true;
+      steps.push(`🤖 AI Consensus Override: direction = SHORT (AI Bear Score: ${aiBearScore.toFixed(1)})`);
+    }
+  }
+
   // FIX #7: calculate actual ranging probability
   let rangeProbability = direction === null ? 50 : Math.max(0, 100 - upProb - downProb);
 
@@ -651,7 +679,7 @@ export async function runAnalysis(allData, config = {}) {
   // ── Confluence Checks (pre-RRR) ─────────────────────────────────
   // Calculate tier BEFORE TPs so we can pass the real tier for scaling.
   // RRR pillar is added after TPs are computed.
-  const trend4HAligned = (direction === 'long'  && trendBias === 'bullish') ||
+  const trend4HAligned = isAiOverride || (direction === 'long'  && trendBias === 'bullish') ||
                          (direction === 'short' && trendBias === 'bearish');
   const dailyAligned   = (direction === 'long'  && dailyBias === 'bullish') ||
                          (direction === 'short' && dailyBias === 'bearish');
@@ -662,8 +690,8 @@ export async function runAnalysis(allData, config = {}) {
                            const isFvgAligned = direction === 'long' ? isFvgBullish : !isFvgBullish;
                            return isFvgAligned && currentPrice >= f.lower && currentPrice <= f.upper;
                          });
-  // C3: Structure shifts filtered by direction
-  const structureShift = allShifts.some(s => s.direction === (direction === 'long' ? 'bullish' : 'bearish'));
+  // C3: Structure shifts filtered by direction (bypassed if AI strongly overrides)
+  const structureShift = isAiOverride || allShifts.some(s => s.direction === (direction === 'long' ? 'bullish' : 'bearish'));
   const rsiResult      = detectRSIDivergence(
     candlesStructure.length > 20 ? candlesStructure : candlesPrimary,
     direction, 14
