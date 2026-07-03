@@ -80,7 +80,7 @@ function isDuplicate(level, existingTPs, risk) {
 /**
  * Calculate smart stop loss with 3-layer defense using Risk scaling (M10: risk-scaled buffer).
  */
-export function calculateSmartSL(invalidationLevel, direction, fvgs, symbol) {
+export function calculateSmartSL(invalidationLevel, direction, fvgs, symbol, fibData = null, volumeProfile = null) {
   const layer1 = invalidationLevel;
   
   // Scale buffer based on asset decimal precision or standard risk scale
@@ -123,11 +123,38 @@ export function calculateSmartSL(invalidationLevel, direction, fvgs, symbol) {
     layer3 = layer2 + maxDisplacement;
   }
 
+  // ── AI Module Anchoring (Golden Pocket / Volume Profile) ──
+  let aiBufferReason = null;
+
+  if (direction === 'long') {
+    // Volume Shield
+    if (volumeProfile && layer3 < volumeProfile.valueAreaLow && layer2 >= volumeProfile.valueAreaLow) {
+      layer3 = volumeProfile.valueAreaLow * 0.9985;
+      aiBufferReason = `Volume Shield (SL outside VA Low: $${volumeProfile.valueAreaLow.toFixed(2)})`;
+    }
+    // Golden Pocket Defense
+    if (fibData && fibData.goldenPocket && layer3 < fibData.levels['0.786'] && layer2 >= fibData.goldenPocket.bottom) {
+      layer3 = fibData.levels['0.786'] * 0.9985;
+      aiBufferReason = `Fibonacci Defense (SL outside 0.786 level: $${fibData.levels['0.786'].toFixed(2)})`;
+    }
+  } else {
+    // Volume Shield
+    if (volumeProfile && layer3 > volumeProfile.valueAreaHigh && layer2 <= volumeProfile.valueAreaHigh) {
+      layer3 = volumeProfile.valueAreaHigh * 1.0015;
+      aiBufferReason = `Volume Shield (SL outside VA High: $${volumeProfile.valueAreaHigh.toFixed(2)})`;
+    }
+    // Golden Pocket Defense
+    if (fibData && fibData.goldenPocket && layer3 > fibData.levels['0.786'] && layer2 <= fibData.goldenPocket.top) {
+      layer3 = fibData.levels['0.786'] * 1.0015;
+      aiBufferReason = `Fibonacci Defense (SL outside 0.786 level: $${fibData.levels['0.786'].toFixed(2)})`;
+    }
+  }
+
   const priceDecimals = (symbol && ASSETS[symbol]) ? ASSETS[symbol].decimals : 4;
   return {
     value: parseFloat(layer3.toFixed(priceDecimals)),
     rawInvalidation: invalidationLevel,
-    buffer: `±${(bufferPct * 100).toFixed(2)}% liquidity buffer`,
+    buffer: aiBufferReason || `±${(bufferPct * 100).toFixed(2)}% liquidity buffer`,
     layer1,
     layer2,
     layer3,
@@ -164,7 +191,7 @@ export function calculateTPs(
   entry, stopLoss, allSwings, fvgs,
   direction, tier = 'HIGH', sessionName = '', maxTpPct = 0.06,
   primaryTf = '15M', structureTf = '1H', biasTf = '4H',
-  minRrr = 3.0, symbol
+  minRrr = 3.0, symbol, fibData = null, volumeProfile = null
 ) {
   const risk = Math.abs(entry - stopLoss);
   if (risk === 0) return { tps: [], tpStructure: 'single' };
@@ -304,6 +331,15 @@ export function calculateTPs(
       candidates.push({ level: (primHigh - range * 1.618) * (1 + 0.0012), reason: '1.618 Fib Extension', isStructural: true });
       candidates.push({ level: (primHigh - range * 2.0) * (1 + 0.0012), reason: '2.0 Fib Extension', isStructural: true });
       candidates.push({ level: (primHigh - range * 2.618) * (1 + 0.0012), reason: '2.618 Fib Extension', isStructural: true });
+    }
+  }
+
+  // 5. Volume Profile POC Target
+  if (volumeProfile && volumeProfile.poc) {
+    if (isLong && volumeProfile.poc > entry) {
+      candidates.push({ level: volumeProfile.poc, reason: 'Volume POC (Point of Control)', isStructural: true });
+    } else if (!isLong && volumeProfile.poc < entry) {
+      candidates.push({ level: volumeProfile.poc, reason: 'Volume POC (Point of Control)', isStructural: true });
     }
   }
 

@@ -420,6 +420,17 @@ export async function runAnalysis(allData, config = {}) {
 
   steps.push(`Direction: ${direction || 'RANGING'} | Bull: ${upProb}% Bear: ${downProb}%`);
 
+  // Fibonacci Golden Pocket (Calculated here for SL/TP anchoring)
+  const htfSwingH = swingsBias.filter(s => s.type === 'high').slice(-1)[0];
+  const htfSwingL = swingsBias.filter(s => s.type === 'low').slice(-1)[0];
+  let fibData = null;
+  let inGoldenPocket = false;
+  if (htfSwingH && htfSwingL) {
+    fibData = calculateFibonacci(htfSwingH.price, htfSwingL.price, direction);
+    inGoldenPocket = isInGoldenPocket(currentPrice, fibData);
+    if (inGoldenPocket) steps.push(`✓ Entry in Fibonacci Golden Pocket (0.618–0.705)`);
+  }
+
   // ── CME Gap detection (Run early for Risk Shield and TP Target injection) ──
   const gapCandles = candles1h.length > 48 ? candles1h : candlesPrimary;
   const rawGaps = detectCMEGaps(gapCandles, currentPrice);
@@ -605,7 +616,7 @@ export async function runAnalysis(allData, config = {}) {
       }
     }
 
-      slData = calculateSmartSL(inv, direction, allFVGs, symbol); // pass symbol for decimals (M11)
+      slData = calculateSmartSL(inv, direction, allFVGs, symbol, fibData, volumeProfile); // pass symbol for decimals (M11)
     
     // Stop Loss side validation (H2)
     if (slData) {
@@ -704,16 +715,7 @@ export async function runAnalysis(allData, config = {}) {
                         (direction && cmeGapData.gapFillBias === (direction === 'long' ? 'bullish' : 'bearish'));
 
   // ── NEW AI Confluence Calculations ─────────────────────────────
-  // Fibonacci Golden Pocket
-  const htfSwingH = swingsBias.filter(s => s.type === 'high').slice(-1)[0];
-  const htfSwingL = swingsBias.filter(s => s.type === 'low').slice(-1)[0];
-  let fibData = null;
-  let inGoldenPocket = false;
-  if (htfSwingH && htfSwingL) {
-    fibData = calculateFibonacci(htfSwingH.price, htfSwingL.price, direction);
-    inGoldenPocket = isInGoldenPocket(currentPrice, fibData);
-    if (inGoldenPocket) steps.push(`✓ Entry in Fibonacci Golden Pocket (0.618–0.705)`);
-  }
+  // Fibonacci Golden Pocket (Calculated earlier)
 
   // Hidden Divergence
   const hiddenDiv = direction ? detectHiddenDivergence(candlesPrimary, direction) : { hasHiddenDiv: false };
@@ -859,14 +861,16 @@ export async function runAnalysis(allData, config = {}) {
       entry, slData.value,
       tpSwingPool, allFVGs,
       direction,
-      preRrrTier,          // FIX: use actual calculated tier (not hardcoded 'HIGH')
+      preRrrTier,
       session.name,
       profile.maxTpPct,
       profile.primaryKey.toUpperCase(),
       profile.structureKey.toUpperCase(),
       profile.biasKey.toUpperCase(),
       profile.minRrr || 3.0,
-      symbol               // FIX: pass symbol for asset-specific decimal precision
+      symbol,
+      fibData,
+      volumeProfile
     );
 
     // Attach projected P&L to each TP (reuses outer posSize - L1)

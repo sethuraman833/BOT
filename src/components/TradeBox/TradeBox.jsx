@@ -67,8 +67,10 @@ export default function TradeBox({ analysis }) {
           <span className="tm-value">{String(session?.name || '—')}</span>
         </div>
         <div className="trade-meta-cell">
-          <span className="tm-label">Score</span>
-          <span className="tm-value mono">{String(confluenceScore?.total || 0)}/{String(confluenceScore?.max || 11)}</span>
+          <span className="tm-label">AI Grade</span>
+          <span className={`tm-value mono tier-${confluenceScore?.aiGrade?.toLowerCase() || 'skip'}`}>
+            {confluenceScore?.aiConfidence || 0}% {confluenceScore?.aiGrade || 'SKIP'}
+          </span>
         </div>
       </div>
 
@@ -100,7 +102,7 @@ export default function TradeBox({ analysis }) {
       <div className="trade-level-row sl">
         <div className="tlr-left">
           <span className="tlr-badge sl-badge">SL</span>
-          <span className="tlr-label">Stop Loss</span>
+          <span className="tlr-label" style={{fontSize: '11px'}}>{stopLoss?.buffer || 'Stop Loss'}</span>
         </div>
         <div className="tlr-right">
           <span className="tlr-price text-red mono">{formatPrice(stopLoss?.value, symbol)} <CopyBtn value={stopLoss?.value} /></span>
