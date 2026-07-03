@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMarket, useMarketDispatch } from './context/MarketContext.jsx';
 import { useBinanceWS } from './hooks/useBinanceWS.js';
-import { useCandles, fetchCurrentPrice } from './hooks/useCandles.js';
+import { useCandles, fetchCurrentPrice, fetchKlines } from './hooks/useCandles.js';
 import { useAnalyze } from './hooks/useAnalyze.js';
 import { useHotkeys } from './hooks/useHotkeys.js';
 import { formatPrice, formatPercent } from './utils/formatters.js';
@@ -36,13 +36,38 @@ export default function App() {
   }, [livePrice, liveChange, asset]);
 
   useEffect(() => {
+    // Initial fetch
     fetchCurrentPrice(asset).then(priceData => {
       if (priceData) {
         dispatch({ type: 'SET_LIVE_PRICE', price: priceData.price, change: priceData.change });
       }
     });
     loadAllTimeframes(asset);
-  }, [asset]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Fallback: Poll REST API every 3 seconds in case WebSocket is blocked (common in some regions)
+    const interval = setInterval(() => {
+      fetchCurrentPrice(asset).then(priceData => {
+        if (priceData) {
+          dispatch({ type: 'SET_LIVE_PRICE', price: priceData.price, change: priceData.change });
+        }
+      });
+      
+      // Also poll the latest forming candle for the current timeframe
+      fetchKlines(asset, timeframe, 2).then(candles => {
+        if (candles && candles.length > 0) {
+          const lastCandle = candles[candles.length - 1];
+          dispatch({
+            type: 'UPDATE_LAST_CANDLE',
+            key: `${asset}_${timeframe}`,
+            candle: lastCandle,
+            isClosed: false,
+          });
+        }
+      }).catch(() => {});
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [asset, timeframe, dispatch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useBinanceWS(asset, timeframe);
 

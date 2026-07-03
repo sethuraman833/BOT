@@ -8,7 +8,7 @@ import { BINANCE_REST, CANDLE_LIMIT, TIMEFRAMES } from '../utils/constants.js';
 import { useMarketDispatch } from '../context/MarketContext.jsx';
 import { log, logError } from '../utils/logger.js';
 
-async function fetchKlines(symbol, interval, limit = CANDLE_LIMIT, signal) {
+export async function fetchKlines(symbol, interval, limit = CANDLE_LIMIT, signal) {
   const url = `${BINANCE_REST}/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
   const res = await fetch(url, { signal });
   if (!res.ok) throw new Error(`Binance API ${res.status}: ${res.statusText}`);
