@@ -764,7 +764,7 @@ export async function runAnalysis(allData, config = {}) {
     (direction === 'long'  && fundingSentiment.sentiment === 'overleveraged_shorts') ||
     (direction === 'short' && fundingSentiment.sentiment === 'overleveraged_longs')
   );
-  if (fundingAligned) steps.push(`✓ Funding Rate: ${fundingSentiment.fundingRatePct?.toFixed(4)}% — Crowd ${fundingSentiment.sentiment === 'overleveraged_longs' ? 'long' : 'short'} (Contrarian ${direction})`);
+  if (fundingAligned) steps.push(`✓ Funding Rate: ${fundingSentiment.fundingRatePct} — Crowd ${fundingSentiment.sentiment === 'overleveraged_longs' ? 'long' : 'short'} (Contrarian ${direction})`);
 
   // Weekly Open bias
   const weeklyBiasAligned = weeklyBias && direction &&
