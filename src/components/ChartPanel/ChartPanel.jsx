@@ -222,9 +222,13 @@ export default function ChartPanel() {
     const rendered = renderedDataRef.current;
     if (!rendered || rendered.length === 0) return;
 
+    const lastRendered = rendered[rendered.length - 1];
+    const lastData     = data[data.length - 1];
+    if (!lastData || !lastRendered) return;
+
     // New closed candle(s) arrived — push to chart
-    if (data.length > rendered.length) {
-      const newCandles = data.slice(rendered.length);
+    if (lastData.time > lastRendered.time) {
+      const newCandles = data.filter(c => c.time > lastRendered.time);
       for (const c of newCandles) {
         try {
           seriesRef.current.update(c);
@@ -237,14 +241,12 @@ export default function ChartPanel() {
             });
           }
           rendered.push(c);
+          if (rendered.length > 2000) rendered.shift(); // Keep bounded
         } catch (_) {}
       }
     }
-
     // Update the forming (last) candle in-place
-    const lastRendered = rendered[rendered.length - 1];
-    const lastData     = data[data.length - 1];
-    if (lastData && lastRendered && lastData.time === lastRendered.time) {
+    else if (lastData.time === lastRendered.time) {
       try {
         seriesRef.current.update(lastData);
         // Update volume bar for forming candle
@@ -279,23 +281,6 @@ export default function ChartPanel() {
 
     try {
       seriesRef.current.update(updatedCandle);
-    } catch (_) {}
-
-    // Dynamic live price line
-    try {
-      if (liveLineRef.current) {
-        seriesRef.current.removePriceLine(liveLineRef.current);
-      }
-      const priceUp = livePrice >= last.open;
-      liveLineRef.current = seriesRef.current.createPriceLine({
-        price: livePrice,
-        color: priceUp ? '#00e5b4' : '#ff3f5e',
-        lineWidth: 1,
-        lineStyle: 2, // dashed
-        axisLabelVisible: true,
-        title: '',
-        lineVisible: true,
-      });
     } catch (_) {}
   }, [livePrice, backtestMode]);
 
