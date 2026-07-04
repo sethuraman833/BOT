@@ -3,26 +3,31 @@ import TradeBox from '../TradeBox/TradeBox.jsx';
 import { useState } from 'react';
 import './AnalysisSidebar.css';
 
-// AI Confluence Score section — no more rigid pillars
-function ConfluenceSection({ score }) {
+// AI Confluence Score section — now with Institutional Signal Grade support
+function ConfluenceSection({ score, signalGrade }) {
   if (!score) return null;
   const pct = score.aiConfidence || 0;
-  const barColor = pct >= 90 ? 'var(--accent-green)' : pct >= 75 ? 'var(--accent-blue)' : pct >= 55 ? 'var(--accent-yellow)' : 'var(--accent-red)';
   const metCount = score.checks.filter(c => c.met).length;
+  
+  // If we have an institutional signal grade (v11), use it instead of the generic AI grade
+  const displayPct = signalGrade ? signalGrade.score : pct;
+  const displayGrade = signalGrade ? signalGrade.grade : (score.aiGrade || 'SKIP');
+  const displayLabel = signalGrade ? signalGrade.label : (score.aiGrade || 'SKIP');
+  
+  const barColor = displayPct >= 85 ? 'var(--accent-green)' : displayPct >= 70 ? 'var(--accent-blue)' : displayPct >= 55 ? 'var(--accent-yellow)' : 'var(--accent-red)';
+  
   return (
     <div className="sidebar-section">
-      <div className="section-header">AI Confluence</div>
+      <div className="section-header">{signalGrade ? 'Institutional Confluence' : 'AI Confluence'}</div>
       <div className="score-display">
-        <span className="score-number mono">{pct}</span>
-        <span className="score-divider" style={{ fontSize: '18px' }}>%</span>
-        <span className={`score-tier ${score.aiGrade?.toLowerCase() || 'skip'}`}>{score.aiGrade || 'SKIP'}</span>
+        <span className="score-number mono">{displayPct}</span>
+        {!signalGrade && <span className="score-divider" style={{ fontSize: '18px' }}>%</span>}
+        <span className={`score-tier ${displayGrade?.toLowerCase() || 'skip'}`}>{displayGrade} {signalGrade ? `— ${displayLabel}` : ''}</span>
       </div>
-      <div className="score-bar-track">
-        <div className="score-bar-fill" style={{ width: `${pct}%`, background: barColor, boxShadow: `0 0 8px ${barColor}50` }} />
+      <div className="score-bar-bg">
+        <div className="score-bar-fill" style={{ width: `${Math.min(100, displayPct)}%`, background: barColor }} />
       </div>
-      <div className="pillar-dots">
-        <span className="pillar-count">{metCount}/{score.checks.length} signals met</span>
-      </div>
+      <span className="pillar-count">{metCount}/{score.checks.length} signals met</span>
       <ul className="check-list">
         {score.checks.map((c, i) => (
           <li key={i} className="check-item">
@@ -390,6 +395,9 @@ export default function AnalysisSidebar() {
         {/* ── DECISION ──────────────────────────────────────── */}
         <DecisionBadge decision={analysis.decision} waitCondition={analysis.waitCondition} />
 
+        {/* ── TRADE BOX (Moved to top so user sees the A+ UI) ── */}
+        <TradeBox analysis={analysis} />
+
         {/* ── REJECTION REASON ──────────────────────────────── */}
         {analysis.rejectionReason && (
           <div className="sidebar-section">
@@ -406,13 +414,10 @@ export default function AnalysisSidebar() {
         )}
 
         {/* ── CONFLUENCE ────────────────────────────────────── */}
-        <ConfluenceSection score={analysis.confluenceScore} />
+        <ConfluenceSection score={analysis.confluenceScore} signalGrade={analysis.signalGrade} />
 
         {/* ── AI ────────────────────────────────────────────── */}
         <AIOpinion aiAnalysis={analysis.aiAnalysis} />
-
-        {/* ── TRADE BOX ─────────────────────────────────────── */}
-        <TradeBox analysis={analysis} />
 
         {/* ── PROBABILITY ───────────────────────────────────── */}
         <ProbabilityBars
