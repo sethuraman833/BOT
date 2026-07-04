@@ -7,7 +7,7 @@ import './AnalysisSidebar.css';
 function ConfluenceSection({ score }) {
   if (!score) return null;
   const pct = score.aiConfidence || 0;
-  const barColor = pct >= 85 ? 'var(--accent-green)' : pct >= 70 ? 'var(--accent-blue)' : pct >= 55 ? 'var(--accent-yellow)' : 'var(--accent-red)';
+  const barColor = pct >= 90 ? 'var(--accent-green)' : pct >= 75 ? 'var(--accent-blue)' : pct >= 55 ? 'var(--accent-yellow)' : 'var(--accent-red)';
   const metCount = score.checks.filter(c => c.met).length;
   return (
     <div className="sidebar-section">

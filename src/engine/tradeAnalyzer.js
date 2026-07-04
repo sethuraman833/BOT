@@ -924,9 +924,12 @@ export async function runAnalysis(allData, config = {}) {
 
   const totalWeight     = checks.reduce((s, c) => s + c.weight, 0);
   const scoredWeight    = checks.reduce((s, c) => s + (c.met ? c.weight : 0), 0);
-  const aiConfidence    = Math.round((scoredWeight / totalWeight) * 100);
-  const aiGrade         = aiConfidence >= 85 ? 'ELITE'
-                        : aiConfidence >= 70 ? 'STRONG'
+  const rawPct          = scoredWeight / totalWeight;
+  // Confidence curve: sqrt maps 30% raw → 55%, 50% raw → 71%, 70% raw → 84%
+  // This compensates for the ~26 checks where most are rare/situational signals
+  const aiConfidence    = Math.round(Math.sqrt(rawPct) * 100);
+  const aiGrade         = aiConfidence >= 90 ? 'ELITE'
+                        : aiConfidence >= 75 ? 'STRONG'
                         : aiConfidence >= 55 ? 'MODERATE'
                         : aiConfidence >= 40 ? 'MARGINAL'
                         : 'SKIP';
