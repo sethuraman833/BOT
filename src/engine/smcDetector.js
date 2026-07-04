@@ -443,6 +443,37 @@ export function calculateRSI(candles, period = 14) {
   return rsis;
 }
 
+export function calculateSMA(data, period) {
+  if (!data || data.length < period) return [];
+  const sma = [];
+  for (let i = 0; i < period - 1; i++) sma.push(null);
+  let sum = 0;
+  for (let i = 0; i < period; i++) sum += data[i];
+  sma.push(sum / period);
+  for (let i = period; i < data.length; i++) {
+    sum += data[i] - data[i - period];
+    sma.push(sum / period);
+  }
+  return sma;
+}
+
+export function detectRSISmaCross(candles, rsiPeriod = 14, smaPeriod = 14) {
+  const rsiValues = calculateRSI(candles, rsiPeriod);
+  const smaValues = calculateSMA(rsiValues, smaPeriod);
+  if (rsiValues.length < 2 || smaValues.length < 2) return { crossUp: false, crossDown: false, rsi: 50, sma: 50 };
+  const currentRsi = rsiValues[rsiValues.length - 1];
+  const currentSma = smaValues[smaValues.length - 1];
+  const prevRsi    = rsiValues[rsiValues.length - 2];
+  const prevSma    = smaValues[smaValues.length - 2];
+  if (currentRsi === null || currentSma === null || prevRsi === null || prevSma === null) return { crossUp: false, crossDown: false, rsi: currentRsi || 50, sma: currentSma || 50 };
+  return {
+    crossUp: prevRsi <= prevSma && currentRsi > currentSma,
+    crossDown: prevRsi >= prevSma && currentRsi < currentSma,
+    rsi: currentRsi,
+    sma: currentSma
+  };
+}
+
 /**
  * Detect RSI divergence by comparing price swings vs RSI swings.
  */
@@ -1197,7 +1228,7 @@ export function getWeeklyOpenBias(candles, currentPrice) {
 }
 
 // ---------------------------------------------------------------
-//  MODULE 11 — DISPLACEMENT QUALITY VALIDATOR
+//  MODULE 11 ï¿½ DISPLACEMENT QUALITY VALIDATOR
 // ---------------------------------------------------------------
 export function validateDisplacement(candles, breakCandleIndex) {
   if (!candles || breakCandleIndex < 0 || breakCandleIndex >= candles.length)
@@ -1229,11 +1260,11 @@ export function validateDisplacement(candles, breakCandleIndex) {
     if (prev && !isBull && c.close < prev.low) { score += 15; reasons.push('Engulfs'); }
   }
   score = Math.min(100, score);
-  return { valid: score >= 50, score, bodyRatio, volMultiplier: volMult, reason: reasons.join(' · ') || 'Weak' };
+  return { valid: score >= 50, score, bodyRatio, volMultiplier: volMult, reason: reasons.join(' ï¿½ ') || 'Weak' };
 }
 
 // ---------------------------------------------------------------
-//  MODULE 12 — ERL / IRL LIQUIDITY CLASSIFICATION
+//  MODULE 12 ï¿½ ERL / IRL LIQUIDITY CLASSIFICATION
 // ---------------------------------------------------------------
 export function classifyLiquidityLevels(candles, fvgs, orderBlocks, currentPrice) {
   if (!candles || candles.length < 10) return { erl: [], irl: [] };
@@ -1266,7 +1297,7 @@ export function classifyLiquidityLevels(candles, fvgs, orderBlocks, currentPrice
 }
 
 // ---------------------------------------------------------------
-//  MODULE 13 — INDUCEMENT DETECTION
+//  MODULE 13 ï¿½ INDUCEMENT DETECTION
 // ---------------------------------------------------------------
 function _dispCheck(c, dir) {
   if (!c) return false;
@@ -1301,7 +1332,7 @@ export function detectInducement(candles, direction) {
 }
 
 // ---------------------------------------------------------------
-//  MODULE 14 — CHOCH QUALITY FILTER
+//  MODULE 14 ï¿½ CHOCH QUALITY FILTER
 // ---------------------------------------------------------------
 export function assessChochQuality(candles, sweeps, direction) {
   if (!candles || candles.length < 10) return { quality: 'LOW', score: 0, reasons: [] };
@@ -1323,7 +1354,7 @@ export function assessChochQuality(candles, sweeps, direction) {
 }
 
 // ---------------------------------------------------------------
-//  MODULE 15 — ATR VOLATILITY REGIME CLASSIFIER
+//  MODULE 15 ï¿½ ATR VOLATILITY REGIME CLASSIFIER
 // ---------------------------------------------------------------
 export function classifyVolatilityRegime(candles, period = 14) {
   if (!candles || candles.length < period * 2) return { regime:'UNKNOWN', atr:0, atrPct:0, trend:'flat', sizingMultiplier:1.0, description:'Insufficient data' };
@@ -1350,7 +1381,7 @@ export function classifyVolatilityRegime(candles, period = 14) {
 }
 
 // ---------------------------------------------------------------
-//  MODULE 16 — DRAW ON LIQUIDITY
+//  MODULE 16 ï¿½ DRAW ON LIQUIDITY
 // ---------------------------------------------------------------
 export function identifyDrawOnLiquidity(candles, direction, currentPrice, fvgs, orderBlocks) {
   if (!candles||candles.length<20) return null;
@@ -1368,7 +1399,7 @@ export function identifyDrawOnLiquidity(candles, direction, currentPrice, fvgs, 
 }
 
 // ---------------------------------------------------------------
-//  MODULE 17 — EQUAL HIGHS / LOWS
+//  MODULE 17 ï¿½ EQUAL HIGHS / LOWS
 // ---------------------------------------------------------------
 export function detectEqualHighsLows(candles, currentPrice, tolerance=0.0005) {
   if (!candles||candles.length<10) return { eqh:[], eql:[] };
@@ -1404,7 +1435,7 @@ export function detectEqualHighsLows(candles, currentPrice, tolerance=0.0005) {
 }
 
 // ---------------------------------------------------------------
-//  MODULE 18 — SIGNAL GRADE (A+ / A / B / C / D)
+//  MODULE 18 ï¿½ SIGNAL GRADE (A+ / A / B / C / D)
 // ---------------------------------------------------------------
 export function calculateSignalGrade({ chochQuality, displacementScore, hasSweep, hasInducement,
   mtfAligned, drawAligned, volatilityRegime, rrrMet, inOTE, atPOC }) {

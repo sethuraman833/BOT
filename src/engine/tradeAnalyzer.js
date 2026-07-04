@@ -14,7 +14,7 @@
 
 import {
   detectOrderBlocks, detectFVGs, detectSweeps, detectStructureShifts,
-  calculateEMA, calculateRSI, detectRSIDivergence, findSwingPoints,
+  calculateEMA, calculateRSI, detectRSIDivergence, findSwingPoints, detectRSISmaCross,
   detectBreakerBlocks, calculateVWAP,
   // ── AI Modules ──────────────────────────────────────────────
   detectCandlePatterns, calculateFibonacci, isInGoldenPocket,
@@ -742,6 +742,8 @@ export async function runAnalysis(allData, config = {}) {
     candlesStructure.length > 20 ? candlesStructure : candlesPrimary,
     direction, 14
   );
+  const rsiCross       = detectRSISmaCross(candlesPrimary, 14, 14);
+  const rsiCrossAligned = direction === 'long' ? rsiCross.crossUp : rsiCross.crossDown;
   const ema200Acting   = e200b && Math.abs(currentPrice - e200b) / e200b < 0.005;
   const slPct          = slData ? Math.abs(entry - slData.value) / entry : 0;
   const emaSignalAligned = emaSignalActive &&
@@ -869,6 +871,7 @@ export async function runAnalysis(allData, config = {}) {
     // ── Volume & Divergence ──────────────────────────────────────
     { label: 'Volume POC Confluence',                                             met: atPOC,                   weight: 1.25 },
     { label: 'RSI Divergence',                                                    met: rsiResult.hasDivergence, weight: 1.0  },
+    { label: 'RSI SMA Crossover (Trend Change)',                                  met: rsiCrossAligned,         weight: 1.0  },
     { label: 'OBV Smart Money Divergence',                                        met: !!obvAligned,            weight: 1.0  },
     { label: 'Hidden Divergence (Trend Continuation)',                            met: hiddenDiv.hasHiddenDiv,  weight: 1.0  },
     { label: 'Candlestick Pattern Confirmed',                                     met: hasCandlePattern,        weight: 1.0  },
