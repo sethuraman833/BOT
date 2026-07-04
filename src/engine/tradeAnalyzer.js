@@ -16,11 +16,15 @@ import {
   detectOrderBlocks, detectFVGs, detectSweeps, detectStructureShifts,
   calculateEMA, calculateRSI, detectRSIDivergence, findSwingPoints,
   detectBreakerBlocks, calculateVWAP,
-  // ── NEW AI Modules ──────────────────────────────────────────
+  // ── AI Modules ──────────────────────────────────────────────
   detectCandlePatterns, calculateFibonacci, isInGoldenPocket,
   calculateBollingerBands, calculateMACD, calculateStochRSI,
   calculateVolumeProfile, detectWyckoffPhase,
   calculateOBVDivergence, detectHiddenDivergence, getWeeklyOpenBias,
+  // ── Institutional Logic Modules (v11) ───────────────────────
+  validateDisplacement, classifyLiquidityLevels, detectInducement,
+  assessChochQuality, classifyVolatilityRegime, identifyDrawOnLiquidity,
+  detectEqualHighsLows, calculateSignalGrade,
 } from './smcDetector.js';
 import { calculateOTE, isInOTE, calculatePremiumDiscount, isInDiscount, isInPremium } from './oteCalculator.js';
 import {
@@ -376,6 +380,30 @@ export async function runAnalysis(allData, config = {}) {
   if (obvDivergence?.hasDivergence)     steps.push(obvDivergence.description);
   if (weeklyBias)                       steps.push(`Weekly: ${weeklyBias.description}`);
 
+  // ── Institutional Logic (v11) ──────────────────────────────────
+  // 1. Volatility Regime — classify before direction to use in sizing
+  const volRegime = classifyVolatilityRegime(candlesPrimary);
+  steps.push(`📊 Vol Regime: ${volRegime.description}`);
+
+  // 2. Equal Highs/Lows — detect clustered retail stop levels
+  const allFVGs = [...fvgsOB, ...fvgsPrimary];
+  const allOBs  = [...obsOB, ...obsPrimary];
+  const eqHiLo  = detectEqualHighsLows(candlesPrimary, currentPrice);
+  if (eqHiLo.eqh.length > 0) steps.push(`🎯 EQH: ${eqHiLo.eqh[0].label} @ $${eqHiLo.eqh[0].level.toFixed(2)}`);
+  if (eqHiLo.eql.length > 0) steps.push(`🎯 EQL: ${eqHiLo.eql[0].label} @ $${eqHiLo.eql[0].level.toFixed(2)}`);
+
+  // 3. ERL/IRL Liquidity Classification
+  const liquidityMap = classifyLiquidityLevels(candlesStructure, allFVGs, allOBs, currentPrice);
+  steps.push(`Liquidity: ${liquidityMap.erl.length} ERL levels | ${liquidityMap.irl.length} IRL levels`);
+
+  // 4. Displacement validation on the most recent BOS/CHOCH candle
+  const lastShiftIdx = allShifts.length > 0 ? candlesPrimary.length - 2 : -1;
+  const dispValidation = lastShiftIdx >= 0
+    ? validateDisplacement(candlesPrimary, lastShiftIdx)
+    : { valid: false, score: 0, reason: 'No recent BOS/CHOCH' };
+  if (dispValidation.valid) steps.push(`✅ Displacement confirmed: ${dispValidation.reason}`);
+  else steps.push(`⚠️ Weak displacement: ${dispValidation.reason}`);
+
   // ── Session ────────────────────────────────────────────────────
   const session   = getCurrentSession();
   const isHigherTF = activeTimeframe === '1h' || activeTimeframe === '4h' || activeTimeframe === '1d';
@@ -442,6 +470,29 @@ export async function runAnalysis(allData, config = {}) {
   }
 
   steps.push(`Direction: ${direction || 'RANGING'} | Bull: ${upProb}% Bear: ${downProb}%`);
+
+  // ── Direction-dependent Institutional Logic ────────────────────
+  let inducementData   = { hasInducement: false };
+  let chochQuality     = { quality: 'LOW', score: 0, reasons: [] };
+  let drawOnLiquidity  = null;
+
+  if (direction) {
+    // 5. Inducement detection — did price trap retail before the real move?
+    inducementData = detectInducement(candlesPrimary, direction);
+    if (inducementData.hasInducement)
+      steps.push(`🪤 Inducement: ${inducementData.description}`);
+
+    // 6. CHOCH quality — was it preceded by an ERL sweep + displacement?
+    chochQuality = assessChochQuality(candlesPrimary, allSweeps, direction);
+    steps.push(`CHOCH Quality: ${chochQuality.quality} (${chochQuality.score}/100) — ${chochQuality.reasons.join(', ') || 'No sweep'}`);
+
+    // 7. Draw on Liquidity — what is price targeting?
+    drawOnLiquidity = identifyDrawOnLiquidity(candlesStructure, direction, currentPrice, allFVGs, allOBs);
+    if (drawOnLiquidity?.description) steps.push(`📍 ${drawOnLiquidity.description}`);
+  }
+
+  // Apply ATR sizing multiplier to risk amount
+  adjustedRiskAmount = (adjustedRiskAmount || riskAmount) * (volRegime.sizingMultiplier || 1.0);
 
   // Fibonacci Golden Pocket (Calculated here for SL/TP anchoring)
   const htfSwingH = swingsBias.filter(s => s.type === 'high').slice(-1)[0];
@@ -539,10 +590,8 @@ export async function runAnalysis(allData, config = {}) {
   let slData = null;
   let posSize = 0;
   let nearestOB = null;
-  const allFVGs = [...fvgsOB, ...fvgsPrimary];
 
   if (direction) {
-    const allOBs    = [...obsOB, ...obsPrimary];
     const activeOBs = allOBs.filter(o => o.status === 'active');
 
     nearestOB = direction === 'long'
@@ -827,6 +876,13 @@ export async function runAnalysis(allData, config = {}) {
     { label: 'CME Gap Bias Aligned',                                              met: cmeGapAligned,           weight: 0.75 },
     { label: 'Funding Rate Contrarian Signal',                                    met: fundingAligned,          weight: 0.75 },
     { label: 'Weekly Open Bias Aligned',                                          met: !!weeklyBiasAligned,     weight: 0.75 },
+    // ── Institutional Quality (v11) ──────────────────────────────
+    { label: 'Displacement Confirmed (BOS/CHOCH)',                                met: dispValidation.valid,    weight: 1.5  },
+    { label: 'Inducement Detected (Stop Hunt)',                                   met: inducementData.hasInducement, weight: 1.25 },
+    { label: 'CHOCH Quality: HIGH+ (ERL Sweep + Disp)',                          met: chochQuality.quality === 'ELITE' || chochQuality.quality === 'HIGH', weight: 1.5 },
+    { label: 'Draw on Liquidity Identified',                                      met: !!(drawOnLiquidity?.primary), weight: 1.0 },
+    { label: 'Volatility Regime: Optimal (Contracting/Transitioning)',            met: volRegime.regime === 'CONTRACTING' || volRegime.regime === 'TRANSITIONING', weight: 0.75 },
+    { label: 'Equal High/Low Liquidity Pool Above/Below',                        met: direction === 'long' ? eqHiLo.eqh.length > 0 : eqHiLo.eql.length > 0, weight: 1.0 },
     ...(profile.hasEmaSignal
       ? [{ label: `EMA Signal: ${emaSignalType || 'None'}`,                     met: emaSignalAligned,        weight: 1.0  }]
       : []),
@@ -883,6 +939,28 @@ export async function runAnalysis(allData, config = {}) {
       });
     }
 
+    // ── Inject EQH/EQL as high-priority TP targets ─────────────
+    if (direction === 'long') {
+      (eqHiLo.eqh || []).filter(l => l.level > entry).forEach(l => {
+        tpSwingPool.push({ price: l.level, type: 'high', reason: l.label + ' — Liquidity Target', tf: 'EQH', priority: l.priority });
+      });
+    } else {
+      (eqHiLo.eql || []).filter(l => l.level < entry).forEach(l => {
+        tpSwingPool.push({ price: l.level, type: 'low', reason: l.label + ' — Liquidity Target', tf: 'EQL', priority: l.priority });
+      });
+    }
+
+    // ── Inject Draw on Liquidity as TP pool targets ─────────────
+    if (drawOnLiquidity) {
+      [drawOnLiquidity.primary, drawOnLiquidity.secondary, drawOnLiquidity.tertiary].forEach(draw => {
+        if (!draw) return;
+        if ((direction === 'long' && draw.level > entry) || (direction === 'short' && draw.level < entry)) {
+          tpSwingPool.push({ price: draw.level, type: direction === 'long' ? 'high' : 'low',
+            reason: `Draw: ${draw.label}`, tf: 'DRAW', priority: draw.priority });
+        }
+      });
+    }
+
     tpData = calculateTPs(
       entry, slData.value,
       tpSwingPool, allFVGs,
@@ -926,13 +1004,29 @@ export async function runAnalysis(allData, config = {}) {
   const scoredWeight    = checks.reduce((s, c) => s + (c.met ? c.weight : 0), 0);
   const rawPct          = scoredWeight / totalWeight;
   // Confidence curve: sqrt maps 30% raw → 55%, 50% raw → 71%, 70% raw → 84%
-  // This compensates for the ~26 checks where most are rare/situational signals
   const aiConfidence    = Math.round(Math.sqrt(rawPct) * 100);
   const aiGrade         = aiConfidence >= 90 ? 'ELITE'
                         : aiConfidence >= 75 ? 'STRONG'
                         : aiConfidence >= 55 ? 'MODERATE'
                         : aiConfidence >= 40 ? 'MARGINAL'
                         : 'SKIP';
+
+  // ── Signal Grade (A+ / A / B / C / D) ─────────────────────────
+  const inOTECheck = checks.find(c => c.label.includes('OTE Zone'));
+  const atPOCCheck = checks.find(c => c.label.includes('Volume POC'));
+  const signalGrade = calculateSignalGrade({
+    chochQuality,
+    displacementScore:  dispValidation.score,
+    hasSweep:           allSweeps.length > 0,
+    hasInducement:      inducementData.hasInducement,
+    mtfAligned:         trend4HAligned && dailyAligned,
+    drawAligned:        !!(drawOnLiquidity?.primary),
+    volatilityRegime:   volRegime.regime,
+    rrrMet:             rrrMeetsMin,
+    inOTE:              inOTECheck?.met || false,
+    atPOC:              atPOCCheck?.met || false,
+  });
+  steps.push(`🏆 Signal Grade: ${signalGrade.grade} — ${signalGrade.label} (${signalGrade.score}/100)`);
 
   // ── Decision (AI Confidence-driven) ────────────────────────────
   let decision        = 'NO_TRADE';
@@ -1030,6 +1124,16 @@ export async function runAnalysis(allData, config = {}) {
       fundingSentiment,
       weeklyBias,
     },
+    // ── Institutional Intelligence (v11) ───────────────────────────
+    signalGrade,
+    volatilityRegime:  volRegime,
+    inducement:        inducementData,
+    chochQuality,
+    drawOnLiquidity,
+    equalHighsLows:    eqHiLo,
+    displacementScore: dispValidation,
+    liquidityMap,
+    // ──
     premiumDiscountZones,
     killZone,
     cmeGapData,

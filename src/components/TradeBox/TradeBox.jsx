@@ -21,20 +21,28 @@ function CopyBtn({ value }) {
 
 // Build a human-readable explanation of why the direction was chosen
 function buildDirectionExplanation(analysis) {
-  const { direction, aiModules, confluenceScore } = analysis;
+  const { direction, aiModules, confluenceScore, inducement, chochQuality, drawOnLiquidity, displacementScore } = analysis;
   if (!direction) return null;
 
   const checks  = confluenceScore?.checks || [];
   const isLong  = direction === 'long';
   const reasons = [];
 
-  // SMC structure
+  // SMC structure & Institutional Logic
   const trenAligned = checks.find(c => c.label.includes('Trend Aligned'));
   const bosChoch    = checks.find(c => c.label.includes('BOS/CHOCH'));
   const liquidity   = checks.find(c => c.label.includes('Liquidity Sweep'));
-  if (trenAligned?.met) reasons.push(`HTF trend is ${isLong ? 'bullish' : 'bearish'}`);
-  if (bosChoch?.met)    reasons.push(`Structure shift (${isLong ? 'BOS bullish' : 'BOS bearish'}) confirmed`);
-  if (liquidity?.met)   reasons.push(`Liquidity swept / FVG filled at entry zone`);
+  
+  if (chochQuality?.quality === 'ELITE' || chochQuality?.quality === 'HIGH') {
+    reasons.push(`High-probability CHOCH (ERL Swept + Disp)`);
+  } else if (bosChoch?.met) {
+    reasons.push(`Structure shift (${isLong ? 'BOS bullish' : 'BOS bearish'})`);
+  }
+  
+  if (displacementScore?.valid) reasons.push(`Displacement Confirmed`);
+  if (inducement?.hasInducement) reasons.push(`Inducement Swept (Retail Trapped)`);
+  if (drawOnLiquidity?.primary) reasons.push(`Draw on Liquidity: ${drawOnLiquidity.primary.label}`);
+  if (liquidity?.met && !chochQuality) reasons.push(`Liquidity swept at entry zone`);
 
   // AI modules
   if (aiModules?.macd?.bullCross && isLong)   reasons.push('MACD bullish crossover');
@@ -45,31 +53,41 @@ function buildDirectionExplanation(analysis) {
   if (aiModules?.obvDivergence?.bullishDivergence && isLong)  reasons.push('OBV smart-money accumulation');
   if (aiModules?.obvDivergence?.bearishDivergence && !isLong) reasons.push('OBV smart-money distribution');
   if (aiModules?.weeklyBias?.bias === direction) reasons.push(`Weekly open bias: ${isLong ? '↑ Bullish' : '↓ Bearish'}`);
-  if (aiModules?.fibonacciData?.goldenPocket)    reasons.push('Entry in Fib Golden Pocket (0.618–0.705)');
-  if (aiModules?.stochRSI?.isOversold && isLong)   reasons.push('StochRSI oversold at entry');
-  if (aiModules?.stochRSI?.isOverbought && !isLong) reasons.push('StochRSI overbought at entry');
-  if (aiModules?.bollingerBands?.isSqueezeRelease)  reasons.push('Bollinger Band squeeze release');
+  if (aiModules?.fibonacciData?.goldenPocket)    reasons.push('Entry in Fib Golden Pocket');
+  if (aiModules?.stochRSI?.isOversold && isLong)   reasons.push('StochRSI oversold');
+  if (aiModules?.stochRSI?.isOverbought && !isLong) reasons.push('StochRSI overbought');
+  if (aiModules?.bollingerBands?.isSqueezeRelease)  reasons.push('BB Squeeze release');
 
   return reasons.length > 0 ? reasons.join(' · ') : `${isLong ? 'Bullish' : 'Bearish'} bias detected`;
 }
 
 // Build active signal chips for the top banner
 function buildSignalChips(analysis) {
-  const { aiModules, confluenceScore, direction } = analysis;
+  const { aiModules, confluenceScore, direction, inducement, displacementScore, equalHighsLows, volatilityRegime } = analysis;
   const checks = confluenceScore?.checks || [];
   const isLong = direction === 'long';
   const chips  = [];
 
-  const chipIf = (label, text, type = 'active') => {
-    const c = checks.find(ch => ch.label.includes(label));
-    if (c?.met) chips.push({ text, type });
+  const chipIf = (labelStr, shortText, type = 'active') => {
+    if (checks.some(c => c.label.includes(labelStr) && c.met)) {
+      chips.push({ text: shortText, type });
+    }
   };
 
+  // Core SMC
   chipIf('Trend Aligned', 'Trend ✓');
-  chipIf('BOS/CHOCH', 'BOS ✓');
   chipIf('Liquidity', 'Liq ✓');
   chipIf('Order Block', 'OB ✓');
   chipIf('OTE Zone', 'OTE ✓');
+
+  // Institutional Logic
+  if (displacementScore?.valid) chips.push({ text: 'Disp ✓', type: 'active ai' });
+  if (inducement?.hasInducement) chips.push({ text: 'Inducement ✓', type: 'active ai' });
+  if (isLong && equalHighsLows?.eqh?.length > 0) chips.push({ text: 'EQH Target', type: 'active ai' });
+  if (!isLong && equalHighsLows?.eql?.length > 0) chips.push({ text: 'EQL Target', type: 'active ai' });
+  if (volatilityRegime?.regime === 'CONTRACTING') chips.push({ text: 'Squeeze', type: 'active ai' });
+
+  // Tech / AI
   chipIf('Golden Pocket', 'Fib GP ✓', 'active ai');
   chipIf('MACD', 'MACD ✓', 'active ai');
   if (aiModules?.wyckoffPhase?.signal === direction) chips.push({ text: `Wyckoff ✓`, type: 'active ai' });
@@ -134,10 +152,16 @@ export default function TradeBox({ analysis }) {
       {/* ── AI Score Banner ──────────────────────────────────── */}
       <div className="trade-ai-banner">
         <div className="tai-score-wrap">
-          <div className={`tai-score-ring ${grade}`}>{conf}%</div>
+          <div className={`tai-score-ring ${grade}`}>
+            {analysis.signalGrade ? analysis.signalGrade.grade : `${conf}%`}
+          </div>
           <div className="tai-grade-info">
-            <div className={`tai-grade-label grade-${grade}`}>{confluenceScore?.aiGrade || 'SKIP'}</div>
-            <div className="tai-grade-sub">AI Confidence</div>
+            <div className={`tai-grade-label grade-${grade}`}>
+              {analysis.signalGrade ? analysis.signalGrade.label : (confluenceScore?.aiGrade || 'SKIP')}
+            </div>
+            <div className="tai-grade-sub">
+              {analysis.signalGrade ? `Inst. Score: ${analysis.signalGrade.score}/100` : 'AI Confidence'}
+            </div>
           </div>
         </div>
         <div className="tai-signals">

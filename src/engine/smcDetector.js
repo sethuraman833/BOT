@@ -1195,3 +1195,237 @@ export function getWeeklyOpenBias(candles, currentPrice) {
   }
   return null;
 }
+
+// ---------------------------------------------------------------
+//  MODULE 11 — DISPLACEMENT QUALITY VALIDATOR
+// ---------------------------------------------------------------
+export function validateDisplacement(candles, breakCandleIndex) {
+  if (!candles || breakCandleIndex < 0 || breakCandleIndex >= candles.length)
+    return { valid: false, score: 0, reason: 'No break candle' };
+  const c = candles[breakCandleIndex];
+  if (!c) return { valid: false, score: 0, reason: 'No candle at index' };
+  const body = Math.abs(c.close - c.open);
+  const range = c.high - c.low;
+  if (range === 0) return { valid: false, score: 0, reason: 'Doji' };
+  const bodyRatio = body / range;
+  const isBull = c.close > c.open;
+  const upperWick = c.high - Math.max(c.open, c.close);
+  const lowerWick = Math.min(c.open, c.close) - c.low;
+  const wickRatio = isBull ? (lowerWick / range) : (upperWick / range);
+  const lookbackStart = Math.max(0, breakCandleIndex - 20);
+  const avgVol = candles.slice(lookbackStart, breakCandleIndex)
+    .reduce((s, x) => s + (x.volume || 0), 0) / Math.max(1, breakCandleIndex - lookbackStart);
+  const volMult = avgVol > 0 ? (c.volume || 0) / avgVol : 1;
+  let score = 0; const reasons = [];
+  if (bodyRatio >= 0.60)      { score += 35; reasons.push(`Body ${(bodyRatio*100).toFixed(0)}%`); }
+  else if (bodyRatio >= 0.45) { score += 20; reasons.push('Moderate body'); }
+  if (wickRatio <= 0.20)      { score += 25; reasons.push('Closes at extreme'); }
+  else if (wickRatio <= 0.35) { score += 12; }
+  if (volMult >= 1.5)         { score += 25; reasons.push(`Vol ${volMult.toFixed(1)}x`); }
+  else if (volMult >= 1.0)    { score += 12; }
+  if (breakCandleIndex > 0) {
+    const prev = candles[breakCandleIndex - 1];
+    if (prev && isBull && c.close > prev.high) { score += 15; reasons.push('Engulfs'); }
+    if (prev && !isBull && c.close < prev.low) { score += 15; reasons.push('Engulfs'); }
+  }
+  score = Math.min(100, score);
+  return { valid: score >= 50, score, bodyRatio, volMultiplier: volMult, reason: reasons.join(' · ') || 'Weak' };
+}
+
+// ---------------------------------------------------------------
+//  MODULE 12 — ERL / IRL LIQUIDITY CLASSIFICATION
+// ---------------------------------------------------------------
+export function classifyLiquidityLevels(candles, fvgs, orderBlocks, currentPrice) {
+  if (!candles || candles.length < 10) return { erl: [], irl: [] };
+  const erl = [], irl = [];
+  const swings = findSwingPoints(candles, 5);
+  const highs = swings.filter(s => s.type === 'high').slice(-10);
+  const lows  = swings.filter(s => s.type === 'low').slice(-10);
+  highs.forEach((h, i) => {
+    const isEq = highs.some((h2, j) => j !== i && Math.abs(h2.price - h.price) / h.price < 0.0005);
+    erl.push({ level: h.price, type: 'high', subtype: isEq ? 'EQH' : 'swing_high',
+      label: isEq ? 'Equal High (EQH)' : 'Swing High', priority: isEq ? 'HIGH' : 'MEDIUM',
+      distPct: ((h.price - currentPrice) / currentPrice) * 100 });
+  });
+  lows.forEach((l, i) => {
+    const isEq = lows.some((l2, j) => j !== i && Math.abs(l2.price - l.price) / l.price < 0.0005);
+    erl.push({ level: l.price, type: 'low', subtype: isEq ? 'EQL' : 'swing_low',
+      label: isEq ? 'Equal Low (EQL)' : 'Swing Low', priority: isEq ? 'HIGH' : 'MEDIUM',
+      distPct: ((l.price - currentPrice) / currentPrice) * 100 });
+  });
+  (fvgs || []).forEach(f => irl.push({ level: f.midpoint, type: f.type === 'bullish' ? 'low' : 'high',
+    subtype: 'fvg', label: `${f.type === 'bullish' ? 'Bull' : 'Bear'} FVG`, priority: 'MEDIUM',
+    distPct: ((f.midpoint - currentPrice) / currentPrice) * 100 }));
+  (orderBlocks || []).filter(ob => ob.status === 'active').forEach(ob => {
+    const mid = (ob.upperBound + ob.lowerBound) / 2;
+    irl.push({ level: mid, type: ob.type === 'demand' ? 'low' : 'high', subtype: 'ob',
+      label: `${ob.type === 'demand' ? 'Demand' : 'Supply'} OB`, priority: ob.strength > 3 ? 'HIGH' : 'MEDIUM',
+      distPct: ((mid - currentPrice) / currentPrice) * 100 });
+  });
+  return { erl, irl };
+}
+
+// ---------------------------------------------------------------
+//  MODULE 13 — INDUCEMENT DETECTION
+// ---------------------------------------------------------------
+function _dispCheck(c, dir) {
+  if (!c) return false;
+  const body = Math.abs(c.close - c.open), range = c.high - c.low;
+  if (range === 0 || body / range < 0.50) return false;
+  return dir === 'bullish' ? c.close > c.open : c.close < c.open;
+}
+export function detectInducement(candles, direction) {
+  if (!candles || candles.length < 20) return { hasInducement: false };
+  const recent = candles.slice(-Math.min(30, candles.length - 2));
+  const swings = findSwingPoints(recent, 2);
+  if (direction === 'long') {
+    const minorHighs = swings.filter(s => s.type === 'high').slice(-4);
+    for (let i = 1; i < minorHighs.length; i++) {
+      const mh = minorHighs[i];
+      for (let k = mh.index + 1; k < recent.length - 2; k++) {
+        if (recent[k] && recent[k].high > mh.price && recent[k].close < mh.price && _dispCheck(recent[k+1],'bullish'))
+          return { hasInducement: true, inducementLevel: mh.price, description: `Bull inducement swept $${mh.price.toFixed(2)}` };
+      }
+    }
+  } else {
+    const minorLows = swings.filter(s => s.type === 'low').slice(-4);
+    for (let i = 1; i < minorLows.length; i++) {
+      const ml = minorLows[i];
+      for (let k = ml.index + 1; k < recent.length - 2; k++) {
+        if (recent[k] && recent[k].low < ml.price && recent[k].close > ml.price && _dispCheck(recent[k+1],'bearish'))
+          return { hasInducement: true, inducementLevel: ml.price, description: `Bear inducement swept $${ml.price.toFixed(2)}` };
+      }
+    }
+  }
+  return { hasInducement: false };
+}
+
+// ---------------------------------------------------------------
+//  MODULE 14 — CHOCH QUALITY FILTER
+// ---------------------------------------------------------------
+export function assessChochQuality(candles, sweeps, direction) {
+  if (!candles || candles.length < 10) return { quality: 'LOW', score: 0, reasons: [] };
+  let score = 0; const reasons = [];
+  const recentSweep = (sweeps||[]).some(s => {
+    const age = candles.length - 1 - (s.candleIndex||0);
+    return age <= 10 && ((direction==='long' && (s.type==='bullish'||s.direction==='long')) ||
+                         (direction==='short'&& (s.type==='bearish'||s.direction==='short')));
+  });
+  if (recentSweep) { score += 40; reasons.push('ERL swept before CHOCH'); }
+  const disp = validateDisplacement(candles, candles.length - 2);
+  if (disp.valid) { score += Math.round(disp.score * 0.4); reasons.push(`Disp: ${disp.reason}`); }
+  const sw = findSwingPoints(candles.slice(-20), 3);
+  const rel = direction==='long' ? sw.filter(s=>s.type==='high') : sw.filter(s=>s.type==='low');
+  if (rel.length >= 2) { score += 20; reasons.push('Multi-swing'); }
+  score = Math.min(100, score);
+  const quality = score>=70?'ELITE':score>=45?'HIGH':score>=25?'MEDIUM':'LOW';
+  return { quality, score, reasons };
+}
+
+// ---------------------------------------------------------------
+//  MODULE 15 — ATR VOLATILITY REGIME CLASSIFIER
+// ---------------------------------------------------------------
+export function classifyVolatilityRegime(candles, period = 14) {
+  if (!candles || candles.length < period * 2) return { regime:'UNKNOWN', atr:0, atrPct:0, trend:'flat', sizingMultiplier:1.0, description:'Insufficient data' };
+  const atrs = [];
+  for (let i = 1; i < candles.length; i++) {
+    const c=candles[i], p=candles[i-1];
+    atrs.push(Math.max(c.high-c.low, Math.abs(c.high-p.close), Math.abs(c.low-p.close)));
+  }
+  const k = 2/(period+1);
+  let atr = atrs.slice(0,period).reduce((a,b)=>a+b,0)/period;
+  const sm=[atr];
+  for (let i=period;i<atrs.length;i++){atr=atrs[i]*k+sm[sm.length-1]*(1-k);sm.push(atr);}
+  const cur=sm[sm.length-1],p5=sm[sm.length-6]||cur,p14=sm[Math.max(0,sm.length-15)]||cur;
+  const price=candles[candles.length-1].close, atrPct=(cur/price)*100;
+  const c5=(cur-p5)/p5, c14=(cur-p14)/p14;
+  let regime='NORMAL',trend='flat';
+  if(c5>0.10&&c14>0.05){regime='EXPANDING';trend='rising';}
+  else if(c5<-0.10&&c14<-0.05){regime='CONTRACTING';trend='falling';}
+  else if(Math.abs(c14)<0.03&&atrPct<0.5){regime='CONTRACTING';trend='compressed';}
+  else if(c5>0.05&&c14<0){regime='TRANSITIONING';trend='inflecting';}
+  return { regime, atr:parseFloat(cur.toFixed(4)), atrPct:parseFloat(atrPct.toFixed(3)), trend,
+    description:`${regime} | ATR ${atrPct.toFixed(2)}% | ${trend}`,
+    sizingMultiplier: regime==='EXPANDING'?0.75:regime==='CONTRACTING'?1.25:regime==='TRANSITIONING'?1.1:1.0 };
+}
+
+// ---------------------------------------------------------------
+//  MODULE 16 — DRAW ON LIQUIDITY
+// ---------------------------------------------------------------
+export function identifyDrawOnLiquidity(candles, direction, currentPrice, fvgs, orderBlocks) {
+  if (!candles||candles.length<20) return null;
+  const { erl } = classifyLiquidityLevels(candles, fvgs, orderBlocks, currentPrice);
+  const targets = direction==='long'
+    ? erl.filter(l=>l.level>currentPrice&&l.type==='high').sort((a,b)=>a.level-b.level)
+    : erl.filter(l=>l.level<currentPrice&&l.type==='low').sort((a,b)=>b.level-a.level);
+  if (!targets.length) return null;
+  return {
+    primary:   targets[0]?{...targets[0],distPct:Math.abs(targets[0].distPct)}:null,
+    secondary: targets[1]?{...targets[1],distPct:Math.abs(targets[1].distPct)}:null,
+    tertiary:  targets[2]?{...targets[2],distPct:Math.abs(targets[2].distPct)}:null,
+    description: targets[0]?`Draw ? ${targets[0].label} @ $${targets[0].level.toFixed(2)}`:'No draw',
+  };
+}
+
+// ---------------------------------------------------------------
+//  MODULE 17 — EQUAL HIGHS / LOWS
+// ---------------------------------------------------------------
+export function detectEqualHighsLows(candles, currentPrice, tolerance=0.0005) {
+  if (!candles||candles.length<10) return { eqh:[], eql:[] };
+  const eqh=[],eql=[];
+  const recent=candles.slice(-Math.min(60,candles.length));
+  const procH=new Set();
+  for(let i=0;i<recent.length-1;i++){
+    if(procH.has(i)) continue;
+    const grp=[i];
+    for(let j=i+1;j<recent.length;j++){
+      if(Math.abs(recent[j].high-recent[i].high)/recent[i].high<=tolerance){grp.push(j);procH.add(j);}
+    }
+    if(grp.length>=2){
+      const lvl=grp.reduce((s,idx)=>s+recent[idx].high,0)/grp.length;
+      if(lvl>currentPrice) eqh.push({level:lvl,count:grp.length,label:`EQH (${grp.length}x)`,priority:grp.length>=3?'HIGH':'MEDIUM',distPct:((lvl-currentPrice)/currentPrice)*100});
+    }
+  }
+  const procL=new Set();
+  for(let i=0;i<recent.length-1;i++){
+    if(procL.has(i)) continue;
+    const grp=[i];
+    for(let j=i+1;j<recent.length;j++){
+      if(Math.abs(recent[j].low-recent[i].low)/recent[i].low<=tolerance){grp.push(j);procL.add(j);}
+    }
+    if(grp.length>=2){
+      const lvl=grp.reduce((s,idx)=>s+recent[idx].low,0)/grp.length;
+      if(lvl<currentPrice) eql.push({level:lvl,count:grp.length,label:`EQL (${grp.length}x)`,priority:grp.length>=3?'HIGH':'MEDIUM',distPct:((lvl-currentPrice)/currentPrice)*100});
+    }
+  }
+  eqh.sort((a,b)=>a.distPct-b.distPct);
+  eql.sort((a,b)=>Math.abs(a.distPct)-Math.abs(b.distPct));
+  return { eqh, eql };
+}
+
+// ---------------------------------------------------------------
+//  MODULE 18 — SIGNAL GRADE (A+ / A / B / C / D)
+// ---------------------------------------------------------------
+export function calculateSignalGrade({ chochQuality, displacementScore, hasSweep, hasInducement,
+  mtfAligned, drawAligned, volatilityRegime, rrrMet, inOTE, atPOC }) {
+  let s=0;
+  if(hasSweep)                                  s+=15;
+  if(hasInducement)                             s+=10;
+  if(chochQuality?.quality==='ELITE')           s+=15;
+  else if(chochQuality?.quality==='HIGH')       s+=10;
+  else if(chochQuality?.quality==='MEDIUM')     s+=5;
+  if((displacementScore||0)>=70)                s+=10;
+  else if((displacementScore||0)>=50)           s+=5;
+  if(mtfAligned)  s+=15;
+  if(drawAligned) s+=10;
+  if(inOTE)       s+=5;
+  if(rrrMet)      s+=8;
+  if(atPOC)       s+=5;
+  if(volatilityRegime==='TRANSITIONING')        s+=7;
+  else if(volatilityRegime==='CONTRACTING')     s+=5;
+  else if(volatilityRegime==='EXPANDING')       s+=2;
+  s=Math.min(100,s);
+  const grade=s>=85?'A+':s>=70?'A':s>=55?'B':s>=40?'C':'D';
+  const label=s>=85?'ELITE SETUP':s>=70?'HIGH CONVICTION':s>=55?'MODERATE':s>=40?'LOW CONVICTION':'AVOID';
+  return { grade, score:s, label };
+}
