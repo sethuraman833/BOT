@@ -2,7 +2,6 @@ import { useState, useCallback } from 'react';
 import { formatPrice, formatSize } from '../../utils/formatters.js';
 import './TradeBox.css';
 
-// Copy-to-clipboard button component
 function CopyBtn({ value }) {
   const [copied, setCopied] = useState(false);
   const handleCopy = useCallback(() => {
@@ -14,17 +13,78 @@ function CopyBtn({ value }) {
     }).catch(() => {});
   }, [value]);
   return (
-    <button className={`copy-btn ${copied ? 'copied' : ''}`} onClick={handleCopy} title="Copy to clipboard" aria-label="Copy price">
+    <button className={`copy-btn ${copied ? 'copied' : ''}`} onClick={handleCopy} title="Copy" aria-label="Copy price">
       {copied ? '✓' : '⧉'}
     </button>
   );
+}
+
+// Build a human-readable explanation of why the direction was chosen
+function buildDirectionExplanation(analysis) {
+  const { direction, aiModules, confluenceScore } = analysis;
+  if (!direction) return null;
+
+  const checks  = confluenceScore?.checks || [];
+  const isLong  = direction === 'long';
+  const reasons = [];
+
+  // SMC structure
+  const trenAligned = checks.find(c => c.label.includes('Trend Aligned'));
+  const bosChoch    = checks.find(c => c.label.includes('BOS/CHOCH'));
+  const liquidity   = checks.find(c => c.label.includes('Liquidity Sweep'));
+  if (trenAligned?.met) reasons.push(`HTF trend is ${isLong ? 'bullish' : 'bearish'}`);
+  if (bosChoch?.met)    reasons.push(`Structure shift (${isLong ? 'BOS bullish' : 'BOS bearish'}) confirmed`);
+  if (liquidity?.met)   reasons.push(`Liquidity swept / FVG filled at entry zone`);
+
+  // AI modules
+  if (aiModules?.macd?.bullCross && isLong)   reasons.push('MACD bullish crossover');
+  if (aiModules?.macd?.bearCross && !isLong)  reasons.push('MACD bearish crossover');
+  if (aiModules?.wyckoffPhase?.signal === direction) {
+    reasons.push(`Wyckoff: ${aiModules.wyckoffPhase.phase}`);
+  }
+  if (aiModules?.obvDivergence?.bullishDivergence && isLong)  reasons.push('OBV smart-money accumulation');
+  if (aiModules?.obvDivergence?.bearishDivergence && !isLong) reasons.push('OBV smart-money distribution');
+  if (aiModules?.weeklyBias?.bias === direction) reasons.push(`Weekly open bias: ${isLong ? '↑ Bullish' : '↓ Bearish'}`);
+  if (aiModules?.fibonacciData?.goldenPocket)    reasons.push('Entry in Fib Golden Pocket (0.618–0.705)');
+  if (aiModules?.stochRSI?.isOversold && isLong)   reasons.push('StochRSI oversold at entry');
+  if (aiModules?.stochRSI?.isOverbought && !isLong) reasons.push('StochRSI overbought at entry');
+  if (aiModules?.bollingerBands?.isSqueezeRelease)  reasons.push('Bollinger Band squeeze release');
+
+  return reasons.length > 0 ? reasons.join(' · ') : `${isLong ? 'Bullish' : 'Bearish'} bias detected`;
+}
+
+// Build active signal chips for the top banner
+function buildSignalChips(analysis) {
+  const { aiModules, confluenceScore, direction } = analysis;
+  const checks = confluenceScore?.checks || [];
+  const isLong = direction === 'long';
+  const chips  = [];
+
+  const chipIf = (label, text, type = 'active') => {
+    const c = checks.find(ch => ch.label.includes(label));
+    if (c?.met) chips.push({ text, type });
+  };
+
+  chipIf('Trend Aligned', 'Trend ✓');
+  chipIf('BOS/CHOCH', 'BOS ✓');
+  chipIf('Liquidity', 'Liq ✓');
+  chipIf('Order Block', 'OB ✓');
+  chipIf('OTE Zone', 'OTE ✓');
+  chipIf('Golden Pocket', 'Fib GP ✓', 'active ai');
+  chipIf('MACD', 'MACD ✓', 'active ai');
+  if (aiModules?.wyckoffPhase?.signal === direction) chips.push({ text: `Wyckoff ✓`, type: 'active ai' });
+  chipIf('Volume POC', 'POC ✓', 'active ai');
+  chipIf('Kill Zone', 'KZ ✓');
+  chipIf('Funding Rate', 'Funding ✓', 'active ai');
+
+  return chips.slice(0, 8); // max 8 chips
 }
 
 export default function TradeBox({ analysis }) {
   if (!analysis || !analysis.direction) {
     return (
       <div className="sidebar-section">
-        <div className="trade-box-empty">No trade direction detected.</div>
+        <div className="trade-box-empty">Scanning for high-probability setup…</div>
       </div>
     );
   }
@@ -33,99 +93,132 @@ export default function TradeBox({ analysis }) {
     direction, entry, stopLoss, tpDetails,
     positionSize, breakevenMove, confluenceScore,
     session, keyRisk, invalidationLevel, symbol,
-    primaryTimeframe, analysisMode,
+    primaryTimeframe, analysisMode, aiModules,
   } = analysis;
 
-  const isLong = direction === 'long';
-  const slPct  = (entry && stopLoss?.value)
+  const isLong   = direction === 'long';
+  const grade    = confluenceScore?.aiGrade?.toLowerCase() || 'skip';
+  const conf     = confluenceScore?.aiConfidence || 0;
+  const slPct    = (entry && stopLoss?.value)
     ? ((Math.abs(entry - stopLoss.value) / entry) * 100).toFixed(2)
     : '—';
+
+  const dirExplanation = buildDirectionExplanation(analysis);
+  const chips          = buildSignalChips(analysis);
+
+  // TP color helpers
+  const tpPriceClass = (i) => i === 0 ? 'tp' : i === 1 ? 'tp2' : 'tp3';
+  const tpBadgeClass = (i) => `tp${i + 1}-badge`;
+  const tpAccent     = (i) => `tp${i + 1}`;
+
+  // Wyckoff / Volume context
+  const wyckoff = aiModules?.wyckoffPhase;
+  const vp      = aiModules?.volumeProfile;
+  const macd    = aiModules?.macd;
+  const funding = aiModules?.fundingSentiment;
 
   return (
     <div className={`trade-box ${isLong ? 'long' : 'short'}`}>
 
-      {/* ── Header ─────────────────────────────────────────── */}
+      {/* ── Header ──────────────────────────────────────────── */}
       <div className="trade-box-header">
-        <span>TRADE SETUP</span>
-        <span className={`trade-dir-badge ${isLong ? 'long' : 'short'}`}>
+        <div className="trade-box-header-left">
+          <div className="trade-box-title">Signal · {String(analysisMode || primaryTimeframe || '—')}</div>
+          <div className="trade-box-subtitle">{String(symbol || '—')} · {String(session?.name || '—')}</div>
+        </div>
+        <div className={`trade-dir-badge ${isLong ? 'long' : 'short'}`}>
           {isLong ? '▲ LONG' : '▼ SHORT'}
-        </span>
-      </div>
-
-      {/* ── Meta ───────────────────────────────────────────── */}
-      <div className="trade-meta-row">
-        <div className="trade-meta-cell">
-          <span className="tm-label">Asset</span>
-          <span className="tm-value mono">{String(symbol || '—')}</span>
-        </div>
-        <div className="trade-meta-cell">
-          <span className="tm-label">TF</span>
-          <span className="tm-value mono">{String(primaryTimeframe || '—').toUpperCase()}</span>
-        </div>
-        <div className="trade-meta-cell">
-          <span className="tm-label">Session</span>
-          <span className="tm-value">{String(session?.name || '—')}</span>
-        </div>
-        <div className="trade-meta-cell">
-          <span className="tm-label">AI Grade</span>
-          <span className={`tm-value mono tier-${confluenceScore?.aiGrade?.toLowerCase() || 'skip'}`}>
-            {confluenceScore?.aiConfidence || 0}% {confluenceScore?.aiGrade || 'SKIP'}
-          </span>
         </div>
       </div>
 
-      <div className="trade-divider" />
+      {/* ── AI Score Banner ──────────────────────────────────── */}
+      <div className="trade-ai-banner">
+        <div className="tai-score-wrap">
+          <div className={`tai-score-ring ${grade}`}>{conf}%</div>
+          <div className="tai-grade-info">
+            <div className={`tai-grade-label grade-${grade}`}>{confluenceScore?.aiGrade || 'SKIP'}</div>
+            <div className="tai-grade-sub">AI Confidence</div>
+          </div>
+        </div>
+        <div className="tai-signals">
+          {chips.map((c, i) => (
+            <span key={i} className={`tai-signal-chip ${c.type}`}>{c.text}</span>
+          ))}
+        </div>
+      </div>
 
-      {/* ── Entry ──────────────────────────────────────────── */}
-      <div className="trade-entry-block">
-        <div className="teb-label">Entry Price</div>
+      {/* ── Entry ───────────────────────────────────────────── */}
+      <div className={`trade-entry-block ${isLong ? 'long' : 'short'}`}>
+        <div className="teb-label">Entry Zone</div>
         <div className="teb-price">{formatPrice(entry, symbol)} <CopyBtn value={entry} /></div>
-        <div className="teb-sub">
-          <div className="teb-sub-item">
-            <span className="text-dim">Size:</span>
-            <strong className="mono">{formatSize(positionSize)} units</strong>
+        <div className="teb-chips">
+          <div className="teb-chip size">
+            <span className="chip-label">Size</span>
+            <strong>{formatSize(positionSize)} units</strong>
           </div>
-          <div className="teb-sub-item">
-            <span className="text-dim">Risk:</span>
-            <strong className="mono text-red">${analysis.riskAmount ? analysis.riskAmount.toFixed(2) : '5.00'}</strong>
+          <div className="teb-chip risk">
+            <span className="chip-label">Risk</span>
+            <strong>${analysis.riskAmount ? analysis.riskAmount.toFixed(2) : '5.00'}</strong>
           </div>
-          <div className="teb-sub-item">
-            <span className="text-dim">SL dist:</span>
-            <strong className="mono text-red">−{slPct}%</strong>
+          <div className="teb-chip sldist">
+            <span className="chip-label">SL Dist</span>
+            <strong>−{slPct}%</strong>
           </div>
         </div>
       </div>
 
       <div className="trade-divider" />
 
-      {/* ── Stop Loss ──────────────────────────────────────── */}
+      {/* ── Stop Loss ───────────────────────────────────────── */}
       <div className="trade-level-row sl">
-        <div className="tlr-left">
-          <span className="tlr-badge sl-badge">SL</span>
-          <span className="tlr-label" style={{fontSize: '11px'}}>{stopLoss?.buffer || 'Stop Loss'}</span>
-        </div>
-        <div className="tlr-right">
-          <span className="tlr-price text-red mono">{formatPrice(stopLoss?.value, symbol)} <CopyBtn value={stopLoss?.value} /></span>
-          <span className="tlr-pct text-red">−{slPct}%</span>
+        <div className="tlr-accent" />
+        <div className="tlr-content">
+          <div className="tlr-left">
+            <div className="tlr-badge-row">
+              <span className="tlr-badge sl-badge">SL</span>
+            </div>
+            <div className="tlr-reason" title={stopLoss?.buffer || 'Structural Stop'}>
+              {stopLoss?.buffer || 'Structural Stop'}
+            </div>
+          </div>
+          <div className="tlr-right">
+            <span className="tlr-price sl">{formatPrice(stopLoss?.value, symbol)} <CopyBtn value={stopLoss?.value} /></span>
+            <div className="tlr-meta">
+              <span className="tlr-rrr sl">−{slPct}%</span>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* ── TPs ────────────────────────────────────────────── */}
+      {/* ── Take Profits ────────────────────────────────────── */}
       {tpDetails && Array.isArray(tpDetails) && tpDetails.map((tp, i) => {
         if (!tp || !tp.level) return null;
         const pctMove  = (entry && tp.level) ? ((Math.abs(tp.level - entry) / entry) * 100).toFixed(2) : '—';
         const rrrLabel = (tp.rrr != null) ? `1:${Number(tp.rrr).toFixed(1)}` : '—';
         return (
-          <div className={`trade-level-row tp tp${i + 1}`} key={i}>
-            <div className="tlr-left">
-              <span className={`tlr-badge tp-badge tp${i + 1}-badge`}>TP{i + 1}</span>
-              <span className="tlr-label">{String(tp.reason || 'Target')}</span>
-            </div>
-            <div className="tlr-right">
-              <span className="tlr-price text-green mono">{formatPrice(tp.level, symbol)} <CopyBtn value={tp.level} /></span>
-              <span className="tlr-rrr">{rrrLabel}</span>
-              <span className="tlr-pct text-green">+{pctMove}%</span>
-              <span className="tlr-close">→{String(tp.closePercent || 0)}%</span>
+          <div className={`trade-level-row ${tpAccent(i)}`} key={i}>
+            <div className="tlr-accent" />
+            <div className="tlr-content">
+              <div className="tlr-left">
+                <div className="tlr-badge-row">
+                  <span className={`tlr-badge ${tpBadgeClass(i)}`}>TP{i + 1}</span>
+                  <span className="tlr-close">→ {String(tp.closePercent || 0)}% of position</span>
+                </div>
+                <div className="tlr-reason" title={String(tp.reason || 'Target')}>
+                  {String(tp.reason || 'Target')}
+                </div>
+              </div>
+              <div className="tlr-right">
+                <span className={`tlr-price ${tpPriceClass(i)}`}>
+                  {formatPrice(tp.level, symbol)} <CopyBtn value={tp.level} />
+                </span>
+                <div className="tlr-meta">
+                  <span className="tlr-rrr">{rrrLabel}</span>
+                  <span className="tlr-pct" style={{ color: i === 0 ? '#00e5b4' : i === 1 ? '#3b8ef0' : '#9d6fff' }}>
+                    +{pctMove}%
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
         );
@@ -133,54 +226,101 @@ export default function TradeBox({ analysis }) {
 
       <div className="trade-divider" />
 
-      {/* ── Breakeven ──────────────────────────────────────── */}
+      {/* ── Breakeven ───────────────────────────────────────── */}
       <div className="trade-be-row">
-        <span className="text-dim">⚡ Move SL to BE at</span>
-        <span className="mono text-yellow">{formatPrice(breakevenMove, symbol)}</span>
+        <span>⚡ Move SL to Breakeven at</span>
+        <span className="mono" style={{ color: 'var(--accent-yellow)', fontWeight: 700 }}>
+          {formatPrice(breakevenMove, symbol)}
+        </span>
       </div>
 
-      <div className="trade-divider" />
-      
-      {/* ── Trade Management Rules ─────────────────────────── */}
-      <div className="trade-management-rules">
-        <div className="tm-rules-header">📈 Trade Management Exit Rules</div>
-        <div className="tm-rules-body">
-          <div className="tm-rule-item">
-            <strong>BE Trigger:</strong> Move SL to Entry at 1.5R in profit ($+{(analysis.riskAmount * 1.5 || 7.50).toFixed(2)} value: {formatPrice(breakevenMove, symbol)})
+      {/* ── AI Reasoning ────────────────────────────────────── */}
+      <div className="trade-reasoning">
+        <div className="trade-reasoning-header">🧠 Signal Reasoning</div>
+        <div className="reasoning-grid">
+          <div className="reasoning-item full-width">
+            <div className="ri-label">Why {isLong ? 'LONG' : 'SHORT'}?</div>
+            <div className={`ri-value ${isLong ? 'bullish' : 'bearish'}`}>{dirExplanation}</div>
           </div>
-          {tpDetails && tpDetails.length >= 3 ? (
-            <>
-              <div className="tm-rule-item">
-                <strong>TP1 Hit:</strong> Close 40% position & Move SL to Breakeven immediately
+          {wyckoff?.signal && (
+            <div className="reasoning-item">
+              <div className="ri-label">Wyckoff Phase</div>
+              <div className={`ri-value ${wyckoff.signal === direction ? 'bullish' : 'bearish'}`}>
+                {wyckoff.phase} — {wyckoff.description?.split('.')[0]}
               </div>
-              <div className="tm-rule-item">
-                <strong>TP2 Hit:</strong> Close 35% (total) & Trail SL to TP1 level ({formatPrice(tpDetails[0].level, symbol)})
-              </div>
-              <div className="tm-rule-item">
-                <strong>TP3 Hit:</strong> Close remaining 25% (Terminal exit)
-              </div>
-            </>
-          ) : (
-            <div className="tm-rule-item">
-              <strong>Single TP:</strong> Close 100% position at Target (No ladder applied)
             </div>
           )}
-          <div className="tm-rule-item text-yellow">
-            <strong>Momentum Shift:</strong> Close 100% on close of 2 consecutive 15m candles against trade
+          {vp?.poc && (
+            <div className="reasoning-item">
+              <div className="ri-label">Volume Profile</div>
+              <div className="ri-value neutral">
+                POC: {formatPrice(vp.poc, symbol)} · VA: {formatPrice(vp.valueAreaLow, symbol)}–{formatPrice(vp.valueAreaHigh, symbol)}
+              </div>
+            </div>
+          )}
+          {macd && (
+            <div className="reasoning-item">
+              <div className="ri-label">MACD</div>
+              <div className={`ri-value ${macd.bullCross ? 'bullish' : macd.bearCross ? 'bearish' : 'neutral'}`}>
+                {macd.bullCross ? 'Bull cross ↑' : macd.bearCross ? 'Bear cross ↓' : `H: ${macd.histogram?.toFixed?.(2) ?? '—'}`}
+              </div>
+            </div>
+          )}
+          {funding?.sentiment && funding.sentiment !== 'neutral' && (
+            <div className="reasoning-item">
+              <div className="ri-label">Funding / OI</div>
+              <div className={`ri-value ${funding.aligned ? (isLong ? 'bullish' : 'bearish') : 'neutral'}`}>
+                {funding.fundingRatePct} · {funding.sentiment.replace('overleveraged_', 'OL ').replace('_', ' ')}
+              </div>
+            </div>
+          )}
+          <div className="reasoning-item">
+            <div className="ri-label">Invalidation</div>
+            <div className="ri-value bearish">
+              Price close beyond {String(invalidationLevel || '—')}
+            </div>
           </div>
-          <div className="tm-rule-item text-red">
-            <strong>Structure Shift:</strong> Close 100% immediately if price closes past recent 15m HL/LH
-          </div>
-          <div className="tm-rule-item text-purple">
-            <strong>{analysis.timeCap || '6H'} Time Cap:</strong> Close 50% & BE (if in profit) or exit full position if stalled after {(analysis.timeCap || '6H').toLowerCase()}
+          <div className="reasoning-item">
+            <div className="ri-label">Key Risk</div>
+            <div className="ri-value neutral">{String(keyRisk || '—')}</div>
           </div>
         </div>
       </div>
 
-      {/* ── Warnings ───────────────────────────────────────── */}
-      <div className="trade-warnings">
-        <div><span className="text-yellow">⚠</span> {String(keyRisk || '—')}</div>
-        <div><span className="text-red">✗</span> Invalidated if price closes beyond {String(invalidationLevel || '—')}</div>
+      {/* ── Trade Management ─────────────────────────────────── */}
+      <div className="trade-management-rules">
+        <div className="tm-rules-header">Trade Management</div>
+        <div className="tm-rules-body">
+          <div className="tm-rule-item text-green">
+            <strong>BE Trigger:</strong> Move SL to Entry after 1.5R gain
+          </div>
+          {tpDetails && tpDetails.length >= 3 ? (
+            <>
+              <div className="tm-rule-item">
+                <strong>TP1:</strong> Close 40% → move SL to breakeven
+              </div>
+              <div className="tm-rule-item">
+                <strong>TP2:</strong> Close 35% → trail SL to TP1 ({formatPrice(tpDetails[0]?.level, symbol)})
+              </div>
+              <div className="tm-rule-item">
+                <strong>TP3:</strong> Close remaining 25% — final exit
+              </div>
+            </>
+          ) : (
+            <div className="tm-rule-item">
+              <strong>Single Target:</strong> Close 100% at TP
+            </div>
+          )}
+          <div className="tm-rule-item text-yellow">
+            <strong>Momentum Exit:</strong> 2 consecutive 15m closes against trade
+          </div>
+          <div className="tm-rule-item text-red">
+            <strong>Structure Exit:</strong> Immediate close on 15m HL/LH breach
+          </div>
+          <div className="tm-rule-item text-purple">
+            <strong>{analysis.timeCap || '6H'} Cap:</strong> Exit or reduce if stalled
+          </div>
+        </div>
       </div>
 
     </div>
