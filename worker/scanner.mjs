@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────
-//  Scanner v10.0 — All-TF Scan, Parallel, Retry, Deduped
+//  Scanner v11.0 — All-TF Scan, Parallel, Retry, Deduped
 // ─────────────────────────────────────────────────────────
 
 import { sendTradeAlert } from './telegramBot.mjs';

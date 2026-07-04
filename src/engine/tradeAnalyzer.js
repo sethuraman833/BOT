@@ -229,7 +229,7 @@ export async function runAnalysis(allData, config = {}) {
   const profile = TF_PROFILES[activeTimeframe] || TF_PROFILES['15m'];
   const riskAmount = profile.riskAmount || RISK_AMOUNT;
   const steps   = [];
-  steps.push(`Engine v10.0 | ${profile.label} | ${symbol}`);
+  steps.push(`Engine v11.0 (Inst Logic) | ${profile.label} | ${symbol}`);
   
   let slSideInvalid = false; // H2 validation flag declared early
   let adjustedRiskAmount = riskAmount; // C5: hoisted to outer scope for return object

@@ -431,7 +431,7 @@ export default function AnalysisSidebar() {
         <StepAccordion steps={analysis.analysisSteps} />
 
         {/* ── FOOTER ────────────────────────────────────────── */}
-        <div className="engine-footer">ENGINE v10.0 · {analysis.symbol} · {analysis.analysisMode}</div>
+        <div className="engine-footer">ENGINE v11.0 · {analysis.symbol} · {analysis.analysisMode}</div>
 
       </div>
     </aside>
