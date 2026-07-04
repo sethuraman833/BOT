@@ -107,8 +107,7 @@ const TF_PROFILES = {
     biasKey:             '1h',
     obKey:               '1h',
     swingLookback:       3,     // raised from 2 to filter micro-swing noise (requires 15min confirmation per side)
-    minPillars:          3, // 3 of 4 core pillars (HTF Trend, Liquidity, BOS/CHOCH, RRR)
-    minConfluence:       5, // recalibrated: ~6/11 → 5/10 (count-based scale)
+    minAiConfidence:     40, // AI Confidence % threshold for TAKE_NOW
     maxSlPct:            0.015,  // 1.5% max SL for scalping
     maxTpPct:            0.030,  // 3.0% window — wide enough for minRRR=3.0 with SLs up to ~1% (targets hit in 4-6h)
     maxEntryDist:        0.003,  // 0.3% max entry distance
@@ -129,8 +128,7 @@ const TF_PROFILES = {
     biasKey:             '4h',
     obKey:               '4h',
     swingLookback:       3,
-    minPillars:          3, // lowered from 4 to prevent overly restrictive setups
-    minConfluence:       6, // recalibrated: ~7/11 → 6/9 (count-based scale)
+    minAiConfidence:     45, // AI Confidence % threshold for TAKE_NOW
     maxSlPct:            0.020,  // 2% max SL
     maxTpPct:            0.07,   // 7% max TP range
     maxEntryDist:        0.005,  // 0.5% max entry distance
@@ -151,8 +149,7 @@ const TF_PROFILES = {
     biasKey:             '1d',
     obKey:               '4h',
     swingLookback:       3,
-    minPillars:          3, // lowered from 4 to prevent overly restrictive setups
-    minConfluence:       7, // recalibrated: ~8/11 → 7/9 (count-based scale)
+    minAiConfidence:     50, // AI Confidence % threshold for TAKE_NOW
     maxSlPct:            0.025,
     maxTpPct:            0.12,   // 12% max TP range
     maxEntryDist:        0.010,  // 1.0% max entry distance
@@ -173,8 +170,7 @@ const TF_PROFILES = {
     biasKey:             '1w',
     obKey:               '1d',
     swingLookback:       5,
-    minPillars:          3, // lowered from 4 to prevent overly restrictive setups
-    minConfluence:       7, // recalibrated: ~8/11 → 7/9 (count-based scale)
+    minAiConfidence:     50, // AI Confidence % threshold for TAKE_NOW
     maxSlPct:            0.030,
     maxTpPct:            0.20,   // 20% max TP range
     maxEntryDist:        0.020,  // 2.0% max entry distance
@@ -195,8 +191,7 @@ const TF_PROFILES = {
     biasKey:             '1w',
     obKey:               '1w',
     swingLookback:       7,
-    minPillars:          3, // lowered from 4 to prevent overly restrictive setups
-    minConfluence:       5, // recalibrated: ~6/11 → 5/9 (count-based scale)
+    minAiConfidence:     40, // AI Confidence % threshold for TAKE_NOW
     maxSlPct:            0.050,
     maxTpPct:            0.30,
     maxEntryDist:        0.030,  // 3.0% max entry distance
@@ -801,36 +796,39 @@ export async function runAnalysis(allData, config = {}) {
     weeklyBias.bias === direction;
 
   const preRrrChecks = [
-    // PILLARS (core — must all be met)
-    { label: `${profile.biasKey.toUpperCase()} Trend Aligned`,                                      met: trend4HAligned,          pillar: true,  weight: 1.5 },
-    { label: 'Liquidity Sweep / FVG Fill',                                                            met: liquidityEvent,           pillar: true,  weight: 1.5 },
-    { label: `${profile.primaryKey.toUpperCase()}/${profile.structureKey.toUpperCase()} BOS/CHOCH`, met: structureShift,           pillar: true,  weight: 1.5 },
-    // NON-PILLARS (existing)
-    { label: 'Active Trading Session',                                                                met: sessionOk,                pillar: false, weight: 0.75 },
-    { label: 'Near Valid Order Block',                                                                met: nearOB,                   pillar: false, weight: 1.0 },
-    { label: 'Daily Bias Aligned (EMA200)',                                                           met: dailyAligned,             pillar: false, weight: 1.0 },
-    { label: 'RSI Divergence',                                                                        met: rsiResult.hasDivergence,  pillar: false, weight: 1.0 },
-    { label: 'EMA200 Acting as S/R',                                                                 met: ema200Acting,             pillar: false, weight: 0.75 },
-    { label: 'Entry in OTE Zone (61.8–78.6%)',                                                       met: inOTE,                    pillar: false, weight: 1.0 },
-    { label: `Entry in ${direction === 'long' ? 'Discount' : 'Premium'} Zone`,                      met: inCorrectZone,            pillar: false, weight: 1.0 },
-    { label: 'VWAP Aligned',                                                                          met: vwapAligned,              pillar: false, weight: 0.75 },
-    { label: 'Kill Zone Active',                                                                      met: killZone.inKillZone,      pillar: false, weight: 0.75 },
-    { label: 'Near Breaker Block (Flipped S/R)',                                                      met: nearBreaker,              pillar: false, weight: 0.75 },
-    { label: 'CME Gap Bias Aligned',                                                                  met: cmeGapAligned,            pillar: false, weight: 0.75 },
-    // ── NEW AI Confluence Checks ─────────────────────────────────
-    { label: 'Fibonacci Golden Pocket (0.618–0.705)',                                                 met: inGoldenPocket,           pillar: false, weight: 1.25 },
-    { label: 'Candlestick Pattern Confirmed',                                                         met: hasCandlePattern,         pillar: false, weight: 1.0  },
-    { label: 'MACD Momentum Aligned',                                                                 met: !!macdAligned,            pillar: false, weight: 1.0  },
-    { label: 'Stochastic RSI Extreme (OS/OB)',                                                        met: !!stochAligned,           pillar: false, weight: 1.0  },
-    { label: 'Bollinger Band Signal',                                                                 met: !!bbAligned,              pillar: false, weight: 0.75 },
-    { label: 'Volume POC Confluence',                                                                 met: atPOC,                    pillar: false, weight: 1.0  },
-    { label: `Wyckoff ${wyckoffPhase?.phase || ''} Signal`,                                          met: !!wyckoffAligned,         pillar: false, weight: 1.5  },
-    { label: 'OBV Smart Money Divergence',                                                            met: !!obvAligned,             pillar: false, weight: 1.0  },
-    { label: 'Hidden Divergence (Trend Continuation)',                                                met: hiddenDiv.hasHiddenDiv,   pillar: false, weight: 1.0  },
-    { label: 'Funding Rate Contrarian Signal',                                                        met: fundingAligned,           pillar: false, weight: 0.75 },
-    { label: 'Weekly Open Bias Aligned',                                                              met: !!weeklyBiasAligned,      pillar: false, weight: 0.75 },
+    // ── SMC Structure (High Weight) ───────────────────────────────
+    { label: `${profile.biasKey.toUpperCase()} Trend Aligned`,                   met: trend4HAligned,          weight: 1.5  },
+    { label: 'Liquidity Sweep / FVG Fill',                                        met: liquidityEvent,          weight: 1.5  },
+    { label: `${profile.primaryKey.toUpperCase()}/${profile.structureKey.toUpperCase()} BOS/CHOCH`, met: structureShift, weight: 1.5  },
+    { label: 'Near Valid Order Block',                                            met: nearOB,                  weight: 1.25 },
+    { label: 'Near Breaker Block (Flipped S/R)',                                  met: nearBreaker,             weight: 1.0  },
+    // ── Price Position ────────────────────────────────────────────
+    { label: 'Entry in OTE Zone (61.8–78.6%)',                                   met: inOTE,                   weight: 1.25 },
+    { label: `Entry in ${direction === 'long' ? 'Discount' : 'Premium'} Zone`,  met: inCorrectZone,           weight: 1.0  },
+    { label: 'Fibonacci Golden Pocket (0.618–0.705)',                             met: inGoldenPocket,          weight: 1.5  },
+    // ── Trend Confirmation ────────────────────────────────────────
+    { label: 'Daily Bias Aligned (EMA200)',                                      met: dailyAligned,            weight: 1.0  },
+    { label: 'EMA200 Acting as S/R',                                             met: ema200Acting,            weight: 0.75 },
+    { label: 'VWAP Aligned',                                                      met: vwapAligned,             weight: 0.75 },
+    // ── AI Momentum ──────────────────────────────────────────────
+    { label: 'MACD Momentum Aligned',                                            met: !!macdAligned,           weight: 1.25 },
+    { label: 'Stochastic RSI Extreme (OS/OB)',                                   met: !!stochAligned,          weight: 1.0  },
+    { label: 'Bollinger Band Signal',                                             met: !!bbAligned,             weight: 0.75 },
+    { label: `Wyckoff ${wyckoffPhase?.phase || ''} Signal`,                     met: !!wyckoffAligned,        weight: 1.5  },
+    // ── Volume & Divergence ──────────────────────────────────────
+    { label: 'Volume POC Confluence',                                             met: atPOC,                   weight: 1.25 },
+    { label: 'RSI Divergence',                                                    met: rsiResult.hasDivergence, weight: 1.0  },
+    { label: 'OBV Smart Money Divergence',                                        met: !!obvAligned,            weight: 1.0  },
+    { label: 'Hidden Divergence (Trend Continuation)',                            met: hiddenDiv.hasHiddenDiv,  weight: 1.0  },
+    { label: 'Candlestick Pattern Confirmed',                                     met: hasCandlePattern,        weight: 1.0  },
+    // ── Session & Sentiment ──────────────────────────────────────
+    { label: 'Active Trading Session',                                            met: sessionOk,               weight: 0.75 },
+    { label: 'Kill Zone Active',                                                  met: killZone.inKillZone,     weight: 0.75 },
+    { label: 'CME Gap Bias Aligned',                                              met: cmeGapAligned,           weight: 0.75 },
+    { label: 'Funding Rate Contrarian Signal',                                    met: fundingAligned,          weight: 0.75 },
+    { label: 'Weekly Open Bias Aligned',                                          met: !!weeklyBiasAligned,     weight: 0.75 },
     ...(profile.hasEmaSignal
-      ? [{ label: `EMA Signal: ${emaSignalType || 'None'}`,                                          met: emaSignalAligned,         pillar: false, weight: 1.0  }]
+      ? [{ label: `EMA Signal: ${emaSignalType || 'None'}`,                     met: emaSignalAligned,        weight: 1.0  }]
       : []),
   ];
 
@@ -914,28 +912,26 @@ export async function runAnalysis(allData, config = {}) {
     steps.push(`TP source: ${tpData.tps.map(t => t.reason).join(' → ')}`);
   }
 
-  // ── Final Confluence (with RRR pillar) ─────────────────────────
+  // ── Final Score ────────────────────────────────────────────────
   const tp1Rrr      = tpData?.tps?.[0]?.rrr ?? 0;
   const rrrMeetsMin = tp1Rrr >= (profile.minRrr || 3.0);
 
-  // Full check list including the RRR pillar
+  // Full check list including RRR
   const checks = [
     ...preRrrChecks,
-    { label: `RRR ≥ 1:${(profile.minRrr || 3.0).toFixed(0)} (Structural)`, met: rrrMeetsMin, pillar: true, weight: 1.5 },
+    { label: `RRR ≥ 1:${(profile.minRrr || 3.0).toFixed(0)} (Structural)`, met: rrrMeetsMin, weight: 1.5 },
   ];
 
   const totalWeight     = checks.reduce((s, c) => s + c.weight, 0);
   const scoredWeight    = checks.reduce((s, c) => s + (c.met ? c.weight : 0), 0);
-  const max             = checks.length;
-  const normalizedTotal = Math.min(max, Math.round((scoredWeight / totalWeight) * max));
-  const pillarsMet      = checks.filter(c => c.pillar && c.met).length;
-  const pillarsTotal    = checks.filter(c => c.pillar).length;
-  const tier            = normalizedTotal >= Math.ceil(max * 0.73) ? 'EXCEPTIONAL'
-                        : normalizedTotal >= Math.ceil(max * 0.55) ? 'HIGH'
-                        : normalizedTotal >= Math.ceil(max * 0.36) ? 'MEDIUM'
-                        : 'REJECT';
+  const aiConfidence    = Math.round((scoredWeight / totalWeight) * 100);
+  const aiGrade         = aiConfidence >= 85 ? 'ELITE'
+                        : aiConfidence >= 70 ? 'STRONG'
+                        : aiConfidence >= 55 ? 'MODERATE'
+                        : aiConfidence >= 40 ? 'MARGINAL'
+                        : 'SKIP';
 
-  // ── Decision ───────────────────────────────────────────────────
+  // ── Decision (AI Confidence-driven) ────────────────────────────
   let decision        = 'NO_TRADE';
   let rejectionReason = null;
 
@@ -943,16 +939,13 @@ export async function runAnalysis(allData, config = {}) {
   const entryDistPct = direction ? Math.abs(currentPrice - entry) / currentPrice : 0;
 
   if (!direction) {
-    rejectionReason = `Market ranging — no ${profile.biasKey.toUpperCase()} directional bias`;
-  } else if (!trend4HAligned) {
-    rejectionReason = `${profile.biasKey.toUpperCase()} Trend is not aligned with trade direction (${trendBias.toUpperCase()})`;
+    rejectionReason = `Market ranging — no ${profile.biasKey.toUpperCase()} directional bias & AI consensus insufficient`;
   } else if (emaVetoActive) {
     rejectionReason = emaVetoReason;
-  } else if (slSideInvalid || !slData) { // H2 validation check
+  } else if (slSideInvalid || !slData) {
     rejectionReason = `Invalid Stop Loss placement relative to entry`;
   } else if (entryDistPct > profile.maxEntryDist) {
-    // NEW: Instead of rejecting, suggest a limit order at the OTE/OB level
-    if (normalizedTotal >= profile.minConfluence && pillarsMet >= profile.minPillars && rrrMeetsMin) {
+    if (aiConfidence >= profile.minAiConfidence && rrrMeetsMin) {
       decision = 'WAIT';
       const limitOrderPrice = oteZone?.midpoint || entry;
       const limitLabel = oteZone ? `Limit @ OTE ${formatLimitPrice(limitOrderPrice, symbol)}` : `Limit @ ${formatLimitPrice(entry, symbol)}`;
@@ -964,18 +957,14 @@ export async function runAnalysis(allData, config = {}) {
     rejectionReason = `SL too wide: ${(slPct * 100).toFixed(2)}% > ${(profile.maxSlPct * 100).toFixed(2)}% max for ${profile.label}`;
   } else if (!rrrMeetsMin) {
     rejectionReason = `RRR too low: ${tp1Rrr.toFixed(2)} < ${(profile.minRrr || 3.0).toFixed(1)} minimum`;
-  } else if (pillarsMet < profile.minPillars) {
-    rejectionReason = `Pillars: ${pillarsMet}/${pillarsTotal} (need ${profile.minPillars} for ${profile.label})`;
-  } else if (normalizedTotal < profile.minConfluence) {
-    rejectionReason = `Confluence: ${normalizedTotal}/${max} (need ${profile.minConfluence} for ${profile.label})`;
+  } else if (aiConfidence < profile.minAiConfidence) {
+    rejectionReason = `AI Confidence too low: ${aiConfidence}% < ${profile.minAiConfidence}% min for ${profile.label}`;
   } else {
     decision = 'TAKE_NOW';
   }
 
-  steps.push(`→ ${decision} | Score: ${normalizedTotal}/${max} | Pillars: ${pillarsMet}/${pillarsTotal}`);
+  steps.push(`→ ${decision} | AI: ${aiConfidence}% ${aiGrade}`);
   if (rejectionReason) steps.push(`Rejected: ${rejectionReason}`);
-
-  const finalTier = (decision === 'NO_TRADE' && pillarsMet < pillarsTotal) ? 'REJECT' : tier;
 
   // ── Return ─────────────────────────────────────────────────────
   return {
@@ -992,15 +981,9 @@ export async function runAnalysis(allData, config = {}) {
     liquidationPrice: (direction && slData && !slSideInvalid) ? estimateLiquidationPrice(entry, direction, calculateLeverage(posSize, entry, balance)) : 0,
     breakevenMove: (direction && slData && !slSideInvalid) ? calculateBreakevenMove(entry, slData.value, symbol) : null,
     confluenceScore: {
-      total: normalizedTotal, max, tier: finalTier,
-      checks, pillarsMet, pillarsTotal,
-      pillarsAllMet: pillarsMet === pillarsTotal,
-      // AI Confidence Score: percentage of weighted checks met
-      aiConfidence: Math.round((scoredWeight / totalWeight) * 100),
-      aiGrade: scoredWeight / totalWeight >= 0.85 ? 'ELITE'
-             : scoredWeight / totalWeight >= 0.70 ? 'STRONG'
-             : scoredWeight / totalWeight >= 0.55 ? 'MODERATE'
-             : 'SKIP',
+      checks,
+      aiConfidence,
+      aiGrade,
     },
     session,
     upProbability:    upProb,

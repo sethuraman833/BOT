@@ -3,26 +3,15 @@ import TradeBox from '../TradeBox/TradeBox.jsx';
 import { useState } from 'react';
 import './AnalysisSidebar.css';
 
-// Pillar dot row
-function PillarDots({ checks }) {
-  const pillars = checks.filter(c => c.pillar);
-  return (
-    <div className="pillar-dots">
-      {pillars.map((p, i) => (
-        <div key={i} className={`pillar-dot ${p.met ? 'met' : 'unmet'}`} title={p.label} />
-      ))}
-      <span className="pillar-count">{pillars.filter(p => p.met).length}/{pillars.length} pillars</span>
-    </div>
-  );
-}
-
+// AI Confluence Score section — no more rigid pillars
 function ConfluenceSection({ score }) {
   if (!score) return null;
   const pct = score.aiConfidence || 0;
   const barColor = pct >= 85 ? 'var(--accent-green)' : pct >= 70 ? 'var(--accent-blue)' : pct >= 55 ? 'var(--accent-yellow)' : 'var(--accent-red)';
+  const metCount = score.checks.filter(c => c.met).length;
   return (
     <div className="sidebar-section">
-      <div className="section-header">Confluence Score</div>
+      <div className="section-header">AI Confluence</div>
       <div className="score-display">
         <span className="score-number mono">{pct}</span>
         <span className="score-divider" style={{ fontSize: '18px' }}>%</span>
@@ -31,13 +20,15 @@ function ConfluenceSection({ score }) {
       <div className="score-bar-track">
         <div className="score-bar-fill" style={{ width: `${pct}%`, background: barColor, boxShadow: `0 0 8px ${barColor}50` }} />
       </div>
-      <PillarDots checks={score.checks} />
+      <div className="pillar-dots">
+        <span className="pillar-count">{metCount}/{score.checks.length} signals met</span>
+      </div>
       <ul className="check-list">
         {score.checks.map((c, i) => (
-          <li key={i} className={`check-item ${c.pillar ? 'pillar' : ''}`}>
+          <li key={i} className="check-item">
             <div className={`check-icon ${c.met ? 'met' : 'unmet'}`}>{c.met ? '✓' : '✗'}</div>
             <span className="check-label">{c.label}</span>
-            {c.pillar && <span className="pillar-tag">PILLAR</span>}
+            {c.weight >= 1.5 && <span className="pillar-tag" style={{ background: 'rgba(157,111,255,0.15)', color: 'var(--accent-purple)', borderColor: 'var(--accent-purple)' }}>KEY</span>}
           </li>
         ))}
       </ul>
