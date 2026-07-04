@@ -531,13 +531,14 @@ export async function runAnalysis(allData, config = {}) {
     if (belowBothMajor) {
       const hasRecentBullishChoch = allShifts.some(s => s.type === 'CHOCH' && s.direction === 'bullish');
       const rsiDivResult = detectRSIDivergence(candlesPrimary, 'long', 14);
+      const isEliteSetup = chochQuality.quality === 'ELITE' || chochQuality.quality === 'HIGH' || inducementData.hasInducement;
       
-      if (isBearishCascade) {
+      if (isBearishCascade && !isEliteSetup) {
         emaVetoActive = true;
         emaVetoReason = `Strict Long Veto: Price in strong Bearish EMA Cascade (20 < 50 < 200)`;
-      } else if (!hasRecentBullishChoch || !rsiDivResult.hasDivergence) {
+      } else if (!isEliteSetup && (!hasRecentBullishChoch || !rsiDivResult.hasDivergence)) {
         emaVetoActive = true;
-        emaVetoReason = `Long Veto: Price is below major EMAs without combined Bullish CHOCH and RSI Divergence confirmation`;
+        emaVetoReason = `Long Veto: Price is below major EMAs without strong institutional setup or RSI Divergence`;
       }
     }
   } else if (direction === 'short' && primE50 && primE200) {
@@ -547,13 +548,14 @@ export async function runAnalysis(allData, config = {}) {
     if (aboveBothMajor) {
       const hasRecentBearishChoch = allShifts.some(s => s.type === 'CHOCH' && s.direction === 'bearish');
       const rsiDivResult = detectRSIDivergence(candlesPrimary, 'short', 14);
+      const isEliteSetup = chochQuality.quality === 'ELITE' || chochQuality.quality === 'HIGH' || inducementData.hasInducement;
       
-      if (isBullishCascade) {
+      if (isBullishCascade && !isEliteSetup) {
         emaVetoActive = true;
         emaVetoReason = `Strict Short Veto: Price in strong Bullish EMA Cascade (20 > 50 > 200)`;
-      } else if (!hasRecentBearishChoch || !rsiDivResult.hasDivergence) {
+      } else if (!isEliteSetup && (!hasRecentBearishChoch || !rsiDivResult.hasDivergence)) {
         emaVetoActive = true;
-        emaVetoReason = `Short Veto: Price is above major EMAs without combined Bearish CHOCH and RSI Divergence confirmation`;
+        emaVetoReason = `Short Veto: Price is above major EMAs without strong institutional setup or RSI Divergence`;
       }
     }
   }
@@ -1054,8 +1056,8 @@ export async function runAnalysis(allData, config = {}) {
     rejectionReason = `SL too wide: ${(slPct * 100).toFixed(2)}% > ${(profile.maxSlPct * 100).toFixed(2)}% max for ${profile.label}`;
   } else if (!rrrMeetsMin) {
     rejectionReason = `RRR too low: ${tp1Rrr.toFixed(2)} < ${(profile.minRrr || 3.0).toFixed(1)} minimum`;
-  } else if (aiConfidence < profile.minAiConfidence) {
-    rejectionReason = `AI Confidence too low: ${aiConfidence}% < ${profile.minAiConfidence}% min for ${profile.label}`;
+  } else if (aiConfidence < profile.minAiConfidence && signalGrade.grade !== 'A+' && signalGrade.grade !== 'A') {
+    rejectionReason = `AI Confidence too low: ${aiConfidence}% < ${profile.minAiConfidence}% min for ${profile.label} (Inst Grade: ${signalGrade.grade})`;
   } else {
     decision = 'TAKE_NOW';
   }
