@@ -1112,7 +1112,7 @@ export async function runAnalysis(allData, config = {}) {
     modeColor:        profile.modeColor,
     primaryTimeframe: profile.primaryKey,
     isScalping:       profile.isScalping,
-    emaSignal:        emaSignalActive ? { active: true, type: emaSignalType } : null,
+    emaSignal:        emaSignalActive ? { active: true, type: emaSignalType, aligned: emaSignalAligned } : null,
     smcData: {
       orderBlocks:     [...obsOB, ...obsPrimary],
       breakerBlocks:   breakerBlocks,

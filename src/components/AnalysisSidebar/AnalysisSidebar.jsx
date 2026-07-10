@@ -367,7 +367,7 @@ export default function AnalysisSidebar() {
           </span>
           <span className="amh-label">Analysis</span>
           <span className="amh-mode">{analysis.analysisMode || '—'}</span>
-          {analysis.emaSignal?.active && (
+          {analysis.emaSignal?.active && analysis.emaSignal?.aligned && (
             <span className="ema-signal-pill">⚡ {analysis.emaSignal.type}</span>
           )}
         </div>
