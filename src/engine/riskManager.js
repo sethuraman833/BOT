@@ -133,7 +133,7 @@ export function calculateSmartSL(invalidationLevel, direction, fvgs, symbol, fib
       aiBufferReason = `Volume Shield (SL outside VA Low: $${volumeProfile.valueAreaLow.toFixed(2)})`;
     }
     // Golden Pocket Defense
-    if (fibData && fibData.goldenPocket && layer3 < fibData.levels['0.786'] && layer2 >= fibData.goldenPocket.bottom) {
+    if (fibData && fibData.goldenPocket && layer3 < fibData.levels['0.786'] && layer2 >= fibData.goldenPocket.low) {
       layer3 = fibData.levels['0.786'] * 0.9985;
       aiBufferReason = `Fibonacci Defense (SL outside 0.786 level: $${fibData.levels['0.786'].toFixed(2)})`;
     }
@@ -144,7 +144,7 @@ export function calculateSmartSL(invalidationLevel, direction, fvgs, symbol, fib
       aiBufferReason = `Volume Shield (SL outside VA High: $${volumeProfile.valueAreaHigh.toFixed(2)})`;
     }
     // Golden Pocket Defense
-    if (fibData && fibData.goldenPocket && layer3 > fibData.levels['0.786'] && layer2 <= fibData.goldenPocket.top) {
+    if (fibData && fibData.goldenPocket && layer3 > fibData.levels['0.786'] && layer2 <= fibData.goldenPocket.high) {
       layer3 = fibData.levels['0.786'] * 1.0015;
       aiBufferReason = `Fibonacci Defense (SL outside 0.786 level: $${fibData.levels['0.786'].toFixed(2)})`;
     }

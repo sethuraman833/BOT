@@ -121,7 +121,7 @@ const TF_PROFILES = {
     isScalping:          true,
     timeCap:             '4H',
     riskAmount:          5,     // Set back to $5 to align with uniform risk rules
-    minRrr:              3.0,   // Capped min RRR at 1:3 as explicitly requested
+    minRrr:              2.0,   // Capped min RRR at 1:2 for scalps
     minShiftAge:         2,     // BOS/CHOCH must hold for 2 closed candles (10min) before counting
   },
   '15m': {
@@ -142,7 +142,7 @@ const TF_PROFILES = {
     isScalping:          false,
     timeCap:             '6H',
     riskAmount:          5,
-    minRrr:              3.0,
+    minRrr:              2.5,   // Capped min RRR at 1:2.5 for intraday
     minShiftAge:         1,     // BOS/CHOCH confirmation (H6)
   },
   '1h': {
@@ -532,13 +532,15 @@ export async function runAnalysis(allData, config = {}) {
       const hasRecentBullishChoch = allShifts.some(s => s.type === 'CHOCH' && s.direction === 'bullish');
       const rsiDivResult = detectRSIDivergence(candlesPrimary, 'long', 14);
       const isEliteSetup = chochQuality.quality === 'ELITE' || chochQuality.quality === 'HIGH' || inducementData.hasInducement;
+      const rsiCross = detectRSISmaCross(candlesPrimary, 14, 14);
+      const isOverride = isEliteSetup || rsiCross.crossUp || rsiDivResult.isOversold;
       
-      if (isBearishCascade && !isEliteSetup) {
+      if (isBearishCascade && !isOverride) {
         emaVetoActive = true;
-        emaVetoReason = `Strict Long Veto: Price in strong Bearish EMA Cascade (20 < 50 < 200)`;
-      } else if (!isEliteSetup && (!hasRecentBullishChoch || !rsiDivResult.hasDivergence)) {
+        emaVetoReason = `Strict Long Veto: Price in strong Bearish EMA Cascade (20 < 50 < 200) without reversal confirmation`;
+      } else if (!isOverride && (!hasRecentBullishChoch || !rsiDivResult.hasDivergence)) {
         emaVetoActive = true;
-        emaVetoReason = `Long Veto: Price is below major EMAs without strong institutional setup or RSI Divergence`;
+        emaVetoReason = `Long Veto: Price is below major EMAs without strong institutional setup, RSI Divergence, or RSI SMA Crossover`;
       }
     }
   } else if (direction === 'short' && primE50 && primE200) {
@@ -549,13 +551,15 @@ export async function runAnalysis(allData, config = {}) {
       const hasRecentBearishChoch = allShifts.some(s => s.type === 'CHOCH' && s.direction === 'bearish');
       const rsiDivResult = detectRSIDivergence(candlesPrimary, 'short', 14);
       const isEliteSetup = chochQuality.quality === 'ELITE' || chochQuality.quality === 'HIGH' || inducementData.hasInducement;
+      const rsiCross = detectRSISmaCross(candlesPrimary, 14, 14);
+      const isOverride = isEliteSetup || rsiCross.crossDown || rsiDivResult.isOverbought;
       
-      if (isBullishCascade && !isEliteSetup) {
+      if (isBullishCascade && !isOverride) {
         emaVetoActive = true;
-        emaVetoReason = `Strict Short Veto: Price in strong Bullish EMA Cascade (20 > 50 > 200)`;
-      } else if (!isEliteSetup && (!hasRecentBearishChoch || !rsiDivResult.hasDivergence)) {
+        emaVetoReason = `Strict Short Veto: Price in strong Bullish EMA Cascade (20 > 50 > 200) without reversal confirmation`;
+      } else if (!isOverride && (!hasRecentBearishChoch || !rsiDivResult.hasDivergence)) {
         emaVetoActive = true;
-        emaVetoReason = `Short Veto: Price is above major EMAs without strong institutional setup or RSI Divergence`;
+        emaVetoReason = `Short Veto: Price is above major EMAs without strong institutional setup, RSI Divergence, or RSI SMA Crossover`;
       }
     }
   }
@@ -1025,11 +1029,13 @@ export async function runAnalysis(allData, config = {}) {
     hasSweep:           allSweeps.length > 0,
     hasInducement:      inducementData.hasInducement,
     mtfAligned:         trend4HAligned && dailyAligned,
+    mtfPartial:         trend4HAligned || dailyAligned,
     drawAligned:        !!(drawOnLiquidity?.primary),
     volatilityRegime:   volRegime.regime,
     rrrMet:             rrrMeetsMin,
     inOTE:              inOTECheck?.met || false,
     atPOC:              atPOCCheck?.met || false,
+    rsiCrossAligned,
   });
   steps.push(`🏆 Signal Grade: ${signalGrade.grade} — ${signalGrade.label} (${signalGrade.score}/100)`);
 
@@ -1091,8 +1097,8 @@ export async function runAnalysis(allData, config = {}) {
     upProbability:    upProb,
     downProbability:  downProb,
     rangeProbability,
-    rejectionReason,
-    waitCondition:    null,
+    rejectionReason:  decision === 'WAIT' ? null : rejectionReason,
+    waitCondition:    decision === 'WAIT' ? rejectionReason : null,
     keyRisk: ema200Acting ? 'EMA200 Resistance / Support' : slPct > 0.012 ? 'Wide SL — size reduced automatically' : 'Market Volatility',
     invalidationLevel: slData ? slData.rawInvalidation.toFixed(ASSETS[symbol]?.decimals ?? 2) : 'N/A',
     analysisSteps:  steps,

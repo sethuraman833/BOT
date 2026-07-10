@@ -97,25 +97,35 @@ async function scanAsset(symbol, runAnalysis) {
     // Run analysis on ALL tradeable timeframes, pick the best signal
     let bestResult = null;
     for (const tf of TFS_TO_SCAN) {
-      const r = runAnalysis(data, { symbol, activeTimeframe: tf });
+      const r = await runAnalysis(data, { symbol, activeTimeframe: tf });
+      const currentConf = r.confluenceScore?.aiConfidence || 0;
+      const bestConf = bestResult?.confluenceScore?.aiConfidence || 0;
       if (!bestResult ||
           (r.decision === 'TAKE_NOW' && bestResult.decision !== 'TAKE_NOW') ||
-          (r.decision === bestResult.decision && r.confluenceScore.total > bestResult.confluenceScore.total)) {
+          (r.decision === bestResult.decision && currentConf > bestConf)) {
         bestResult = r;
       }
     }
     const result = bestResult;
 
     const { decision, confluenceScore, direction, analysisMode } = result;
-    console.log(`[SCANNER] ${symbol}: ${decision} (${analysisMode}) | Score: ${confluenceScore.total}/${confluenceScore.max} | Pillars: ${confluenceScore.pillarsMet}/${confluenceScore.pillarsTotal} | Dir: ${direction || 'N/A'}`);
+    console.log(`[SCANNER] ${symbol}: ${decision} (${analysisMode}) | Conf: ${confluenceScore?.aiConfidence}% (${confluenceScore?.aiGrade}) | Grade: ${result.signalGrade?.grade || 'N/A'} | Dir: ${direction || 'N/A'}`);
 
-    // TAKE_NOW: Send alert if score >= 5 and not sent recently
-    const shouldAlertTakeNow = decision === 'TAKE_NOW' && confluenceScore.total >= 5;
+    // TAKE_NOW: Send alert if confidence >= 65 and not sent recently
+    const shouldAlertTakeNow = decision === 'TAKE_NOW' && confluenceScore?.aiConfidence >= 65;
 
-    // WAIT: Send alert if score >= 4 and we have clear trigger levels
-    const shouldAlertWait = decision === 'WAIT' && confluenceScore.total >= 4;
+    // WAIT: Send alert if confidence >= 50 and we have clear trigger levels
+    const shouldAlertWait = decision === 'WAIT' && confluenceScore?.aiConfidence >= 50;
 
-    if (shouldAlertTakeNow || shouldAlertWait) {
+    // WATCH: Send alert for A/A+ grade setups even if vetoed (NO_TRADE)
+    const shouldAlertWatch = decision === 'NO_TRADE' && (result.signalGrade?.grade === 'A+' || result.signalGrade?.grade === 'A');
+
+    if (shouldAlertWatch) {
+      result.decision = 'WAIT'; // demote to watch list due to trend veto
+      result.waitCondition = `Institutional Reversal Setup (Grade: ${result.signalGrade.grade}) — opposing trend cascade veto active. Watch for break of veto.`;
+    }
+
+    if (shouldAlertTakeNow || shouldAlertWait || shouldAlertWatch) {
       const lastSent = lastAlertTime[symbol] || 0;
       const elapsed  = Date.now() - lastSent;
 

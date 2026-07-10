@@ -58,7 +58,7 @@ export function detectOrderBlocks(candles, currentPrice) {
       // H5: Historical mitigation check (loop from i+2 to now)
       let mitigated = false;
       for (let k = i + 2; k < candles.length; k++) {
-        if (candles[k].low <= ob.low) {
+        if (candles[k].close <= ob.low) {
           mitigated = true;
           break;
         }
@@ -97,7 +97,7 @@ export function detectOrderBlocks(candles, currentPrice) {
       // H5: Historical mitigation check (loop from i+2 to now)
       let mitigated = false;
       for (let k = i + 2; k < candles.length; k++) {
-        if (candles[k].high >= ob.high) {
+        if (candles[k].close >= ob.high) {
           mitigated = true;
           break;
         }
@@ -251,13 +251,13 @@ export function detectSweeps(candles, sweepThreshold = 0.0015, lookback = 3) {
       // Sweep candle close must be back below the swept level
       if (c.close >= swing.price) continue;
 
-      // Displacement candle within next 1-2 candles
+      // Displacement candle within next 1-3 candles
       const next1 = candles[i + 1];
       const next2 = candles[i + 2];
+      const next3 = candles[i + 3];
       const hasDisplacement = isDisplacementCandle(next1, 'bearish') ||
-                              (next2 && isDisplacementCandle(next2, 'bearish'));
-
-      if (!hasDisplacement) continue;
+                              (next2 && isDisplacementCandle(next2, 'bearish')) ||
+                              (next3 && isDisplacementCandle(next3, 'bearish'));
 
       sweeps.push({
         type: 'bearish',
@@ -267,6 +267,7 @@ export function detectSweeps(candles, sweepThreshold = 0.0015, lookback = 3) {
         candleIndex: i,
         time: c.time,
         direction: 'short',
+        strength: hasDisplacement ? 'strong' : 'weak',
       });
       break;
     }
@@ -281,13 +282,13 @@ export function detectSweeps(candles, sweepThreshold = 0.0015, lookback = 3) {
       // Sweep candle close must be back above the swept level
       if (c.close <= swing.price) continue;
 
-      // Displacement candle within next 1-2 candles
+      // Displacement candle within next 1-3 candles
       const next1 = candles[i + 1];
       const next2 = candles[i + 2];
+      const next3 = candles[i + 3];
       const hasDisplacement = isDisplacementCandle(next1, 'bullish') ||
-                              (next2 && isDisplacementCandle(next2, 'bullish'));
-
-      if (!hasDisplacement) continue;
+                              (next2 && isDisplacementCandle(next2, 'bullish')) ||
+                              (next3 && isDisplacementCandle(next3, 'bullish'));
 
       sweeps.push({
         type: 'bullish',
@@ -297,6 +298,7 @@ export function detectSweeps(candles, sweepThreshold = 0.0015, lookback = 3) {
         candleIndex: i,
         time: c.time,
         direction: 'long',
+        strength: hasDisplacement ? 'strong' : 'weak',
       });
       break;
     }
@@ -318,8 +320,8 @@ export function detectStructureShifts(candles, minAge = 1, lookback = 3) {
   const last = candles[candles.length - 1];
   if (!last) return [];
 
-  // H8: Scan last 5 candles backwards for structure breaks
-  const scanCount = Math.min(5, candles.length);
+  // H8: Scan last 20 candles backwards for structure breaks
+  const scanCount = Math.min(20, candles.length);
 
   if (highs.length >= 2) {
     const prevHigh = highs[highs.length - 2];
@@ -1056,23 +1058,23 @@ export function detectWyckoffPhase(candles, lookback = 50) {
 
   if (springDetected && isConsolidating) {
     phase  = 'ACCUMULATION';
-    signal = 'bullish';
+    signal = 'long';
     description = highVolumeEvent
       ? '🔥 High-Volume Spring: Institutional Accumulation — Strong Bullish Signal'
       : 'Spring Detected: False breakdown below range — Potential accumulation';
   } else if (upthrustDetected && isConsolidating) {
     phase  = 'DISTRIBUTION';
-    signal = 'bearish';
+    signal = 'short';
     description = highVolumeEvent
       ? '🔥 High-Volume Upthrust: Institutional Distribution — Strong Bearish Signal'
       : 'Upthrust Detected: False breakout above range — Potential distribution';
   } else if (currentPrice > rangeHigh * 1.005) {
     phase = 'MARKUP';
-    signal = 'bullish';
+    signal = 'long';
     description = 'Markup Phase: Price escaping range to the upside';
   } else if (currentPrice < rangeLow * 0.995) {
     phase = 'MARKDOWN';
-    signal = 'bearish';
+    signal = 'short';
     description = 'Markdown Phase: Price escaping range to the downside';
   } else {
     description = 'Consolidating inside range — no clear Wyckoff signal yet';
@@ -1339,7 +1341,8 @@ export function assessChochQuality(candles, sweeps, direction) {
   let score = 0; const reasons = [];
   const recentSweep = (sweeps||[]).some(s => {
     const age = candles.length - 1 - (s.candleIndex||0);
-    return age <= 10 && ((direction==='long' && (s.type==='bullish'||s.direction==='long')) ||
+    const isStrong = s.strength !== 'weak';
+    return age <= 10 && isStrong && ((direction==='long' && (s.type==='bullish'||s.direction==='long')) ||
                          (direction==='short'&& (s.type==='bearish'||s.direction==='short')));
   });
   if (recentSweep) { score += 40; reasons.push('ERL swept before CHOCH'); }
@@ -1438,7 +1441,7 @@ export function detectEqualHighsLows(candles, currentPrice, tolerance=0.0005) {
 //  MODULE 18 � SIGNAL GRADE (A+ / A / B / C / D)
 // ---------------------------------------------------------------
 export function calculateSignalGrade({ chochQuality, displacementScore, hasSweep, hasInducement,
-  mtfAligned, drawAligned, volatilityRegime, rrrMet, inOTE, atPOC }) {
+  mtfAligned, mtfPartial, drawAligned, volatilityRegime, rrrMet, inOTE, atPOC, rsiCrossAligned }) {
   let s=0;
   if(hasSweep)                                  s+=15;
   if(hasInducement)                             s+=10;
@@ -1447,16 +1450,18 @@ export function calculateSignalGrade({ chochQuality, displacementScore, hasSweep
   else if(chochQuality?.quality==='MEDIUM')     s+=5;
   if((displacementScore||0)>=70)                s+=10;
   else if((displacementScore||0)>=50)           s+=5;
-  if(mtfAligned)  s+=15;
+  if(mtfAligned)        s+=15;
+  else if(mtfPartial)   s+=8;
   if(drawAligned) s+=10;
   if(inOTE)       s+=5;
   if(rrrMet)      s+=8;
   if(atPOC)       s+=5;
+  if(rsiCrossAligned) s+=5;
   if(volatilityRegime==='TRANSITIONING')        s+=7;
   else if(volatilityRegime==='CONTRACTING')     s+=5;
   else if(volatilityRegime==='EXPANDING')       s+=2;
   s=Math.min(100,s);
-  const grade=s>=85?'A+':s>=70?'A':s>=55?'B':s>=40?'C':'D';
-  const label=s>=85?'ELITE SETUP':s>=70?'HIGH CONVICTION':s>=55?'MODERATE':s>=40?'LOW CONVICTION':'AVOID';
+  const grade=s>=80?'A+':s>=70?'A':s>=55?'B':s>=40?'C':'D';
+  const label=s>=80?'ELITE SETUP':s>=70?'HIGH CONVICTION':s>=55?'MODERATE':s>=40?'LOW CONVICTION':'AVOID';
   return { grade, score:s, label };
 }

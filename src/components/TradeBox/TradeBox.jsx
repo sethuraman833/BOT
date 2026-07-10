@@ -135,8 +135,55 @@ export default function TradeBox({ analysis }) {
   const macd    = aiModules?.macd;
   const funding = aiModules?.fundingSentiment;
 
+  const isElite = analysis.signalGrade?.grade === 'A+';
+  const isNoTrade = analysis.decision === 'NO_TRADE';
+
   return (
-    <div className={`trade-box ${isLong ? 'long' : 'short'}`}>
+    <div className={`trade-box ${isLong ? 'long' : 'short'} ${isNoTrade ? 'vetoed' : ''}`}>
+      {isElite && (
+        <div 
+          className="trade-box-elite-banner"
+          style={{
+            background: 'linear-gradient(90deg, rgba(0,229,180,0.2) 0%, rgba(0,212,255,0.2) 100%)',
+            color: '#00e5b4',
+            textAlign: 'center',
+            padding: '6px 12px',
+            fontSize: '0.75rem',
+            fontWeight: 'bold',
+            letterSpacing: '1px',
+            borderBottom: '1px solid rgba(0,229,180,0.3)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '6px'
+          }}
+        >
+          🏆 ELITE INSTITUTIONAL SETUP
+        </div>
+      )}
+
+      {isNoTrade && (
+        <div 
+          className="trade-box-veto-banner"
+          style={{
+            background: 'linear-gradient(90deg, rgba(255,63,94,0.2) 0%, rgba(255,100,100,0.2) 100%)',
+            color: 'var(--accent-red)',
+            textAlign: 'center',
+            padding: '8px 12px',
+            fontSize: '0.75rem',
+            fontWeight: 'bold',
+            borderBottom: '1px solid rgba(255,63,94,0.3)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '4px'
+          }}
+        >
+          <div>✗ SETUP VETOED / NO TRADE</div>
+          <div style={{ fontSize: '0.65rem', fontWeight: 'normal', opacity: 0.9 }}>
+            {analysis.rejectionReason || 'SMC parameters not fully met'}
+          </div>
+        </div>
+      )}
 
       {/* ── Header ──────────────────────────────────────────── */}
       <div className="trade-box-header">

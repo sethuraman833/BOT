@@ -24,7 +24,7 @@ function ConfluenceSection({ score, signalGrade }) {
         {!signalGrade && <span className="score-divider" style={{ fontSize: '18px' }}>%</span>}
         <span className={`score-tier ${displayGrade?.toLowerCase() || 'skip'}`}>{displayGrade} {signalGrade ? `— ${displayLabel}` : ''}</span>
       </div>
-      <div className="score-bar-bg">
+      <div className="score-bar-track">
         <div className="score-bar-fill" style={{ width: `${Math.min(100, displayPct)}%`, background: barColor }} />
       </div>
       <span className="pillar-count">{metCount}/{score.checks.length} signals met</span>
