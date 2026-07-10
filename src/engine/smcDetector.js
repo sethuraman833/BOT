@@ -1212,7 +1212,7 @@ export function getWeeklyOpenBias(candles, currentPrice) {
   if (!candles || candles.length < 7) return null;
   // Find the most recent Monday candle (day of week from timestamp)
   // Timestamps are Unix seconds; Monday = 1
-  for (let i = candles.length - 1; i >= Math.max(0, candles.length - 10); i--) {
+  for (let i = candles.length - 1; i >= Math.max(0, candles.length - 2500); i--) {
     const date = new Date(candles[i].time * 1000);
     if (date.getUTCDay() === 1) { // Monday
       const weeklyOpen = candles[i].open;
