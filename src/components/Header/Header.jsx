@@ -32,7 +32,7 @@ export default function Header() {
           <div className="brand-icon">T</div>
           <div>
             <h1 className="header-title">TERMINUS</h1>
-            <span className="header-subtitle">SMC INTELLIGENCE v11</span>
+            <span className="header-subtitle">SMC INTELLIGENCE v12</span>
           </div>
         </div>
       </div>
