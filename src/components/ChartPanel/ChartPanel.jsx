@@ -221,7 +221,6 @@ export default function ChartPanel() {
         // fallback if priceScale method isn't available
       }
       timeScale.scrollToRealTime();
-      timeScale.fitContent();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [asset, timeframe, candles]);
