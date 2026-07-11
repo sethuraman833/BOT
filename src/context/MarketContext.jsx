@@ -3,19 +3,25 @@
 // ─────────────────────────────────────────────────────────
 
 import { createContext, useContext, useReducer } from 'react';
-import { DEFAULT_ASSET, DEFAULT_TIMEFRAME, CANDLE_LIMIT } from '../utils/constants.js';
+import { ASSETS, DEFAULT_ASSET, DEFAULT_TIMEFRAME, CANDLE_LIMIT } from '../utils/constants.js';
 
 const MarketContext = createContext(null);
 const MarketDispatchContext = createContext(null);
 
+const getSavedAsset = () => {
+  const saved = localStorage.getItem('terminus_asset');
+  return saved && ASSETS[saved] ? saved : DEFAULT_ASSET;
+};
+
 const initialState = {
-  asset: DEFAULT_ASSET,
+  asset: getSavedAsset(),
   timeframe: DEFAULT_TIMEFRAME,
   candles: {},       // { [symbol_tf]: [...candles] }
   livePrice: null,
   liveChange: 0,
   analysis: null,
   isAnalyzing: false,
+  isLoading: false,  // Data fetching status
   error: null,
   backtestMode: false,
   backtestTime: null, // Selected time for historical analysis
@@ -25,7 +31,10 @@ const initialState = {
 function reducer(state, action) {
   switch (action.type) {
     case 'SET_ASSET':
+      localStorage.setItem('terminus_asset', action.payload);
       return { ...state, asset: action.payload, analysis: null, error: null, backtestTime: null };
+    case 'SET_LOADING':
+      return { ...state, isLoading: action.payload };
     case 'SET_TIMEFRAME':
       return { ...state, timeframe: action.payload, backtestTime: null };
     case 'TOGGLE_BACKTEST':

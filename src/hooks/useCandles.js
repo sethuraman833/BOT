@@ -50,6 +50,7 @@ export function useCandles() {
 
     log('api', `Fetching ${CANDLE_LIMIT} candles × all timeframes for ${symbol}`);
     dispatch({ type: 'SET_ERROR', payload: null });
+    dispatch({ type: 'SET_LOADING', payload: true });
 
     try {
       const resultMap = {};
@@ -61,16 +62,22 @@ export function useCandles() {
           dispatch({ type: 'SET_CANDLES', key, payload: candles });
         })
       );
-      if (abortController.signal.aborted) return null;
+      if (abortController.signal.aborted) {
+        dispatch({ type: 'SET_LOADING', payload: false });
+        return null;
+      }
       log('api', `Loaded: ${Object.entries(resultMap).map(([tf, c]) => `${tf}(${c.length})`).join(', ')}`);
+      dispatch({ type: 'SET_LOADING', payload: false });
       return resultMap; // ← Return fresh data directly — no stale closure
     } catch (err) {
       if (err.name === 'AbortError') {
         log('api', `Fetch aborted for ${symbol}`);
+        dispatch({ type: 'SET_LOADING', payload: false });
         return null;
       }
       logError('api', `Failed to fetch data for ${symbol}`, err);
       dispatch({ type: 'SET_ERROR', payload: `Failed to load ${symbol}: ${err.message}` });
+      dispatch({ type: 'SET_LOADING', payload: false });
       return null;
     }
   }, [dispatch]);

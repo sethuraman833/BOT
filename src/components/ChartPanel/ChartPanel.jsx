@@ -7,7 +7,7 @@ import { formatPrice, formatSize } from '../../utils/formatters.js';
 import './ChartPanel.css';
 
 export default function ChartPanel() {
-  const { asset, timeframe, candles, livePrice, analysis, backtestMode, backtestTime } = useMarket();
+  const { asset, timeframe, candles, livePrice, analysis, backtestMode, backtestTime, isLoading } = useMarket();
   const dispatch = useMarketDispatch();
   const containerRef  = useRef(null);
   const chartRef      = useRef(null);
@@ -21,6 +21,26 @@ export default function ChartPanel() {
 
   const renderedKeyRef  = useRef(null);
   const renderedDataRef = useRef([]);
+
+  const [barSpacing, setBarSpacing] = useState(() => {
+    return Number(localStorage.getItem('terminus_barSpacing')) || 7;
+  });
+
+  const handleZoomIn = () => {
+    setBarSpacing(prev => {
+      const next = Math.min(prev + 2, 25);
+      localStorage.setItem('terminus_barSpacing', next);
+      return next;
+    });
+  };
+
+  const handleZoomOut = () => {
+    setBarSpacing(prev => {
+      const next = Math.max(prev - 2, 1);
+      localStorage.setItem('terminus_barSpacing', next);
+      return next;
+    });
+  };
 
   // ── 1. Create chart once ────────────────────────────────
   useEffect(() => {
@@ -211,7 +231,7 @@ export default function ChartPanel() {
     const timeScale = chartRef.current?.timeScale();
     if (timeScale && clean.length > 0) {
       timeScale.applyOptions({
-        barSpacing: 7,
+        barSpacing: barSpacing,
         rightOffset: 12,
       });
       // Force price scale to auto-scale in case user dragged it previously
@@ -223,7 +243,7 @@ export default function ChartPanel() {
       timeScale.scrollToRealTime();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [asset, timeframe, candles]);
+  }, [asset, timeframe, candles, barSpacing]);
 
   // ── 2b. Sync live WS candle updates ──────────
   useEffect(() => {
@@ -391,6 +411,11 @@ export default function ChartPanel() {
             <span className="legend-price mono">{formatPrice(livePrice, asset)}</span>
           </span>
         )}
+        <div className="zoom-controls">
+          <button className="zoom-btn" onClick={handleZoomOut} title="Zoom Out">−</button>
+          <span className="zoom-label">ZOOM</span>
+          <button className="zoom-btn" onClick={handleZoomIn} title="Zoom In">+</button>
+        </div>
       </div>
 
       {showRibbon && (
@@ -439,6 +464,13 @@ export default function ChartPanel() {
       )}
 
       <div className="chart-container" ref={containerRef} />
+      
+      {isLoading && (!renderedDataRef.current || renderedDataRef.current.length === 0) && (
+        <div className="chart-loading-overlay">
+          <div className="spinner" />
+          <span>LOADING {asset}</span>
+        </div>
+      )}
     </div>
   );
 }

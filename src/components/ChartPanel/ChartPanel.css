@@ -40,7 +40,82 @@
   background: rgba(0, 229, 180, 0.06);
   border: 1px solid rgba(0, 229, 180, 0.15);
   border-radius: 12px;
+  pointer-events: none;
 }
+
+/* ── Loading Overlay ──────────────────────────────────────── */
+.chart-loading-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 11, 16, 0.7);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 100;
+  color: var(--accent-green);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  letter-spacing: 0.05em;
+  gap: 12px;
+}
+
+.spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid rgba(0, 229, 180, 0.1);
+  border-top-color: var(--accent-green);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Zoom Controls ────────────────────────────────────────── */
+.zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--bg-border);
+  border-radius: var(--radius-sm);
+  padding: 2px 4px;
+  margin-left: auto; /* Push to right of legend */
+}
+
+.zoom-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: var(--transition);
+  font-family: var(--font-mono);
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.zoom-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+.zoom-label {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  padding: 0 4px;
+}
+
 .live-pulse {
   width: 6px;
   height: 6px;
