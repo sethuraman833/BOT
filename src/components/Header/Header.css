@@ -7,9 +7,9 @@
   padding: 0 22px;
   background: rgba(9, 14, 22, 0.95);
   border-bottom: 1px solid var(--bg-border);
-  z-index: 10;
+  z-index: 100;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   position: relative;
