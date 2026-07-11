@@ -12,19 +12,6 @@ export default function Header() {
   const { handleAnalyze } = useAnalyze();
   const isPositive = (liveChange || 0) >= 0;
 
-  const [assetDropdownOpen, setAssetDropdownOpen] = useState(false);
-  const dropdownRef = useRef(null);
-
-  useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
-        setAssetDropdownOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
   // Bloomberg-style tick animation
   const prevPrice = useRef(livePrice);
   const [tickClass, setTickClass] = useState('');
@@ -50,39 +37,18 @@ export default function Header() {
         </div>
       </div>
 
-      <div className="header-center" ref={dropdownRef}>
-        <div className={`asset-dropdown-container ${assetDropdownOpen ? 'open' : ''}`}>
-          <button 
-            className="asset-dropdown-active" 
-            onClick={() => setAssetDropdownOpen(!assetDropdownOpen)}
+      <nav className="header-center">
+        {ASSET_LIST.map(key => (
+          <button
+            key={key}
+            className={`asset-tab ${asset === key ? 'active' : ''}`}
+            onClick={() => dispatch({ type: 'SET_ASSET', payload: key })}
+            title={ASSETS[key].label}
           >
-            <span className="asset-dropdown-label">{ASSETS[asset].label}</span>
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-chevron-down">
-              <path d="m6 9 6 6 6-6"/>
-            </svg>
+            {ASSETS[key].symbol.replace('USDT', '')}
           </button>
-          
-          {assetDropdownOpen && (
-            <div className="asset-dropdown-menu">
-              {ASSET_LIST.map(key => (
-                <button
-                  key={key}
-                  className={`asset-dropdown-item ${asset === key ? 'active' : ''}`}
-                  onClick={() => {
-                    dispatch({ type: 'SET_ASSET', payload: key });
-                    setAssetDropdownOpen(false);
-                  }}
-                >
-                  {ASSETS[key].label}
-                  {asset === key && (
-                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent-green)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-                  )}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
+        ))}
+      </nav>
 
       <div className="header-right">
         {livePrice != null && (
