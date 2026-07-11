@@ -144,6 +144,14 @@ export default function ChartPanel() {
       emaRefs.current.ema200.setData([]);
       renderedDataRef.current = [];
       renderedKeyRef.current = null;
+      setDebugMsg(''); // Clear stale tick messages
+      
+      // Immediately force auto-scale so the previous manual zoom doesn't persist
+      try {
+        chartRef.current?.priceScale('right').applyOptions({ autoScale: true });
+        seriesRef.current?.priceScale().applyOptions({ autoScale: true });
+      } catch (e) {}
+
       // Remove live price line
       if (liveLineRef.current) {
         try { seriesRef.current.removePriceLine(liveLineRef.current); } catch (_) {}
@@ -151,7 +159,7 @@ export default function ChartPanel() {
       }
     }
 
-    if (!data || data.length < 5) return;
+    if (!data || data.length === 0) return;
 
     const decimals = ASSETS[asset]?.decimals ?? 2;
     seriesRef.current.applyOptions({
@@ -199,14 +207,21 @@ export default function ChartPanel() {
     emaRefs.current.ema50.setData(mapEMA(e50,  50));
     emaRefs.current.ema200.setData(mapEMA(e200, 200));
 
-    // Auto-scroll to latest data
+    // Auto-scroll and auto-scale to latest data
     const timeScale = chartRef.current?.timeScale();
     if (timeScale && clean.length > 0) {
       timeScale.applyOptions({
         barSpacing: 7,
         rightOffset: 12,
       });
+      // Force price scale to auto-scale in case user dragged it previously
+      try {
+        seriesRef.current.priceScale().applyOptions({ autoScale: true });
+      } catch (e) {
+        // fallback if priceScale method isn't available
+      }
       timeScale.scrollToRealTime();
+      timeScale.fitContent();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [asset, timeframe, candles]);
@@ -218,7 +233,7 @@ export default function ChartPanel() {
     if (renderedKeyRef.current !== key) return;
 
     const data = candles[key];
-    if (!data || data.length < 5) return;
+    if (!data || data.length === 0) return;
 
     const rendered = renderedDataRef.current;
     if (!rendered || rendered.length === 0) return;
