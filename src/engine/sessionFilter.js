@@ -27,11 +27,26 @@ function formatCountdown(minutesLeft) {
   return `Closes in ${m}m`;
 }
 
-export function getCurrentSession() {
+export function getCurrentSession(symbol = '') {
   const now = new Date();
   const utcH = now.getUTCHours();
   const utcM = now.getUTCMinutes();
   const utcTime = utcH + utcM / 60;
+
+  // Traditional markets (like Gold/Forex) close for the weekend
+  if (symbol === 'XAUUSDT') {
+    const day = now.getUTCDay();
+    // Close Friday 21:00 UTC to Sunday 22:00 UTC
+    if (day === 6 || (day === 5 && utcH >= 21) || (day === 0 && utcH < 22)) {
+      return {
+        name: 'Market Closed (Weekend)',
+        status: 'closed',
+        color: 'var(--accent-red)',
+        countdown: 'Opens Sunday 22:00 UTC',
+        isOverlap: false,
+      };
+    }
+  }
 
   // Find matching session
   let matched = null;

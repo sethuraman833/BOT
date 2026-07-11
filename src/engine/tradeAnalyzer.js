@@ -405,10 +405,10 @@ export async function runAnalysis(allData, config = {}) {
   else steps.push(`⚠️ Weak displacement: ${dispValidation.reason}`);
 
   // ── Session ────────────────────────────────────────────────────
-  const session   = getCurrentSession();
+  const session   = getCurrentSession(symbol);
   const isHigherTF = activeTimeframe === '1h' || activeTimeframe === '4h' || activeTimeframe === '1d';
-  const sessionOk = isHigherTF ? true : (session.status === 'optimal' || session.status === 'valid' ||
-                    (profile.sessionAllowNyClose && session.status === 'caution'));
+  const sessionOk = session.status === 'closed' ? false : (isHigherTF ? true : (session.status === 'optimal' || session.status === 'valid' ||
+                    (profile.sessionAllowNyClose && session.status === 'caution')));
   steps.push(`Session: ${session.name} | Valid: ${sessionOk}`);
 
   // ── Direction ──────────────────────────────────────────────────

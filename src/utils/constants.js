@@ -5,6 +5,11 @@
 export const ASSETS = {
   BTCUSDT: { label: 'BTC/USDT', symbol: 'BTCUSDT', decimals: 2, minQty: 0.001, stepSize: 0.001 },
   ETHUSDT: { label: 'ETH/USDT', symbol: 'ETHUSDT', decimals: 2, minQty: 0.01,  stepSize: 0.01  },
+  SOLUSDT: { label: 'SOL/USDT', symbol: 'SOLUSDT', decimals: 2, minQty: 0.1,   stepSize: 0.1   },
+  BNBUSDT: { label: 'BNB/USDT', symbol: 'BNBUSDT', decimals: 2, minQty: 0.01,  stepSize: 0.01  },
+  XRPUSDT: { label: 'XRP/USDT', symbol: 'XRPUSDT', decimals: 4, minQty: 1.0,   stepSize: 1.0   },
+  ADAUSDT: { label: 'ADA/USDT', symbol: 'ADAUSDT', decimals: 4, minQty: 1.0,   stepSize: 1.0   },
+  DOGEUSDT:{ label: 'DOGE/USDT',symbol: 'DOGEUSDT',decimals: 5, minQty: 1.0,   stepSize: 1.0   },
   XAUUSDT: { label: 'XAU/USDT', symbol: 'XAUUSDT', decimals: 2, minQty: 0.01,  stepSize: 0.01  },
 };
 
