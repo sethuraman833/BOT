@@ -226,17 +226,17 @@ function isDisplacementCandle(candle, direction) {
 /**
  * Detect Liquidity Sweeps — wick extends beyond a prior swing, then closes back inside.
  */
-export function detectSweeps(candles, sweepThreshold = 0.0015, lookback = 3) {
+export function detectSweeps(candles, sweepThreshold, scanCount = 15) {
   if (!candles || candles.length === 0) return []; // L6 null guard
   const sweeps = [];
-  const swings = findSwingPoints(candles, lookback); // L5: standardized lookback
-  const recentHighs = swings.filter(s => s.type === 'high').slice(-6);
-  const recentLows  = swings.filter(s => s.type === 'low').slice(-6);
+  const swings = findSwingPoints(candles, 3); // L5: standardized lookback
+  const recentHighs = swings.filter(s => s.type === 'high').slice(-8);
+  const recentLows  = swings.filter(s => s.type === 'low').slice(-8);
 
   const MIN_SWEEP_PCT = sweepThreshold;
 
-  // Check last 10 candles for sweep events. M8: i < candles.length - 2 to prevent OOB
-  const scanLimit = Math.min(10, candles.length - 3);
+  // Check last scanCount candles for sweep events. M8: i < candles.length - 2 to prevent OOB
+  const scanLimit = Math.min(scanCount, candles.length - 3);
   for (let i = candles.length - scanLimit; i < candles.length - 2; i++) {
     const c = candles[i];
     if (!c) continue;
@@ -311,7 +311,7 @@ export function detectSweeps(candles, sweepThreshold = 0.0015, lookback = 3) {
  * Detect BOS (Break of Structure) and CHOCH (Change of Character).
  * BOS = trend continuation. CHOCH = potential reversal.
  */
-export function detectStructureShifts(candles, minAge = 1, lookback = 3) {
+export function detectStructureShifts(candles, minAge = 0, lookback = 3) {
   if (!candles || candles.length === 0) return []; // L6 null guard
   const shifts = [];
   const swings = findSwingPoints(candles, lookback); // L5: standardized lookback
@@ -331,7 +331,9 @@ export function detectStructureShifts(candles, minAge = 1, lookback = 3) {
     for (let s = candles.length - scanCount; s < candles.length; s++) {
       const c = candles[s];
       if (c && c.close > prevHigh.price) {
-        shifts.push({ type: 'BOS', direction: 'bullish', level: prevHigh.price, time: c.time });
+        if (candles.length - 1 - s >= minAge) {
+          shifts.push({ type: 'BOS', direction: 'bullish', level: prevHigh.price, time: c.time, candleIndex: s });
+        }
         break;
       }
     }
@@ -342,7 +344,9 @@ export function detectStructureShifts(candles, minAge = 1, lookback = 3) {
         for (let s = candles.length - scanCount; s < candles.length; s++) {
           const c = candles[s];
           if (c && c.close < lastLow.price) {
-            shifts.push({ type: 'CHOCH', direction: 'bearish', level: lastLow.price, time: c.time });
+            if (candles.length - 1 - s >= minAge) {
+              shifts.push({ type: 'CHOCH', direction: 'bearish', level: lastLow.price, time: c.time, candleIndex: s });
+            }
             break;
           }
         }
@@ -358,7 +362,9 @@ export function detectStructureShifts(candles, minAge = 1, lookback = 3) {
     for (let s = candles.length - scanCount; s < candles.length; s++) {
       const c = candles[s];
       if (c && c.close < prevLow.price) {
-        shifts.push({ type: 'BOS', direction: 'bearish', level: prevLow.price, time: c.time });
+        if (candles.length - 1 - s >= minAge) {
+          shifts.push({ type: 'BOS', direction: 'bearish', level: prevLow.price, time: c.time, candleIndex: s });
+        }
         break;
       }
     }
@@ -369,7 +375,9 @@ export function detectStructureShifts(candles, minAge = 1, lookback = 3) {
         for (let s = candles.length - scanCount; s < candles.length; s++) {
           const c = candles[s];
           if (c && c.close > lastHigh.price) {
-            shifts.push({ type: 'CHOCH', direction: 'bullish', level: lastHigh.price, time: c.time });
+            if (candles.length - 1 - s >= minAge) {
+              shifts.push({ type: 'CHOCH', direction: 'bullish', level: lastHigh.price, time: c.time, candleIndex: s });
+            }
             break;
           }
         }
@@ -639,9 +647,9 @@ export function detectCandlePatterns(candles) {
       patterns.push({ index: i, name: 'Tweezer Top', direction: 'bearish', strength: 1.0, time: c2.time });
     }
 
-    // MORNING STAR — 3-candle bullish reversal: bearish c0, small/doji c1, bullish c2 above c0 midpoint
+    // MORNING STAR - 3-candle bullish reversal: bearish c0, small/doji c1, bullish c2 above c0 midpoint
     const c0Mid = (c0.open + c0.close) / 2;
-    if (isBear1 === false && i >= 2) {
+    if (i >= 2) {
       const isBear0 = c0.close < c0.open;
       const isBull3 = c2.close > c2.open;
       const smallBody1 = body1 < body0 * 0.5;
@@ -882,22 +890,8 @@ export function calculateMACD(candles, fastPeriod = 12, slowPeriod = 26, signalP
 export function calculateStochRSI(candles, rsiPeriod = 14, stochPeriod = 14, smoothK = 3, smoothD = 3) {
   if (!candles || candles.length < rsiPeriod + stochPeriod + smoothK + smoothD) return null;
 
-  // Step 1: RSI values series
-  const closes = candles.map(c => c.close);
-  const rsiValues = [];
-  for (let i = rsiPeriod; i < closes.length; i++) {
-    const slice = closes.slice(i - rsiPeriod, i + 1);
-    let gains = 0, losses = 0;
-    for (let j = 1; j < slice.length; j++) {
-      const diff = slice[j] - slice[j-1];
-      if (diff > 0) gains += diff; else losses -= diff;
-    }
-    const avgGain = gains / rsiPeriod;
-    const avgLoss = losses / rsiPeriod;
-    if (avgLoss === 0) { rsiValues.push(100); continue; }
-    const rs = avgGain / avgLoss;
-    rsiValues.push(100 - (100 / (1 + rs)));
-  }
+  // Step 1: RSI values series (using Wilder's smoothing from calculateRSI)
+  const rsiValues = calculateRSI(candles, rsiPeriod);
 
   if (rsiValues.length < stochPeriod) return null;
 
@@ -1336,7 +1330,7 @@ export function detectInducement(candles, direction) {
 // ---------------------------------------------------------------
 //  MODULE 14 � CHOCH QUALITY FILTER
 // ---------------------------------------------------------------
-export function assessChochQuality(candles, sweeps, direction) {
+export function assessChochQuality(candles, sweeps, direction, lastShiftIdx = -1) {
   if (!candles || candles.length < 10) return { quality: 'LOW', score: 0, reasons: [] };
   let score = 0; const reasons = [];
   const recentSweep = (sweeps||[]).some(s => {
@@ -1346,7 +1340,8 @@ export function assessChochQuality(candles, sweeps, direction) {
                          (direction==='short'&& (s.type==='bearish'||s.direction==='short')));
   });
   if (recentSweep) { score += 40; reasons.push('ERL swept before CHOCH'); }
-  const disp = validateDisplacement(candles, candles.length - 2);
+  const checkIdx = lastShiftIdx >= 0 ? lastShiftIdx : candles.length - 2;
+  const disp = validateDisplacement(candles, checkIdx);
   if (disp.valid) { score += Math.round(disp.score * 0.4); reasons.push(`Disp: ${disp.reason}`); }
   const sw = findSwingPoints(candles.slice(-20), 3);
   const rel = direction==='long' ? sw.filter(s=>s.type==='high') : sw.filter(s=>s.type==='low');
@@ -1406,6 +1401,10 @@ export function identifyDrawOnLiquidity(candles, direction, currentPrice, fvgs, 
 // ---------------------------------------------------------------
 export function detectEqualHighsLows(candles, currentPrice, tolerance=0.0005) {
   if (!candles||candles.length<10) return { eqh:[], eql:[] };
+  let adjustedTolerance = tolerance;
+  if (currentPrice < 1)        adjustedTolerance = 0.003;  // 0.3% for cents-level coins (DOGE, XRP)
+  else if (currentPrice < 100)  adjustedTolerance = 0.0015; // 0.15% for mid-range (SOL, BNB)
+  else                          adjustedTolerance = 0.0005; // 0.05% for high-priced (BTC, ETH)
   const eqh=[],eql=[];
   const recent=candles.slice(-Math.min(60,candles.length));
   const procH=new Set();
@@ -1413,7 +1412,7 @@ export function detectEqualHighsLows(candles, currentPrice, tolerance=0.0005) {
     if(procH.has(i)) continue;
     const grp=[i];
     for(let j=i+1;j<recent.length;j++){
-      if(Math.abs(recent[j].high-recent[i].high)/recent[i].high<=tolerance){grp.push(j);procH.add(j);}
+      if(Math.abs(recent[j].high-recent[i].high)/recent[i].high<=adjustedTolerance){grp.push(j);procH.add(j);}
     }
     if(grp.length>=2){
       const lvl=grp.reduce((s,idx)=>s+recent[idx].high,0)/grp.length;
@@ -1425,7 +1424,7 @@ export function detectEqualHighsLows(candles, currentPrice, tolerance=0.0005) {
     if(procL.has(i)) continue;
     const grp=[i];
     for(let j=i+1;j<recent.length;j++){
-      if(Math.abs(recent[j].low-recent[i].low)/recent[i].low<=tolerance){grp.push(j);procL.add(j);}
+      if(Math.abs(recent[j].low-recent[i].low)/recent[i].low<=adjustedTolerance){grp.push(j);procL.add(j);}
     }
     if(grp.length>=2){
       const lvl=grp.reduce((s,idx)=>s+recent[idx].low,0)/grp.length;

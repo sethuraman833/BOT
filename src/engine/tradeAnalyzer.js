@@ -397,9 +397,10 @@ export async function runAnalysis(allData, config = {}) {
   steps.push(`Liquidity: ${liquidityMap.erl.length} ERL levels | ${liquidityMap.irl.length} IRL levels`);
 
   // 4. Displacement validation on the most recent BOS/CHOCH candle
-  const lastShiftIdx = allShifts.length > 0 ? candlesPrimary.length - 2 : -1;
+  const lastPrimaryShift = shiftsPrimary.length > 0 ? shiftsPrimary[shiftsPrimary.length - 1] : null;
+  const lastShiftIdx = lastPrimaryShift ? lastPrimaryShift.candleIndex : -1;
   const dispValidation = lastShiftIdx >= 0
-    ? validateDisplacement(candlesPrimary, lastShiftIdx)
+    ? validateDisplacement(closedPrimary, lastShiftIdx)
     : { valid: false, score: 0, reason: 'No recent BOS/CHOCH' };
   if (dispValidation.valid) steps.push(`✅ Displacement confirmed: ${dispValidation.reason}`);
   else steps.push(`⚠️ Weak displacement: ${dispValidation.reason}`);
@@ -436,9 +437,9 @@ export async function runAnalysis(allData, config = {}) {
   if (wyckoffPhase?.signal === 'short') aiBearScore += 1.5;
   if (obvDivergence?.bullishDivergence) aiBullScore++;
   if (obvDivergence?.bearishDivergence) aiBearScore++;
-  if (weeklyBias?.bias === 'long') aiBullScore++;
-  if (weeklyBias?.bias === 'short') aiBearScore++;
-  if (fundingSentiment?.aligned) {
+  if (weeklyBias?.bias === 'bullish') aiBullScore++;
+  if (weeklyBias?.bias === 'bearish') aiBearScore++;
+  if (fundingSentiment) {
     if (fundingSentiment.sentiment === 'overleveraged_shorts') aiBullScore++;
     if (fundingSentiment.sentiment === 'overleveraged_longs') aiBearScore++;
   }
@@ -469,6 +470,27 @@ export async function runAnalysis(allData, config = {}) {
     rangeProbability = direction === null ? 50 : Math.max(0, 100 - upProb - downProb);
   }
 
+  // Update funding sentiment alignment once direction is known
+  if (direction && fundingSentiment) {
+    let aligned = false;
+    let confluenceWeight = 0.5;
+    if (direction === 'long' && fundingSentiment.sentiment === 'overleveraged_shorts') {
+      aligned = true;
+      confluenceWeight = 1.0;
+    } else if (direction === 'short' && fundingSentiment.sentiment === 'overleveraged_longs') {
+      aligned = true;
+      confluenceWeight = 1.0;
+    } else if (
+      (direction === 'long' && fundingSentiment.sentiment === 'overleveraged_longs') ||
+      (direction === 'short' && fundingSentiment.sentiment === 'overleveraged_shorts')
+    ) {
+      aligned = false;
+      confluenceWeight = -0.5;
+    }
+    fundingSentiment.aligned = aligned;
+    fundingSentiment.confluenceWeight = confluenceWeight;
+  }
+
   steps.push(`Direction: ${direction || 'RANGING'} | Bull: ${upProb}% Bear: ${downProb}%`);
 
   // ── Direction-dependent Institutional Logic ────────────────────
@@ -483,7 +505,7 @@ export async function runAnalysis(allData, config = {}) {
       steps.push(`🪤 Inducement: ${inducementData.description}`);
 
     // 6. CHOCH quality — was it preceded by an ERL sweep + displacement?
-    chochQuality = assessChochQuality(candlesPrimary, allSweeps, direction);
+    chochQuality = assessChochQuality(candlesPrimary, allSweeps, direction, lastShiftIdx);
     steps.push(`CHOCH Quality: ${chochQuality.quality} (${chochQuality.score}/100) — ${chochQuality.reasons.join(', ') || 'No sweep'}`);
 
     // 7. Draw on Liquidity — what is price targeting?
@@ -703,14 +725,13 @@ export async function runAnalysis(allData, config = {}) {
     }
 
     // ── CME Gap Risk Shield ──────────────────────────────────
-    adjustedRiskAmount = riskAmount;
     let cmeRiskShieldActive = false;
     if (cmeGapData.hasUnfilledGaps && cmeGapData.nearestGap) {
       const nearest = cmeGapData.nearestGap;
       const opposing = (direction === 'long' && nearest.direction === 'up') ||
                        (direction === 'short' && nearest.direction === 'down');
       if (opposing && nearest.distToGapPct < 3.0) {
-        adjustedRiskAmount = riskAmount * 0.5; // Cut risk by 50%
+        adjustedRiskAmount = adjustedRiskAmount * 0.5; // Cut risk by 50%
         cmeRiskShieldActive = true;
       }
     }
@@ -842,15 +863,17 @@ export async function runAnalysis(allData, config = {}) {
   );
 
   // Funding rate aligned (contrarian: overleveraged longs → short, overleveraged shorts → long)
-  const fundingAligned = fundingSentiment.aligned && direction && (
+  const fundingAligned = direction && (
     (direction === 'long'  && fundingSentiment.sentiment === 'overleveraged_shorts') ||
     (direction === 'short' && fundingSentiment.sentiment === 'overleveraged_longs')
   );
   if (fundingAligned) steps.push(`✓ Funding Rate: ${fundingSentiment.fundingRatePct} — Crowd ${fundingSentiment.sentiment === 'overleveraged_longs' ? 'long' : 'short'} (Contrarian ${direction})`);
 
   // Weekly Open bias
-  const weeklyBiasAligned = weeklyBias && direction &&
-    weeklyBias.bias === direction;
+  const weeklyBiasAligned = weeklyBias && direction && (
+    (direction === 'long' && weeklyBias.bias === 'bullish') ||
+    (direction === 'short' && weeklyBias.bias === 'bearish')
+  );
 
   const preRrrChecks = [
     // ── SMC Structure (High Weight) ───────────────────────────────
@@ -858,15 +881,15 @@ export async function runAnalysis(allData, config = {}) {
     { label: 'Liquidity Sweep / FVG Fill',                                        met: liquidityEvent,          weight: 1.5  },
     { label: `${profile.primaryKey.toUpperCase()}/${profile.structureKey.toUpperCase()} BOS/CHOCH`, met: structureShift, weight: 1.5  },
     { label: 'Near Valid Order Block',                                            met: nearOB,                  weight: 1.25 },
-    { label: 'Near Breaker Block (Flipped S/R)',                                  met: nearBreaker,             weight: 1.0  },
+    { label: 'Near Breaker Block (Flipped S/R)',                                  met: nearBreaker,             weight: 1.25 },
     // ── Price Position ────────────────────────────────────────────
-    { label: 'Entry in OTE Zone (61.8–78.6%)',                                   met: inOTE,                   weight: 1.25 },
-    { label: `Entry in ${direction === 'long' ? 'Discount' : 'Premium'} Zone`,  met: inCorrectZone,           weight: 1.0  },
+    { label: 'Entry in OTE Zone (61.8–78.6%)',                                   met: inOTE,                   weight: 1.0  },
+    { label: `Entry in ${direction === 'long' ? 'Discount' : 'Premium'} Zone`,  met: inCorrectZone,           weight: 0.5  },
     { label: 'Fibonacci Golden Pocket (0.618–0.705)',                             met: inGoldenPocket,          weight: 1.5  },
     // ── Trend Confirmation ────────────────────────────────────────
     { label: 'Daily Bias Aligned (EMA200)',                                      met: dailyAligned,            weight: 1.0  },
     { label: 'EMA200 Acting as S/R',                                             met: ema200Acting,            weight: 0.75 },
-    { label: 'VWAP Aligned',                                                      met: vwapAligned,             weight: 0.75 },
+    { label: 'VWAP Aligned',                                                      met: vwapAligned,             weight: 1.0  },
     // ── AI Momentum ──────────────────────────────────────────────
     { label: 'MACD Momentum Aligned',                                            met: !!macdAligned,           weight: 1.25 },
     { label: 'Stochastic RSI Extreme (OS/OB)',                                   met: !!stochAligned,          weight: 1.0  },
@@ -875,9 +898,9 @@ export async function runAnalysis(allData, config = {}) {
     // ── Volume & Divergence ──────────────────────────────────────
     { label: 'Volume POC Confluence',                                             met: atPOC,                   weight: 1.25 },
     { label: 'RSI Divergence',                                                    met: rsiResult.hasDivergence, weight: 1.0  },
-    { label: 'RSI SMA Crossover (Trend Change)',                                  met: rsiCrossAligned,         weight: 1.0  },
+    { label: 'RSI SMA Crossover (Trend Change)',                                  met: rsiCrossAligned,         weight: 0.5  },
     { label: 'OBV Smart Money Divergence',                                        met: !!obvAligned,            weight: 1.0  },
-    { label: 'Hidden Divergence (Trend Continuation)',                            met: hiddenDiv.hasHiddenDiv,  weight: 1.0  },
+    { label: 'Hidden Divergence (Trend Continuation)',                            met: hiddenDiv.hasHiddenDiv,  weight: 0.75 },
     { label: 'Candlestick Pattern Confirmed',                                     met: hasCandlePattern,        weight: 1.0  },
     // ── Session & Sentiment ──────────────────────────────────────
     { label: 'Active Trading Session',                                            met: sessionOk,               weight: 0.75 },

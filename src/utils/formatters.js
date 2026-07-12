@@ -34,8 +34,20 @@ export function formatPercent(value) {
   return `${sign}${value.toFixed(2)}%`;
 }
 
-export function formatSize(value, decimals = 4) {
+export function formatSize(value, symbol = 'BTCUSDT') {
   if (value == null || isNaN(value)) return '—';
+  
+  let decimals = 4;
+  if (symbol && ASSETS[symbol]) {
+    const stepSize = ASSETS[symbol].stepSize;
+    if (stepSize >= 1) decimals = 0;
+    else if (stepSize >= 0.1) decimals = 1;
+    else if (stepSize >= 0.01) decimals = 2;
+    else if (stepSize >= 0.001) decimals = 3;
+    else if (stepSize >= 0.0001) decimals = 4;
+    else if (stepSize >= 0.00001) decimals = 5;
+  }
+  
   return value.toFixed(decimals);
 }
 

@@ -302,7 +302,7 @@ body {
   border-radius: var(--radius-sm);
   font-size: 0.65rem;
   font-family: var(--font-mono);
-  transition: all var(--transition-fast);
+  transition: var(--transition-fast);
   margin-left: var(--space-1);
 }
 .copy-btn:hover {

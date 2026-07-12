@@ -16,12 +16,11 @@ export default function ChartPanel() {
   const emaRefs       = useRef({});
   const priceLinesRef = useRef([]);
   const backtestLineRef = useRef(null);
-  const liveLineRef   = useRef(null);   // live price horizontal line
-  const crosshairDataRef = useRef(null); // crosshair OHLCV tooltip data
 
   const renderedKeyRef  = useRef(null);
   const renderedDataRef = useRef([]);
 
+  const [debugMsg, setDebugMsg] = useState('');
   const [barSpacing, setBarSpacing] = useState(() => {
     return Number(localStorage.getItem('terminus_barSpacing')) || 7;
   });
@@ -171,12 +170,6 @@ export default function ChartPanel() {
         chartRef.current?.priceScale('right').applyOptions({ autoScale: true });
         seriesRef.current?.priceScale().applyOptions({ autoScale: true });
       } catch (e) {}
-
-      // Remove live price line
-      if (liveLineRef.current) {
-        try { seriesRef.current.removePriceLine(liveLineRef.current); } catch (_) {}
-        liveLineRef.current = null;
-      }
     }
 
     if (!data || data.length === 0) return;
@@ -297,8 +290,7 @@ export default function ChartPanel() {
     }
   }, [asset, timeframe, candles]);
 
-  // Debug state to surface errors to the UI
-  const [debugMsg, setDebugMsg] = useState('');
+
   
   // ── 3. Live tick — update last candle + live price line ──
   useEffect(() => {
@@ -321,7 +313,7 @@ export default function ChartPanel() {
         low: last.low,
         close: last.close,
       });
-      setDebugMsg(`Tick OK: ${livePrice}`);
+      setDebugMsg(''); // Clear error on successful tick
     } catch (err) {
       setDebugMsg(`Tick Err: ${err.message}`);
     }
@@ -375,26 +367,7 @@ export default function ChartPanel() {
     }
   }, [analysis, backtestMode]);
 
-  // ── Crosshair OHLCV tooltip ──────────────────────────────
-  useEffect(() => {
-    if (!chartRef.current || !seriesRef.current) return;
 
-    const handler = (param) => {
-      if (!param.time || !param.seriesData) {
-        crosshairDataRef.current = null;
-        return;
-      }
-      const candleData = param.seriesData.get(seriesRef.current);
-      if (candleData) {
-        crosshairDataRef.current = candleData;
-      }
-    };
-
-    chartRef.current.subscribeCrosshairMove(handler);
-    return () => {
-      try { chartRef.current?.unsubscribeCrosshairMove(handler); } catch (_) {}
-    };
-  }, []);
 
   const showRibbon = analysis && analysis.decision !== 'NO_TRADE' && analysis.entry;
 
@@ -458,7 +431,7 @@ export default function ChartPanel() {
           ))}
           <div className="ribbon-sec size">
             <span className="ribbon-label">POSITION</span>
-            <span className="ribbon-val mono">{formatSize(analysis.positionSize)} units</span>
+            <span className="ribbon-val mono">{formatSize(analysis.positionSize, asset)} units</span>
           </div>
         </div>
       )}

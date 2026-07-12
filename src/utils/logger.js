@@ -10,16 +10,23 @@ const STYLES = {
   info:   'color:#7a8a9a',
 };
 
+const IS_DEV = typeof window !== 'undefined' 
+  ? (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+  : true;
+
 export function log(module, message, data) {
+  if (!IS_DEV) return;
   const style = STYLES[module] || STYLES.info;
   const tag = `[${module.toUpperCase()}]`;
+  const time = new Date().toLocaleTimeString();
   if (data !== undefined) {
-    console.log(`%c${tag} ${message}`, style, data);
+    console.log(`%c[${time}] ${tag} ${message}`, style, data);
   } else {
-    console.log(`%c${tag} ${message}`, style);
+    console.log(`%c[${time}] ${tag} ${message}`, style);
   }
 }
 
 export function logError(module, message, err) {
-  console.error(`%c[${module.toUpperCase()}] ${message}`, STYLES.error, err);
+  const time = new Date().toLocaleTimeString();
+  console.error(`%c[${time}] [${module.toUpperCase()}] ${message}`, STYLES.error, err);
 }

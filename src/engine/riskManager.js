@@ -327,10 +327,10 @@ export function calculateTPs(
       candidates.push({ level: (primLow + range * 2.0) * (1 - 0.0012), reason: '2.0 Fib Extension', isStructural: true });
       candidates.push({ level: (primLow + range * 2.618) * (1 - 0.0012), reason: '2.618 Fib Extension', isStructural: true });
     } else {
-      candidates.push({ level: (primHigh - range * 1.272) * (1 + 0.0012), reason: '1.272 Fib Extension', isStructural: true });
-      candidates.push({ level: (primHigh - range * 1.618) * (1 + 0.0012), reason: '1.618 Fib Extension', isStructural: true });
-      candidates.push({ level: (primHigh - range * 2.0) * (1 + 0.0012), reason: '2.0 Fib Extension', isStructural: true });
-      candidates.push({ level: (primHigh - range * 2.618) * (1 + 0.0012), reason: '2.618 Fib Extension', isStructural: true });
+      candidates.push({ level: Math.max(0, primHigh - range * 1.272) * (1 + 0.0012), reason: '1.272 Fib Extension', isStructural: true });
+      candidates.push({ level: Math.max(0, primHigh - range * 1.618) * (1 + 0.0012), reason: '1.618 Fib Extension', isStructural: true });
+      candidates.push({ level: Math.max(0, primHigh - range * 2.0) * (1 + 0.0012), reason: '2.0 Fib Extension', isStructural: true });
+      candidates.push({ level: Math.max(0, primHigh - range * 2.618) * (1 + 0.0012), reason: '2.618 Fib Extension', isStructural: true });
     }
   }
 

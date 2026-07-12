@@ -74,8 +74,7 @@ export function useAnalyze() {
       if (result.decision === 'TAKE_NOW' || (result.decision === 'WAIT' && result.confluenceScore?.total >= 5)) {
         const aiResponse = await getFrontendAiOpinion(result);
         if (aiResponse) {
-          result.aiAnalysis = aiResponse;
-          dispatch({ type: 'SET_ANALYSIS', payload: { ...result }, lastAnalysisTime: utcTime });
+          dispatch({ type: 'UPDATE_ANALYSIS_AI', payload: aiResponse });
         }
       }
 

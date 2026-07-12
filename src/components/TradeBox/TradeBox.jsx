@@ -225,7 +225,7 @@ export default function TradeBox({ analysis }) {
         <div className="teb-chips">
           <div className="teb-chip size">
             <span className="chip-label">Size</span>
-            <strong>{formatSize(positionSize)} units</strong>
+            <strong>{formatSize(positionSize, symbol)} units</strong>
           </div>
           <div className="teb-chip risk">
             <span className="chip-label">Risk</span>

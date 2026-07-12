@@ -80,6 +80,14 @@ function reducer(state, action) {
         isAnalyzing: false, 
         lastAnalysisTime: action.lastAnalysisTime || state.lastAnalysisTime 
       };
+    case 'UPDATE_ANALYSIS_AI':
+      if (state.analysis) {
+        return {
+          ...state,
+          analysis: { ...state.analysis, aiAnalysis: action.payload }
+        };
+      }
+      return state;
     case 'SET_ANALYZING':
       return { ...state, isAnalyzing: action.payload };
     case 'SET_ERROR':

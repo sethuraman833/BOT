@@ -64,7 +64,7 @@ export default function App() {
           });
         }
       }).catch(() => {});
-    }, 3000);
+    }, 15000);
 
     return () => clearInterval(interval);
   }, [asset, timeframe, dispatch]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -89,7 +89,7 @@ export default function App() {
     <div className={`app-shell tab-${mobileTab}`}>
       <Header />
       
-      <ChartPanel />
+      <ErrorBoundary><ChartPanel /></ErrorBoundary>
       <ErrorBoundary><AnalysisSidebar /></ErrorBoundary>
 
       <ControlBar />

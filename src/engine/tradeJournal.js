@@ -36,8 +36,17 @@ function saveJournal(journal) {
 export function recordSignal(analysis) {
   if (!analysis || analysis.decision !== 'TAKE_NOW') return null;
 
+  const journal = loadJournal();
+  
+  // Deduplicate: check if a signal for the same symbol and direction was logged in the last 10s
+  const isDuplicate = journal.some(t => {
+    const timeDiff = Math.abs(Date.now() - new Date(t.timestamp).getTime());
+    return t.symbol === analysis.symbol && t.direction === analysis.direction && timeDiff < 10000;
+  });
+  if (isDuplicate) return null;
+
   const record = {
-    id: `T${Date.now()}`,
+    id: `T${Date.now()}_${Math.floor(Math.random() * 1000)}`,
     timestamp: new Date().toISOString(),
     symbol: analysis.symbol,
     direction: analysis.direction,
@@ -59,7 +68,6 @@ export function recordSignal(analysis) {
     notes: '',
   };
 
-  const journal = loadJournal();
   journal.unshift(record); // newest first
   // Keep last 200 trades
   if (journal.length > 200) journal.length = 200;
@@ -135,7 +143,7 @@ export function calculateMetrics() {
   for (const t of completed) {
     if (t.pnl > 0) { streak = streak > 0 ? streak + 1 : 1; }
     else if (t.pnl < 0) { streak = streak < 0 ? streak - 1 : -1; }
-    else break;
+    else continue;
   }
 
   const rrs = completed.filter(t => t.rrAchieved != null).map(t => t.rrAchieved);
