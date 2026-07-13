@@ -84,7 +84,7 @@ export default function ChartPanel() {
         barSpacing: 7,
         rightOffset: 12,
       },
-      handleScroll: { vertTouchDrag: false },
+      handleScroll: { vertTouchDrag: true },
     });
 
     const series = chart.addCandlestickSeries({
@@ -236,7 +236,14 @@ export default function ChartPanel() {
       timeScale.scrollToRealTime();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [asset, timeframe, candles, barSpacing]);
+  }, [asset, timeframe, candles]);
+
+  // ── 2aa. Handle zoom / bar spacing changes ──────────────
+  useEffect(() => {
+    if (chartRef.current) {
+      chartRef.current.timeScale().applyOptions({ barSpacing });
+    }
+  }, [barSpacing]);
 
   // ── 2b. Sync live WS candle updates ──────────
   useEffect(() => {
