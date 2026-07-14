@@ -1024,12 +1024,28 @@ export async function runAnalysis(allData, config = {}) {
 
   // ── Final Score ────────────────────────────────────────────────
   const tp1Rrr      = tpData?.tps?.[0]?.rrr ?? 0;
-  const rrrMeetsMin = tp1Rrr >= (profile.minRrr || 3.0);
+
+  // ── Min-Move & RRR Filters for non-exempt assets ─────────────
+  // BTC, ETH, XAU are exempt (high-value assets where sub-1% moves are meaningful).
+  // All other assets require SL and TP1 to be ≥1.12% from entry so that
+  // after exchange fees (~0.12%), the net P&L is at least ~1%.
+  const MIN_MOVE_EXEMPT = ['BTCUSDT', 'ETHUSDT', 'XAUUSDT'];
+  const isExemptAsset   = MIN_MOVE_EXEMPT.includes(symbol);
+  const MIN_MOVE_PCT    = 0.0112; // 1.12%
+  const ENFORCED_MIN_RRR = 3.0;   // 1:3 mandatory for non-exempt
+
+  const tp1Level     = tpData?.tps?.[0]?.level ?? 0;
+  const tp1DistPct   = tp1Level && entry ? Math.abs(tp1Level - entry) / entry : 0;
+  const slDistPct    = slPct; // already computed as Math.abs(entry - slData.value) / entry
+
+  const moveFilterOk = isExemptAsset || (slDistPct >= MIN_MOVE_PCT && tp1DistPct >= MIN_MOVE_PCT);
+  const effectiveMinRrr = isExemptAsset ? (profile.minRrr || 3.0) : Math.max(profile.minRrr || 3.0, ENFORCED_MIN_RRR);
+  const rrrMeetsMin = tp1Rrr >= effectiveMinRrr;
 
   // Full check list including RRR
   const checks = [
     ...preRrrChecks,
-    { label: `RRR ≥ 1:${(profile.minRrr || 3.0).toFixed(0)} (Structural)`, met: rrrMeetsMin, weight: 1.5 },
+    { label: `RRR ≥ 1:${effectiveMinRrr.toFixed(0)} (Structural)`, met: rrrMeetsMin, weight: 1.5 },
   ];
 
   const totalWeight     = checks.reduce((s, c) => s + c.weight, 0);
@@ -1086,8 +1102,13 @@ export async function runAnalysis(allData, config = {}) {
     }
   } else if (slPct > profile.maxSlPct) {
     rejectionReason = `SL too wide: ${(slPct * 100).toFixed(2)}% > ${(profile.maxSlPct * 100).toFixed(2)}% max for ${profile.label}`;
+  } else if (!moveFilterOk) {
+    // Non-exempt assets: SL and TP1 must each be ≥1.12% from entry for net ~1% after fees
+    const slShort  = slDistPct < MIN_MOVE_PCT;
+    const tpShort  = tp1DistPct < MIN_MOVE_PCT;
+    rejectionReason = `Min move filter: ${slShort ? `SL ${(slDistPct * 100).toFixed(2)}%` : ''}${slShort && tpShort ? ' & ' : ''}${tpShort ? `TP1 ${(tp1DistPct * 100).toFixed(2)}%` : ''} < 1.12% min for ${symbol.replace('USDT', '')} (net ~1% after fees)`;
   } else if (!rrrMeetsMin) {
-    rejectionReason = `RRR too low: ${tp1Rrr.toFixed(2)} < ${(profile.minRrr || 3.0).toFixed(1)} minimum`;
+    rejectionReason = `RRR too low: ${tp1Rrr.toFixed(2)} < ${effectiveMinRrr.toFixed(1)} minimum`;
   } else if (aiConfidence < profile.minAiConfidence && signalGrade.grade !== 'A+' && signalGrade.grade !== 'A') {
     rejectionReason = `AI Confidence too low: ${aiConfidence}% < ${profile.minAiConfidence}% min for ${profile.label} (Inst Grade: ${signalGrade.grade})`;
   } else {
