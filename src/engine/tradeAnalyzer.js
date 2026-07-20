@@ -278,6 +278,15 @@ export async function runAnalysis(allData, config = {}) {
 
   const currentPrice = candlesPrimary[candlesPrimary.length - 1].close;
 
+  // ── Filter D: Volatility Spike Guard ────────────────────────
+  // If the current candle body exceeds 2.5x the 14-period ATR, the move may be
+  // exhausted — reject to avoid entering at the tip of explosive moves.
+  const primaryATR = calculateATR(candlesPrimary, 14);
+  const lastCandle = candlesPrimary[candlesPrimary.length - 1];
+  const lastCandleBody = Math.abs(lastCandle.close - lastCandle.open);
+  const volSpikeRatio = primaryATR && primaryATR > 0 ? lastCandleBody / primaryATR : 0;
+  const isVolatilitySpike = volSpikeRatio > 2.5;
+
   // ── Step 1: Daily Bias (EMA200 on 1D) ──────────────────────────
   const ema200_1d      = calculateEMA(candles1d.length > 20 ? candles1d : candlesForBias, 200);
   const lastEma200_1d  = ema200_1d[ema200_1d.length - 1];
@@ -618,6 +627,9 @@ export async function runAnalysis(allData, config = {}) {
   let slData = null;
   let posSize = 0;
   let nearestOB = null;
+  let earlyLeverage = 0;
+  const MAX_LEVERAGE = 20;
+  let leverageExceeded = false;
 
   if (direction) {
     const activeOBs = allOBs.filter(o => o.status === 'active');
@@ -740,7 +752,13 @@ export async function runAnalysis(allData, config = {}) {
     // Compute position size once (L1) and pass symbol for step rounding (C6)
     posSize = (slData && !slSideInvalid) ? calculatePositionSize(entry, slData.value, adjustedRiskAmount, symbol) : 0;
     
-    steps.push(`Entry: ${entry.toFixed(decimals)} | SL: ${slData ? slData.value.toFixed(decimals) : 'N/A'} | SL%: ${slData ? ((Math.abs(entry - slData.value) / entry) * 100).toFixed(2) + '%' : 'N/A'} | Size: ${posSize} units`);
+    // ── Filter A: Pre-calculate leverage for max leverage gate ──
+    earlyLeverage = (posSize > 0 && entry > 0 && balance > 0)
+      ? (posSize * entry) / balance
+      : 0;
+    leverageExceeded = earlyLeverage > MAX_LEVERAGE;
+
+    steps.push(`Entry: ${entry.toFixed(decimals)} | SL: ${slData ? slData.value.toFixed(decimals) : 'N/A'} | SL%: ${slData ? ((Math.abs(entry - slData.value) / entry) * 100).toFixed(2) + '%' : 'N/A'} | Size: ${posSize} units | Leverage: ${earlyLeverage.toFixed(1)}x`);
     
     if (cmeRiskShieldActive) {
       steps.push(`⚠️ CME Risk Shield Active: Opposing gap sits within 3%. Reducing risk by 50% ($${adjustedRiskAmount.toFixed(2)}).`);
@@ -1059,6 +1077,14 @@ export async function runAnalysis(allData, config = {}) {
                         : aiConfidence >= 40 ? 'MARGINAL'
                         : 'SKIP';
 
+  // ── Filter B: Min Confluence Count Gate ─────────────────────
+  // Require at least 40% of checks to be met (by count, not weight).
+  // Prevents signals that rely on one or two heavy-weight checks alone.
+  const checksMetCount = preRrrChecks.filter(c => c.met).length;
+  const checksTotalCount = preRrrChecks.length;
+  const checksMetPct = checksTotalCount > 0 ? checksMetCount / checksTotalCount : 0;
+  const minConfluenceCountOk = checksMetPct >= 0.40;
+
   // ── Signal Grade (A+ / A / B / C / D) ─────────────────────────
   const inOTECheck = checks.find(c => c.label.includes('OTE Zone'));
   const atPOCCheck = checks.find(c => c.label.includes('Volume POC'));
@@ -1100,8 +1126,14 @@ export async function runAnalysis(allData, config = {}) {
     } else {
       rejectionReason = `Price too far from entry zone: ${(entryDistPct * 100).toFixed(2)}% > ${(profile.maxEntryDist * 100).toFixed(2)}% max for ${profile.label}`;
     }
+  } else if (isVolatilitySpike) {
+    // Filter D: Reject during extreme volatility spikes
+    rejectionReason = `Volatility spike: current candle body (${(volSpikeRatio).toFixed(1)}x ATR) exceeds 2.5x ATR — wait for pullback`;
   } else if (slPct > profile.maxSlPct) {
     rejectionReason = `SL too wide: ${(slPct * 100).toFixed(2)}% > ${(profile.maxSlPct * 100).toFixed(2)}% max for ${profile.label}`;
+  } else if (leverageExceeded) {
+    // Filter A: Reject if effective leverage exceeds 20x
+    rejectionReason = `Leverage too high: ${earlyLeverage.toFixed(1)}x > ${MAX_LEVERAGE}x cap — SL too tight for account size`;
   } else if (!moveFilterOk) {
     // Non-exempt assets: SL and TP1 must each be ≥1.12% from entry for net ~1% after fees
     const slShort  = slDistPct < MIN_MOVE_PCT;
@@ -1109,10 +1141,28 @@ export async function runAnalysis(allData, config = {}) {
     rejectionReason = `Min move filter: ${slShort ? `SL ${(slDistPct * 100).toFixed(2)}%` : ''}${slShort && tpShort ? ' & ' : ''}${tpShort ? `TP1 ${(tp1DistPct * 100).toFixed(2)}%` : ''} < 1.12% min for ${symbol.replace('USDT', '')} (net ~1% after fees)`;
   } else if (!rrrMeetsMin) {
     rejectionReason = `RRR too low: ${tp1Rrr.toFixed(2)} < ${effectiveMinRrr.toFixed(1)} minimum`;
+  } else if (!minConfluenceCountOk) {
+    // Filter B: Reject if too few confluence checks are met (by count)
+    rejectionReason = `Low confluence: only ${checksMetCount}/${checksTotalCount} checks met (${(checksMetPct * 100).toFixed(0)}% < 40% min)`;
   } else if (aiConfidence < profile.minAiConfidence && signalGrade.grade !== 'A+' && signalGrade.grade !== 'A') {
     rejectionReason = `AI Confidence too low: ${aiConfidence}% < ${profile.minAiConfidence}% min for ${profile.label} (Inst Grade: ${signalGrade.grade})`;
   } else {
     decision = 'TAKE_NOW';
+  }
+
+  // ── Filter C: News Caution Downgrade ──────────────────────────
+  // During NY Economic Release window (12:30-15:00 UTC), downgrade TAKE_NOW to WAIT
+  // unless Signal Grade is A+ or AI Confidence >= 75%.
+  let newsCaution = false;
+  let newsCautionReason = null;
+  if (newsStatus.caution) {
+    newsCaution = true;
+    newsCautionReason = newsStatus.reason || 'Economic release window active';
+    if (decision === 'TAKE_NOW' && signalGrade.grade !== 'A+' && aiConfidence < 75) {
+      decision = 'WAIT';
+      rejectionReason = `News Caution: ${newsCautionReason} — wait for post-event BOS confirmation`;
+      steps.push(`⚠️ News Caution Downgrade: TAKE_NOW → WAIT (${newsCautionReason})`);
+    }
   }
 
   steps.push(`→ ${decision} | AI: ${aiConfidence}% ${aiGrade}`);
@@ -1143,6 +1193,8 @@ export async function runAnalysis(allData, config = {}) {
     rangeProbability,
     rejectionReason:  decision === 'WAIT' ? null : rejectionReason,
     waitCondition:    decision === 'WAIT' ? rejectionReason : null,
+    newsCaution,
+    newsCautionReason,
     keyRisk: ema200Acting ? 'EMA200 Resistance / Support' : slPct > 0.012 ? 'Wide SL — size reduced automatically' : 'Market Volatility',
     invalidationLevel: slData ? slData.rawInvalidation.toFixed(ASSETS[symbol]?.decimals ?? 2) : 'N/A',
     analysisSteps:  steps,
