@@ -1043,20 +1043,11 @@ export async function runAnalysis(allData, config = {}) {
   // ── Final Score ────────────────────────────────────────────────
   const tp1Rrr      = tpData?.tps?.[0]?.rrr ?? 0;
 
-  // ── Min-Move & RRR Filters for non-exempt assets ─────────────
-  // BTC, ETH, XAU are exempt (high-value assets where sub-1% moves are meaningful).
-  // All other assets require SL and TP1 to be ≥1.12% from entry so that
-  // after exchange fees (~0.12%), the net P&L is at least ~1%.
+  // ── RRR Filters for non-exempt assets ────────────────────────
   const MIN_MOVE_EXEMPT = ['BTCUSDT', 'ETHUSDT', 'XAUUSDT'];
   const isExemptAsset   = MIN_MOVE_EXEMPT.includes(symbol);
-  const MIN_MOVE_PCT    = 0.0112; // 1.12%
   const ENFORCED_MIN_RRR = 3.0;   // 1:3 mandatory for non-exempt
 
-  const tp1Level     = tpData?.tps?.[0]?.level ?? 0;
-  const tp1DistPct   = tp1Level && entry ? Math.abs(tp1Level - entry) / entry : 0;
-  const slDistPct    = slPct; // already computed as Math.abs(entry - slData.value) / entry
-
-  const moveFilterOk = isExemptAsset || (slDistPct >= MIN_MOVE_PCT && tp1DistPct >= MIN_MOVE_PCT);
   const effectiveMinRrr = isExemptAsset ? (profile.minRrr || 3.0) : Math.max(profile.minRrr || 3.0, ENFORCED_MIN_RRR);
   const rrrMeetsMin = tp1Rrr >= effectiveMinRrr;
 
@@ -1134,11 +1125,6 @@ export async function runAnalysis(allData, config = {}) {
   } else if (leverageExceeded) {
     // Filter A: Reject if effective leverage exceeds 20x
     rejectionReason = `Leverage too high: ${earlyLeverage.toFixed(1)}x > ${MAX_LEVERAGE}x cap — SL too tight for account size`;
-  } else if (!moveFilterOk) {
-    // Non-exempt assets: SL and TP1 must each be ≥1.12% from entry for net ~1% after fees
-    const slShort  = slDistPct < MIN_MOVE_PCT;
-    const tpShort  = tp1DistPct < MIN_MOVE_PCT;
-    rejectionReason = `Min move filter: ${slShort ? `SL ${(slDistPct * 100).toFixed(2)}%` : ''}${slShort && tpShort ? ' & ' : ''}${tpShort ? `TP1 ${(tp1DistPct * 100).toFixed(2)}%` : ''} < 1.12% min for ${symbol.replace('USDT', '')} (net ~1% after fees)`;
   } else if (!rrrMeetsMin) {
     rejectionReason = `RRR too low: ${tp1Rrr.toFixed(2)} < ${effectiveMinRrr.toFixed(1)} minimum`;
   } else if (!minConfluenceCountOk) {
