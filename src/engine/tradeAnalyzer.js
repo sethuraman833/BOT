@@ -1149,38 +1149,138 @@ export async function runAnalysis(allData, config = {}) {
   steps.push(`→ ${decision} | AI: ${aiConfidence}% ${aiGrade}`);
   if (rejectionReason) steps.push(`Rejected: ${rejectionReason}`);
 
-  // ── Estimated Trade Duration Calculation ──────────────────────
+  // ── Smart Trade Duration Engine ────────────────────────────────
+  // Multi-factor model accounting for:
+  //   1. ATR-based candle velocity (base)
+  //   2. Volatility regime (expanding vs contracting)
+  //   3. Market structure quality (CHOCH / displacement)
+  //   4. Session type (kill zone vs normal vs off-hours)
+  //   5. Volume profile (POC confluence = faster fills)
+  //   6. Liquidity sweep presence (price already induced = faster)
+  //   7. Draw on Liquidity clarity (clear target = faster)
+  //   8. OTE entry quality (deep OTE = faster reaction)
+  //   9. RRR magnitude (higher RRR = longer hold)
+  //  10. Wyckoff phase alignment
+  // ────────────────────────────────────────────────────────────────
   const tfMinutesMap = { '5m': 5, '15m': 15, '1h': 60, '4h': 240, '1d': 1440 };
   const tfMins = tfMinutesMap[activeTimeframe] || 15;
   const tp1Price = tpData?.tps?.[0]?.level || (direction === 'long' ? entry * 1.01 : entry * 0.99);
   const distToTp1 = Math.abs(entry - tp1Price);
   const currentAtr = primaryATR || (entry * 0.005);
-  
-  // Typical directional movement fills ~0.65 ATR per candle towards target
-  const estCandlesToTp1 = currentAtr > 0 ? Math.ceil(distToTp1 / (currentAtr * 0.65)) : 3;
-  const minEstMins = Math.max(tfMins, Math.round(estCandlesToTp1 * tfMins * 0.6));
-  const maxEstMins = Math.max(tfMins * 2, Math.round(estCandlesToTp1 * tfMins * 1.4));
-  
+
+  // 1. Base: ATR velocity — how many candles to cover TP1 distance
+  //    Institutional moves fill ~0.7 ATR per candle directionally
+  const baseCandlesToTp1 = currentAtr > 0 ? Math.ceil(distToTp1 / (currentAtr * 0.7)) : 4;
+
+  // 2. Volatility Regime Multiplier
+  //    EXPANDING = fast momentum; CONTRACTING = slow build-up before pop
+  //    TRANSITIONING = moderate; EXTREME = erratic, slower reliable fill
+  const volMultiplier =
+    volRegime.regime === 'EXPANDING'      ? 0.65  // fast directional
+    : volRegime.regime === 'TRANSITIONING'  ? 0.85  // building
+    : volRegime.regime === 'CONTRACTING'    ? 1.25  // tight — takes longer for price to pop
+    : volRegime.regime === 'EXTREME'        ? 1.45  // erratic — harder to fill cleanly
+    : 1.0;
+
+  // 3. Structure Quality Multiplier (CHOCH + displacement strength)
+  //    Elite setup with confirmed displacement fills faster
+  const structQuality = chochQuality.quality === 'ELITE' ? 0.70
+    : chochQuality.quality === 'HIGH'   ? 0.82
+    : chochQuality.quality === 'MEDIUM' ? 1.00
+    : 1.20;  // LOW or no CHOCH quality = slower drift
+
+  // 4. Session Speed Multiplier
+  //    Kill zone = peak institutional, very fast fills
+  //    London-NY Overlap = optimal; Asian = slow drift
+  const sessionSpeed =
+    killZone.inKillZone                              ? 0.65  // peak institutional activity
+    : session.name.includes('London–NY')             ? 0.75  // optimal overlap
+    : session.name.includes('London Open')           ? 0.80  // strong London flow
+    : session.name.includes('NY Session')            ? 0.85  // NY flow
+    : session.name.includes('London Session')        ? 0.90  // standard
+    : session.name.includes('NY Close')              ? 1.30  // winding down, slow
+    : session.name.includes('Asian')                 ? 1.50  // low volume, drift
+    : 1.10;  // pre-market or unknown
+
+  // 5. Volume Profile bonus — if at POC, orders fill faster
+  const pocBonus = atPOC ? 0.88 : 1.0;
+
+  // 6. Liquidity Sweep bonus — price already swept inducement, clean path
+  const sweepBonus = allSweeps.length > 0 ? 0.90 : 1.05;
+
+  // 7. Draw on Liquidity clarity
+  const drawBonus = drawOnLiquidity?.primary ? 0.85 : 1.0;
+
+  // 8. OTE entry quality — deep OTE = spring-loaded, fills very fast
+  const oteBonus = inOTE ? 0.80 : 1.0;
+
+  // 9. RRR magnitude — higher RRR means TP1 is further, takes longer
+  const rrrFactor = tp1Rrr > 0 ? Math.max(0.8, Math.min(1.6, tp1Rrr / 3.0)) : 1.0;
+
+  // 10. Wyckoff phase — Markup / Markdown = fast; Accumulation = slow; Spring = very fast
+  const wyckoffSpeed =
+    wyckoffPhase?.phase === 'Markup'     ? 0.72
+    : wyckoffPhase?.phase === 'Markdown' ? 0.72
+    : wyckoffPhase?.phase === 'Spring'   ? 0.60  // spring is explosive
+    : wyckoffPhase?.phase === 'Accumulation' ? 1.35
+    : wyckoffPhase?.phase === 'Distribution' ? 1.35
+    : 1.0;
+
+  // 11. Inducement presence — stop hunt already done, move is clean
+  const inducementBonus = inducementData.hasInducement ? 0.82 : 1.0;
+
+  // Composite multiplier (product of all factors)
+  const compositeMultiplier =
+    volMultiplier * structQuality * sessionSpeed *
+    pocBonus * sweepBonus * drawBonus * oteBonus *
+    rrrFactor * wyckoffSpeed * inducementBonus;
+
+  // Final estimated candles, clamp to sensible range
+  const estCandles = Math.max(1, Math.round(baseCandlesToTp1 * compositeMultiplier));
+
+  // Convert to minutes with min/max spread
+  const avgEstMins  = Math.max(tfMins, estCandles * tfMins);
+  const minEstMins  = Math.max(tfMins,    Math.round(avgEstMins * 0.55));
+  const maxEstMins  = Math.max(tfMins * 2, Math.round(avgEstMins * 1.55));
+
+  // Format helper
   const formatDurationLabel = (mins) => {
-    if (mins < 60) return `${mins} mins`;
-    const hours = Math.round(mins / 60);
-    if (hours < 24) return `${hours} hr${hours > 1 ? 's' : ''}`;
-    const days = Math.round(hours / 24);
-    return `${days} day${days > 1 ? 's' : ''}`;
+    if (mins < 60) return `${Math.round(mins)} min${Math.round(mins) !== 1 ? 's' : ''}`;
+    const hours = mins / 60;
+    if (hours < 24) {
+      const h = Math.round(hours * 2) / 2; // round to nearest 0.5h
+      return h === Math.floor(h) ? `${h} hr${h !== 1 ? 's' : ''}` : `${h} hrs`;
+    }
+    const days = Math.round(hours / 24 * 10) / 10;
+    return `${days} day${days !== 1 ? 's' : ''}`;
   };
-  
-  const avgEstMins = Math.round((minEstMins + maxEstMins) / 2);
+
+  // Build the factor summary for UI display
+  const durationFactors = [];
+  if (volRegime.regime === 'EXPANDING')   durationFactors.push('⚡ Expanding volatility — fast move');
+  if (volRegime.regime === 'CONTRACTING') durationFactors.push('🌀 Contracting volatility — slow build');
+  if (volRegime.regime === 'EXTREME')     durationFactors.push('⚠️ Extreme volatility — erratic');
+  if (killZone.inKillZone)               durationFactors.push(`⚡ ${killZone.killZoneName} — peak activity`);
+  if (chochQuality.quality === 'ELITE')  durationFactors.push('💎 Elite CHOCH — fast fill');
+  if (inOTE)                             durationFactors.push('🎯 OTE Entry — spring-loaded reaction');
+  if (inducementData.hasInducement)      durationFactors.push('🪤 Inducement done — clean move');
+  if (atPOC)                             durationFactors.push('📊 At Volume POC — quick order fill');
+  if (allSweeps.length > 0)             durationFactors.push('💧 Liquidity swept — path clear');
+  if (drawOnLiquidity?.primary)         durationFactors.push(`🎯 Clear draw: ${drawOnLiquidity.primary}`);
+  if (wyckoffPhase?.phase === 'Spring') durationFactors.push('🚀 Wyckoff Spring — explosive');
+  if (session.name.includes('Asian'))   durationFactors.push('😴 Asian session — slow drift');
+  if (session.name.includes('NY Close')) durationFactors.push('🔔 NY Close — slowing down');
+
   const estimatedDuration = {
-    minMins: minEstMins,
-    maxMins: maxEstMins,
-    avgMins: avgEstMins,
+    minMins:        minEstMins,
+    maxMins:        maxEstMins,
+    avgMins:        Math.round(avgEstMins),
     formattedRange: `${formatDurationLabel(minEstMins)} – ${formatDurationLabel(maxEstMins)}`,
-    typicalLabel: avgEstMins < 60
-      ? `~${avgEstMins} mins`
-      : avgEstMins < 1440
-        ? `~${Math.round(avgEstMins / 60)} hour${Math.round(avgEstMins / 60) > 1 ? 's' : ''}`
-        : `~${(avgEstMins / 1440).toFixed(1)} days`,
-    maxCap: profile.timeCap || '4H',
+    typicalLabel:   formatDurationLabel(Math.round(avgEstMins)),
+    maxCap:         profile.timeCap || '4H',
+    factors:        durationFactors,
+    compositeScore: compositeMultiplier.toFixed(2),
+    basedOn: `${estCandles} candle${estCandles !== 1 ? 's' : ''} × ${tfMins}m (${activeTimeframe})`,
   };
 
   // ── Return ─────────────────────────────────────────────────────

@@ -319,21 +319,48 @@ function TradeDurationInsight({ duration, timeframe }) {
     '1d': 'Trend',
   };
 
+  // Speed interpretation from composite score
+  const speed = parseFloat(duration.compositeScore || '1');
+  const speedLabel = speed < 0.65 ? { text: 'Very Fast', color: '#00e5b4' }
+    : speed < 0.85 ? { text: 'Fast',      color: '#00d4ff' }
+    : speed < 1.10 ? { text: 'Moderate',  color: '#f7c948' }
+    : speed < 1.35 ? { text: 'Slow',      color: '#ff9f43' }
+    :               { text: 'Very Slow',  color: '#ff3f5e' };
+
   return (
     <div className="sidebar-section duration-insight-card">
       <div className="duration-header">
         <span className="duration-title">⏱ Est. Trade Duration</span>
         <span className="duration-tf-tag">{tfLabels[timeframe] || (timeframe || '').toUpperCase()}</span>
       </div>
+
       <div className="duration-main-display">
         <div className="duration-time-value mono">{duration.typicalLabel}</div>
         <div className="duration-sub-range">
-          Expected Range: <span className="mono">{duration.formattedRange}</span>
+          Range: <span className="mono">{duration.formattedRange}</span>
         </div>
       </div>
+
+      {/* Speed indicator */}
+      <div className="duration-speed-row">
+        <span className="duration-speed-label">Market Speed</span>
+        <span className="duration-speed-badge" style={{ color: speedLabel.color, borderColor: speedLabel.color + '40', background: speedLabel.color + '12' }}>
+          {speedLabel.text}
+        </span>
+      </div>
+
+      {/* Factor breakdown */}
+      {duration.factors && duration.factors.length > 0 && (
+        <div className="duration-factors">
+          {duration.factors.map((f, i) => (
+            <div key={i} className="duration-factor-item">{f}</div>
+          ))}
+        </div>
+      )}
+
       <div className="duration-footer-info">
-        <span className="duration-pill">Max Time Horizon: <strong>{duration.maxCap}</strong></span>
-        <span className="duration-note">Based on 14-ATR velocity & TP1 target distance</span>
+        <span className="duration-pill">Max Cap: <strong>{duration.maxCap}</strong></span>
+        <span className="duration-note">{duration.basedOn}</span>
       </div>
     </div>
   );
