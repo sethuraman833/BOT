@@ -1266,7 +1266,7 @@ export async function runAnalysis(allData, config = {}) {
   if (inducementData.hasInducement)      durationFactors.push('🪤 Inducement done — clean move');
   if (atPOC)                             durationFactors.push('📊 At Volume POC — quick order fill');
   if (allSweeps.length > 0)             durationFactors.push('💧 Liquidity swept — path clear');
-  if (drawOnLiquidity?.primary)         durationFactors.push(`🎯 Clear draw: ${drawOnLiquidity.primary}`);
+  if (drawOnLiquidity?.primary)         durationFactors.push(`🎯 Draw: ${drawOnLiquidity.primary.label || 'Target identified'} @ $${drawOnLiquidity.primary.level?.toFixed(2) || '—'}`);
   if (wyckoffPhase?.phase === 'Spring') durationFactors.push('🚀 Wyckoff Spring — explosive');
   if (session.name.includes('Asian'))   durationFactors.push('😴 Asian session — slow drift');
   if (session.name.includes('NY Close')) durationFactors.push('🔔 NY Close — slowing down');
