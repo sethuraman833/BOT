@@ -278,14 +278,13 @@ export async function runAnalysis(allData, config = {}) {
 
   const currentPrice = candlesPrimary[candlesPrimary.length - 1].close;
 
-  // ── Filter D: Volatility Spike Guard ────────────────────────
-  // If the current candle body exceeds 2.5x the 14-period ATR, the move may be
-  // exhausted — reject to avoid entering at the tip of explosive moves.
+  // ── Filter D: Extreme Volatility Spike Guard ──────────────────
+  // Only trigger on non-directional parabolic blow-off (>4.5x ATR) without displacement
   const primaryATR = calculateATR(candlesPrimary, 14);
   const lastCandle = candlesPrimary[candlesPrimary.length - 1];
   const lastCandleBody = Math.abs(lastCandle.close - lastCandle.open);
   const volSpikeRatio = primaryATR && primaryATR > 0 ? lastCandleBody / primaryATR : 0;
-  const isVolatilitySpike = volSpikeRatio > 2.5;
+  const isVolatilitySpike = volSpikeRatio > 4.5 && (!dispValidation || !dispValidation.valid);
 
   // ── Step 1: Daily Bias (EMA200 on 1D) ──────────────────────────
   const ema200_1d      = calculateEMA(candles1d.length > 20 ? candles1d : candlesForBias, 200);
@@ -628,7 +627,7 @@ export async function runAnalysis(allData, config = {}) {
   let posSize = 0;
   let nearestOB = null;
   let earlyLeverage = 0;
-  const MAX_LEVERAGE = 20;
+  const MAX_LEVERAGE = 75;
   let leverageExceeded = false;
 
   if (direction) {
@@ -1043,12 +1042,8 @@ export async function runAnalysis(allData, config = {}) {
   // ── Final Score ────────────────────────────────────────────────
   const tp1Rrr      = tpData?.tps?.[0]?.rrr ?? 0;
 
-  // ── RRR Filters for non-exempt assets ────────────────────────
-  const MIN_MOVE_EXEMPT = ['BTCUSDT', 'ETHUSDT', 'XAUUSDT'];
-  const isExemptAsset   = MIN_MOVE_EXEMPT.includes(symbol);
-  const ENFORCED_MIN_RRR = 3.0;   // 1:3 mandatory for non-exempt
-
-  const effectiveMinRrr = isExemptAsset ? (profile.minRrr || 3.0) : Math.max(profile.minRrr || 3.0, ENFORCED_MIN_RRR);
+  // ── RRR Filters ──────────────────────────────────────────────
+  const effectiveMinRrr = profile.minRrr || 2.0;
   const rrrMeetsMin = tp1Rrr >= effectiveMinRrr;
 
   // Full check list including RRR
@@ -1069,12 +1064,12 @@ export async function runAnalysis(allData, config = {}) {
                         : 'SKIP';
 
   // ── Filter B: Min Confluence Count Gate ─────────────────────
-  // Require at least 40% of checks to be met (by count, not weight).
-  // Prevents signals that rely on one or two heavy-weight checks alone.
+  // Require at least 25% of checks (or 6 checks) to be met.
+  // Bypass if signal grade is A/A+ or AI confidence is sufficient.
   const checksMetCount = preRrrChecks.filter(c => c.met).length;
   const checksTotalCount = preRrrChecks.length;
   const checksMetPct = checksTotalCount > 0 ? checksMetCount / checksTotalCount : 0;
-  const minConfluenceCountOk = checksMetPct >= 0.40;
+  const minConfluenceCountOk = checksMetPct >= 0.25 || checksMetCount >= 6;
 
   // ── Signal Grade (A+ / A / B / C / D) ─────────────────────────
   const inOTECheck = checks.find(c => c.label.includes('OTE Zone'));
@@ -1118,18 +1113,18 @@ export async function runAnalysis(allData, config = {}) {
       rejectionReason = `Price too far from entry zone: ${(entryDistPct * 100).toFixed(2)}% > ${(profile.maxEntryDist * 100).toFixed(2)}% max for ${profile.label}`;
     }
   } else if (isVolatilitySpike) {
-    // Filter D: Reject during extreme volatility spikes
-    rejectionReason = `Volatility spike: current candle body (${(volSpikeRatio).toFixed(1)}x ATR) exceeds 2.5x ATR — wait for pullback`;
+    // Filter D: Reject during extreme parabolic non-directional volatility spikes
+    rejectionReason = `Volatility spike: current candle body (${(volSpikeRatio).toFixed(1)}x ATR) exceeds 4.5x ATR — wait for pullback`;
   } else if (slPct > profile.maxSlPct) {
     rejectionReason = `SL too wide: ${(slPct * 100).toFixed(2)}% > ${(profile.maxSlPct * 100).toFixed(2)}% max for ${profile.label}`;
   } else if (leverageExceeded) {
-    // Filter A: Reject if effective leverage exceeds 20x
+    // Filter A: Reject if effective leverage exceeds 75x
     rejectionReason = `Leverage too high: ${earlyLeverage.toFixed(1)}x > ${MAX_LEVERAGE}x cap — SL too tight for account size`;
   } else if (!rrrMeetsMin) {
     rejectionReason = `RRR too low: ${tp1Rrr.toFixed(2)} < ${effectiveMinRrr.toFixed(1)} minimum`;
-  } else if (!minConfluenceCountOk) {
+  } else if (!minConfluenceCountOk && signalGrade.grade !== 'A+' && signalGrade.grade !== 'A') {
     // Filter B: Reject if too few confluence checks are met (by count)
-    rejectionReason = `Low confluence: only ${checksMetCount}/${checksTotalCount} checks met (${(checksMetPct * 100).toFixed(0)}% < 40% min)`;
+    rejectionReason = `Low confluence: only ${checksMetCount}/${checksTotalCount} checks met (${(checksMetPct * 100).toFixed(0)}% < 25% min)`;
   } else if (aiConfidence < profile.minAiConfidence && signalGrade.grade !== 'A+' && signalGrade.grade !== 'A') {
     rejectionReason = `AI Confidence too low: ${aiConfidence}% < ${profile.minAiConfidence}% min for ${profile.label} (Inst Grade: ${signalGrade.grade})`;
   } else {
@@ -1153,6 +1148,40 @@ export async function runAnalysis(allData, config = {}) {
 
   steps.push(`→ ${decision} | AI: ${aiConfidence}% ${aiGrade}`);
   if (rejectionReason) steps.push(`Rejected: ${rejectionReason}`);
+
+  // ── Estimated Trade Duration Calculation ──────────────────────
+  const tfMinutesMap = { '5m': 5, '15m': 15, '1h': 60, '4h': 240, '1d': 1440 };
+  const tfMins = tfMinutesMap[activeTimeframe] || 15;
+  const tp1Price = tpData?.tps?.[0]?.level || (direction === 'long' ? entry * 1.01 : entry * 0.99);
+  const distToTp1 = Math.abs(entry - tp1Price);
+  const currentAtr = primaryATR || (entry * 0.005);
+  
+  // Typical directional movement fills ~0.65 ATR per candle towards target
+  const estCandlesToTp1 = currentAtr > 0 ? Math.ceil(distToTp1 / (currentAtr * 0.65)) : 3;
+  const minEstMins = Math.max(tfMins, Math.round(estCandlesToTp1 * tfMins * 0.6));
+  const maxEstMins = Math.max(tfMins * 2, Math.round(estCandlesToTp1 * tfMins * 1.4));
+  
+  const formatDurationLabel = (mins) => {
+    if (mins < 60) return `${mins} mins`;
+    const hours = Math.round(mins / 60);
+    if (hours < 24) return `${hours} hr${hours > 1 ? 's' : ''}`;
+    const days = Math.round(hours / 24);
+    return `${days} day${days > 1 ? 's' : ''}`;
+  };
+  
+  const avgEstMins = Math.round((minEstMins + maxEstMins) / 2);
+  const estimatedDuration = {
+    minMins: minEstMins,
+    maxMins: maxEstMins,
+    avgMins: avgEstMins,
+    formattedRange: `${formatDurationLabel(minEstMins)} – ${formatDurationLabel(maxEstMins)}`,
+    typicalLabel: avgEstMins < 60
+      ? `~${avgEstMins} mins`
+      : avgEstMins < 1440
+        ? `~${Math.round(avgEstMins / 60)} hour${Math.round(avgEstMins / 60) > 1 ? 's' : ''}`
+        : `~${(avgEstMins / 1440).toFixed(1)} days`,
+    maxCap: profile.timeCap || '4H',
+  };
 
   // ── Return ─────────────────────────────────────────────────────
   return {
@@ -1185,6 +1214,7 @@ export async function runAnalysis(allData, config = {}) {
     invalidationLevel: slData ? slData.rawInvalidation.toFixed(ASSETS[symbol]?.decimals ?? 2) : 'N/A',
     analysisSteps:  steps,
     oteZone,
+    estimatedDuration,
     symbol,
     balance,
     timeCap:          profile.timeCap,

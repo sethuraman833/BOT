@@ -308,14 +308,36 @@ function CMEGapSection({ cmeGapData }) {
   );
 }
 
-// Colour per TF mode
-const MODE_COLORS = {
-  '5m':  '#00d4ff',
-  '15m': '#3b8ef0',
-  '1h':  '#f7c948',
-  '4h':  '#9d6fff',
-  '1d':  '#ff3f5e',
-};
+function TradeDurationInsight({ duration, timeframe }) {
+  if (!duration) return null;
+
+  const tfLabels = {
+    '5m': 'Scalp',
+    '15m': 'Intraday',
+    '1h': 'Swing',
+    '4h': 'Position',
+    '1d': 'Trend',
+  };
+
+  return (
+    <div className="sidebar-section duration-insight-card">
+      <div className="duration-header">
+        <span className="duration-title">⏱ Est. Trade Duration</span>
+        <span className="duration-tf-tag">{tfLabels[timeframe] || (timeframe || '').toUpperCase()}</span>
+      </div>
+      <div className="duration-main-display">
+        <div className="duration-time-value mono">{duration.typicalLabel}</div>
+        <div className="duration-sub-range">
+          Expected Range: <span className="mono">{duration.formattedRange}</span>
+        </div>
+      </div>
+      <div className="duration-footer-info">
+        <span className="duration-pill">Max Time Horizon: <strong>{duration.maxCap}</strong></span>
+        <span className="duration-note">Based on 14-ATR velocity & TP1 target distance</span>
+      </div>
+    </div>
+  );
+}
 
 export default function AnalysisSidebar() {
   const { analysis, isAnalyzing, timeframe } = useMarket();
@@ -395,8 +417,11 @@ export default function AnalysisSidebar() {
         {/* ── DECISION ──────────────────────────────────────── */}
         <DecisionBadge decision={analysis.decision} waitCondition={analysis.waitCondition} />
 
-        {/* ── TRADE BOX (Moved to top so user sees the A+ UI) ── */}
+        {/* ── TRADE BOX ──────────────────────────────────────── */}
         <TradeBox analysis={analysis} />
+
+        {/* ── ESTIMATED TRADE DURATION INSIGHT ────────────────── */}
+        <TradeDurationInsight duration={analysis.estimatedDuration} timeframe={analysis.primaryTimeframe} />
 
         {/* ── REJECTION REASON ──────────────────────────────── */}
         {analysis.rejectionReason && (
