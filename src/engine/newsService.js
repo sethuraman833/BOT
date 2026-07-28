@@ -40,7 +40,7 @@ export async function checkNewsVeto(symbol) {
     return {
       veto: false, // We don't hard veto without API proof, but we flag it
       caution: true,
-      reason: 'Standard NY Economic Release Window (12:30-15:00 UTC)',
+      reason: 'Standard NY Economic Release Window (6:00 PM - 8:30 PM IST)',
       impact: 'MEDIUM'
     };
   }

@@ -42,7 +42,7 @@ export function getCurrentSession(symbol = '') {
         name: 'Market Closed (Weekend)',
         status: 'closed',
         color: 'var(--accent-red)',
-        countdown: 'Opens Sunday 22:00 UTC',
+        countdown: 'Opens Mon 3:30 AM IST',
         isOverlap: false,
       };
     }

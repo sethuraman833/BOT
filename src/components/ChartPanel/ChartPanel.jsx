@@ -404,7 +404,7 @@ export default function ChartPanel() {
             <div className="ribbon-sec backtest">
               <span className="ribbon-label">BACKTEST POINT</span>
               <span className="ribbon-val mono text-yellow">
-                {backtestTime ? new Date(backtestTime * 1000).toLocaleString() : '—'}
+                {backtestTime ? new Date(backtestTime * 1000).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) + ' IST' : '—'}
               </span>
             </div>
           )}

@@ -56,9 +56,18 @@ export function formatRRR(value) {
   return `1:${value.toFixed(1)}`;
 }
 
+export function formatISTTime(date = new Date()) {
+  const d = date instanceof Date ? date : new Date(date);
+  const options = {
+    timeZone: 'Asia/Kolkata',
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  };
+  return `${d.toLocaleTimeString('en-IN', options)} IST`;
+}
+
 export function formatUTCTime(date = new Date()) {
-  const h = String(date.getUTCHours()).padStart(2, '0');
-  const m = String(date.getUTCMinutes()).padStart(2, '0');
-  const s = String(date.getUTCSeconds()).padStart(2, '0');
-  return `${h}:${m}:${s} UTC`;
+  return formatISTTime(date);
 }
