@@ -339,6 +339,15 @@ function TradeDurationInsight({ duration, timeframe }) {
   );
 }
 
+// Colour per TF mode
+const MODE_COLORS = {
+  '5m':  '#00d4ff',
+  '15m': '#3b8ef0',
+  '1h':  '#f7c948',
+  '4h':  '#9d6fff',
+  '1d':  '#ff3f5e',
+};
+
 export default function AnalysisSidebar() {
   const { analysis, isAnalyzing, timeframe } = useMarket();
 
