@@ -35,7 +35,8 @@ import {
 import { getCurrentSession, isSessionValid, getKillZone } from './sessionFilter.js';
 import { detectCMEGaps, analyzeCMEGaps } from './cmeGapAnalyzer.js';
 import { getFundingOISentiment } from './fundingRate.js';
-import { RISK_AMOUNT, ASSETS } from '../utils/constants.js';
+import { RISK_AMOUNT, ASSETS, CHALLENGE_CONFIG } from '../utils/constants.js';
+import { canTrade as challengeCanTrade, getChallengeStatus } from './challengeTracker.js';
 
 // ─── ATR-BASED MINIMUM SL DISTANCE ────────────────────────
 // Computes the minimum SL distance as a multiple of ATR,
@@ -120,7 +121,7 @@ const TF_PROFILES = {
     sessionAllowNyClose: true,
     isScalping:          true,
     timeCap:             '4H',
-    riskAmount:          5,     // Set back to $5 to align with uniform risk rules
+    riskAmount:          50,    // $50 risk per trade (funding challenge)
     minRrr:              2.0,   // Capped min RRR at 1:2 for scalps
     minShiftAge:         2,     // BOS/CHOCH must hold for 2 closed candles (10min) before counting
   },
@@ -141,7 +142,7 @@ const TF_PROFILES = {
     sessionAllowNyClose: false,
     isScalping:          false,
     timeCap:             '6H',
-    riskAmount:          5,
+    riskAmount:          50,
     minRrr:              2.5,   // Capped min RRR at 1:2.5 for intraday
     minShiftAge:         1,     // BOS/CHOCH confirmation (H6)
   },
@@ -162,7 +163,7 @@ const TF_PROFILES = {
     sessionAllowNyClose: false,
     isScalping:          false,
     timeCap:             '24H',
-    riskAmount:          5,
+    riskAmount:          50,
     minRrr:              3.0,
     minShiftAge:         1,     // BOS/CHOCH confirmation (H6)
   },
@@ -183,7 +184,7 @@ const TF_PROFILES = {
     sessionAllowNyClose: false,
     isScalping:          false,
     timeCap:             '48H',
-    riskAmount:          5,
+    riskAmount:          50,
     minRrr:              3.0,
     minShiftAge:         1,     // BOS/CHOCH confirmation (H6)
   },
@@ -204,7 +205,7 @@ const TF_PROFILES = {
     sessionAllowNyClose: false,
     isScalping:          false,
     timeCap:             '5D',
-    riskAmount:          5,
+    riskAmount:          50,
     minRrr:              3.0,
     minShiftAge:         1,     // BOS/CHOCH confirmation (H6)
   },
@@ -233,6 +234,23 @@ export async function runAnalysis(allData, config = {}) {
   
   let slSideInvalid = false; // H2 validation flag declared early
   let adjustedRiskAmount = riskAmount; // C5: hoisted to outer scope for return object
+
+  // ── Challenge Mode DD Guard ──────────────────────────────────
+  if (CHALLENGE_CONFIG.enabled) {
+    const tradeAllowed = challengeCanTrade();
+    if (!tradeAllowed.allowed) {
+      return {
+        decision: 'NO_TRADE',
+        rejectionReason: `🛡️ CHALLENGE GUARD: ${tradeAllowed.reason}`,
+        confluenceScore: { total: 0, max: 10, checks: [], tier: 'REJECT' },
+        analysisSteps:   [`🛡️ Challenge DD Guard: ${tradeAllowed.reason}`],
+        analysisMode:    profile.label,
+        primaryTimeframe: profile.primaryKey,
+        challengeStatus: getChallengeStatus(),
+      };
+    }
+    steps.push(`🏆 Challenge Mode: DD budget $${tradeAllowed.budget.toFixed(0)} remaining`);
+  }
 
   // ── Kill Zone detection ────────────────────────────────────────────
   const killZone = getKillZone();
@@ -651,83 +669,156 @@ export async function runAnalysis(allData, config = {}) {
       entry = nearestOB.entryBoundary;
     }
 
-    // Compute ATR-based minimum SL distance for this symbol+timeframe
+    // ── ATR & Wick Variance helpers (shared across SL logic) ──────
+    const slAtr = primaryATR; // already computed above (calculateATR on primary candles)
     const minDistance = computeMinSlDistance(candlesPrimary, entry, activeTimeframe, symbol);
+
+    // Average upper/lower wick size over last 20 candles — used as stop-hunt buffer
+    const wickSample = candlesPrimary.slice(-20);
+    const avgWickSize = wickSample.length > 0
+      ? wickSample.reduce((sum, c) => {
+          const upperWick = c.high - Math.max(c.open, c.close);
+          const lowerWick = Math.min(c.open, c.close) - c.low;
+          return sum + (direction === 'long' ? lowerWick : upperWick);
+        }, 0) / wickSample.length
+      : 0;
+
+    // ── Sweep recency window (TF-based) ──────────────────────────
+    // Only honour sweep wicks that are recent enough to be structurally relevant.
+    // 5m → 12 candles (1 hr), 15m → 8 candles (2 hrs), 1h → 5 candles (5 hrs),
+    // 4h → 4 candles (16 hrs), 1d → 3 candles (3 days)
+    const SWEEP_RECENCY_CANDLES = { '5m': 12, '15m': 8, '1h': 5, '4h': 4, '1d': 3 };
+    const maxSweepAge = SWEEP_RECENCY_CANDLES[activeTimeframe] ?? 8;
+    const totalPrimary = candlesPrimary.length;
+    const isRecentSweep = (s) => (totalPrimary - 1 - (s.candleIndex ?? 0)) <= maxSweepAge;
 
     // Find true structural swing points (confirmed swing highs/lows, not raw min/max)
     const primarySwings = findSwingPoints(candlesPrimary.slice(-50), profile.swingLookback);
     const nearestSwingLows  = primarySwings.filter(s => s.type === 'low'  && s.price < entry).sort((a, b) => b.price - a.price);
     const nearestSwingHighs = primarySwings.filter(s => s.type === 'high' && s.price > entry).sort((a, b) => a.price - b.price);
 
-    const trueSwingLow  = nearestSwingLows.length  > 0 ? nearestSwingLows[0].price  : entry - minDistance;
-    const trueSwingHigh = nearestSwingHighs.length > 0 ? nearestSwingHighs[0].price : entry + minDistance;
+    // ── HTF Structure Fallback ─────────────────────────────────
+    // If primary swing fails, look at structure TF for a better anchor.
+    const structureSwings = findSwingPoints(
+      candlesStructure.length > 20 ? candlesStructure.slice(-30) : candlesPrimary.slice(-50),
+      profile.swingLookback
+    );
+    const htfSwingLows  = structureSwings.filter(s => s.type === 'low'  && s.price < entry).sort((a, b) => b.price - a.price);
+    const htfSwingHighs = structureSwings.filter(s => s.type === 'high' && s.price > entry).sort((a, b) => a.price - b.price);
+
+    // Pick the tightest valid level — primary preferred, HTF as fallback
+    const bestSwingLow  = nearestSwingLows.length  > 0 ? nearestSwingLows[0].price
+                        : htfSwingLows.length       > 0 ? htfSwingLows[0].price
+                        : entry - minDistance;
+    const bestSwingHigh = nearestSwingHighs.length > 0 ? nearestSwingHighs[0].price
+                        : htfSwingHighs.length      > 0 ? htfSwingHighs[0].price
+                        : entry + minDistance;
+
+    // ── Asian Session SL Widening ────────────────────────────────
+    // London Open expansions frequently blow through Asian session structural
+    // levels. Widen the minimum distance by 1.35× when trading in Asian hours.
+    const isAsianSession = session.name?.toLowerCase().includes('asian');
+    const sessionSlMult  = isAsianSession ? 1.35 : 1.0;
+    const effectiveMinDistance = minDistance * sessionSlMult;
+    if (isAsianSession) steps.push(`🌏 Asian Session: SL minimum widened ×1.35 for London Open expansion`);
 
     let inv;
     if (direction === 'long') {
       // SL anchor priority for LONG:
       // 1) Demand OB lowerBound — the structural floor the OB is built on
-      // 2) Most-recent bullish sweep wick low — the actual extreme price swept below
-      // 3) Nearest true swing low — last resort fallback
+      // 2) Most-recent RECENT bullish sweep wick low (time-filtered)
+      // 3) Best swing low (primary → HTF fallback)
       if (nearestOB && nearestOB.lowerBound < entry) {
         inv = nearestOB.lowerBound;
-        // If the most recent sweep went deeper than the OB floor, honour that wick
+        // Override with recent sweep wick only if it swept deeper than OB floor
         const recentBullSweeps = sweepsPrimary
-          .filter(s => (s.direction === 'long' || s.type === 'bullish') && s.wickExtreme !== undefined && s.wickExtreme < entry)
+          .filter(s => (s.direction === 'long' || s.type === 'bullish') && s.wickExtreme !== undefined && s.wickExtreme < entry && isRecentSweep(s))
           .sort((a, b) => b.candleIndex - a.candleIndex);
         if (recentBullSweeps.length > 0 && recentBullSweeps[0].wickExtreme < inv) {
           inv = recentBullSweeps[0].wickExtreme;
+          steps.push(`🪤 SL anchored to recent sweep wick low @ $${inv.toFixed(ASSETS[symbol]?.decimals ?? 2)} (within ${maxSweepAge} candles)`);
         }
       } else {
-        // No OB: anchor to the most recent sweep wick low, else swing low
+        // No OB: anchor to most recent (time-filtered) sweep wick low, then HTF swing
         const recentBullSweeps = [
-          ...sweepsPrimary.filter(s => (s.direction === 'long' || s.type === 'bullish') && s.wickExtreme !== undefined && s.wickExtreme < entry),
-          ...sweepsStructure.filter(s => (s.direction === 'long' || s.type === 'bullish') && s.wickExtreme !== undefined && s.wickExtreme < entry),
+          ...sweepsPrimary.filter(s => (s.direction === 'long' || s.type === 'bullish') && s.wickExtreme !== undefined && s.wickExtreme < entry && isRecentSweep(s)),
+          ...sweepsStructure.filter(s => (s.direction === 'long' || s.type === 'bullish') && s.wickExtreme !== undefined && s.wickExtreme < entry && isRecentSweep(s)),
         ].sort((a, b) => b.candleIndex - a.candleIndex);
-        inv = recentBullSweeps.length > 0 ? recentBullSweeps[0].wickExtreme : trueSwingLow;
+        if (recentBullSweeps.length > 0) {
+          inv = recentBullSweeps[0].wickExtreme;
+          steps.push(`🪤 SL anchored to recent sweep wick low @ $${inv.toFixed(ASSETS[symbol]?.decimals ?? 2)}`);
+        } else {
+          inv = bestSwingLow;
+          const anchor = nearestSwingLows.length > 0 ? 'Primary' : 'HTF';
+          steps.push(`📌 SL anchored to ${anchor} swing low @ $${inv.toFixed(ASSETS[symbol]?.decimals ?? 2)}`);
+        }
       }
 
-      // Safety guard: if for some reason inv is still not below entry, fall back to trueSwingLow
-      if (inv >= entry) {
-        inv = trueSwingLow;
-      }
-      // Enforce minimum distance
-      if (entry - inv < minDistance) {
-        inv = entry - minDistance;
-      }
+      // Safety guard: SL must be below entry
+      if (inv >= entry) inv = bestSwingLow;
+      // Enforce session-aware minimum distance
+      if (entry - inv < effectiveMinDistance) inv = entry - effectiveMinDistance;
     } else {
       // SL anchor priority for SHORT:
-      // 1) Supply OB upperBound — the structural ceiling the OB is built on
-      // 2) Most-recent bearish sweep wick high — the actual extreme price swept above
-      // 3) Nearest true swing high — last resort fallback
+      // 1) Supply OB upperBound — structural ceiling
+      // 2) Most-recent RECENT bearish sweep wick high (time-filtered)
+      // 3) Best swing high (primary → HTF fallback)
       if (nearestOB && nearestOB.upperBound > entry) {
         inv = nearestOB.upperBound;
-        // If the most recent sweep went higher than the OB ceiling, honour that wick
         const recentBearSweeps = sweepsPrimary
-          .filter(s => (s.direction === 'short' || s.type === 'bearish') && s.wickExtreme !== undefined && s.wickExtreme > entry)
+          .filter(s => (s.direction === 'short' || s.type === 'bearish') && s.wickExtreme !== undefined && s.wickExtreme > entry && isRecentSweep(s))
           .sort((a, b) => b.candleIndex - a.candleIndex);
         if (recentBearSweeps.length > 0 && recentBearSweeps[0].wickExtreme > inv) {
           inv = recentBearSweeps[0].wickExtreme;
+          steps.push(`🪤 SL anchored to recent sweep wick high @ $${inv.toFixed(ASSETS[symbol]?.decimals ?? 2)} (within ${maxSweepAge} candles)`);
         }
       } else {
-        // No OB: anchor to the most recent sweep wick high, else swing high
         const recentBearSweeps = [
-          ...sweepsPrimary.filter(s => (s.direction === 'short' || s.type === 'bearish') && s.wickExtreme !== undefined && s.wickExtreme > entry),
-          ...sweepsStructure.filter(s => (s.direction === 'short' || s.type === 'bearish') && s.wickExtreme !== undefined && s.wickExtreme > entry),
+          ...sweepsPrimary.filter(s => (s.direction === 'short' || s.type === 'bearish') && s.wickExtreme !== undefined && s.wickExtreme > entry && isRecentSweep(s)),
+          ...sweepsStructure.filter(s => (s.direction === 'short' || s.type === 'bearish') && s.wickExtreme !== undefined && s.wickExtreme > entry && isRecentSweep(s)),
         ].sort((a, b) => b.candleIndex - a.candleIndex);
-        inv = recentBearSweeps.length > 0 ? recentBearSweeps[0].wickExtreme : trueSwingHigh;
+        if (recentBearSweeps.length > 0) {
+          inv = recentBearSweeps[0].wickExtreme;
+          steps.push(`🪤 SL anchored to recent sweep wick high @ $${inv.toFixed(ASSETS[symbol]?.decimals ?? 2)}`);
+        } else {
+          inv = bestSwingHigh;
+          const anchor = nearestSwingHighs.length > 0 ? 'Primary' : 'HTF';
+          steps.push(`📌 SL anchored to ${anchor} swing high @ $${inv.toFixed(ASSETS[symbol]?.decimals ?? 2)}`);
+        }
       }
 
-      // Safety guard: if for some reason inv is still not above entry, fall back to trueSwingHigh
-      if (inv <= entry) {
-        inv = trueSwingHigh;
-      }
-      // Enforce minimum distance
-      if (inv - entry < minDistance) {
-        inv = entry + minDistance;
-      }
+      // Safety guard: SL must be above entry
+      if (inv <= entry) inv = bestSwingHigh;
+      // Enforce session-aware minimum distance
+      if (inv - entry < effectiveMinDistance) inv = entry + effectiveMinDistance;
     }
 
-      slData = calculateSmartSL(inv, direction, allFVGs, symbol, fibData, volumeProfile); // pass symbol for decimals (M11)
+    // ── Thesis Invalidation Cross-Check ─────────────────────────
+    // If the BOS/CHOCH that generated the trade signal has since been broken
+    // by a *closed* candle in the opposite direction, the setup is invalid.
+    // This is the true structural SL — if triggered, mark slSideInvalid.
+    const thesisBroken = (() => {
+      if (!lastPrimaryShift) return false;
+      const triggerIdx   = lastPrimaryShift.candleIndex;
+      const recentClosed = candlesPrimary.slice(triggerIdx + 1); // candles AFTER the shift
+      if (recentClosed.length === 0) return false;
+      const shiftLevel = lastPrimaryShift.price ?? lastPrimaryShift.level;
+      if (!shiftLevel) return false;
+      if (direction === 'long') {
+        // Thesis broken if a full candle closed BELOW the BOS level after it formed
+        return recentClosed.some(c => c.close < shiftLevel);
+      } else {
+        // Thesis broken if a full candle closed ABOVE the BOS level after it formed
+        return recentClosed.some(c => c.close > shiftLevel);
+      }
+    })();
+    if (thesisBroken) {
+      slSideInvalid = true;
+      steps.push(`⚠️ THESIS INVALIDATED: BOS/CHOCH level closed through — structural edge lost`);
+    }
+
+    // Pass ATR and avgWickSize to calculateSmartSL for improved capping
+    slData = calculateSmartSL(inv, direction, allFVGs, symbol, fibData, volumeProfile, slAtr, avgWickSize);
     
     // Stop Loss side validation (H2)
     if (slData) {
@@ -1039,6 +1130,47 @@ export async function runAnalysis(allData, config = {}) {
     steps.push(`TP source: ${tpData.tps.map(t => t.reason).join(' → ')}`);
   }
 
+  // ── Trailing TP Calculation (Bybit-Compatible) ──────────────────
+  // Activation Price: 75% of the distance from entry to TP1 — trailing
+  // only activates after a meaningful move to avoid premature exits.
+  // Trailing Amount: 1.5× ATR — rides momentum but exits on genuine reversal.
+  // Callback Rate: trailing amount as % of activation price (for Bybit UI).
+  let trailingTP = null;
+  if (direction && tpData?.tps?.[0] && slData && primaryATR && primaryATR > 0) {
+    const tp1Level    = tpData.tps[0].level;
+    const entryToTp1  = Math.abs(tp1Level - entry);
+    const isLong      = direction === 'long';
+    const priceDecimals = ASSETS[symbol]?.decimals ?? 2;
+
+    // Activation at 75% of the way to TP1
+    const activationPrice = isLong
+      ? entry + entryToTp1 * 0.75
+      : entry - entryToTp1 * 0.75;
+
+    // Trailing amount = 1.5× ATR (volatility-calibrated callback)
+    const trailingAmount = primaryATR * 1.5;
+
+    // Callback rate as percentage (what Bybit uses)
+    const callbackRate = (trailingAmount / activationPrice) * 100;
+
+    // Minimum profit if trailing triggers at activation = activation - trailing - entry
+    const minProfitIfTrailed = isLong
+      ? (activationPrice - trailingAmount) - entry
+      : entry - (activationPrice + trailingAmount);
+    const minProfitDollar = Math.max(0, minProfitIfTrailed * posSize);
+
+    trailingTP = {
+      activationPrice:  parseFloat(activationPrice.toFixed(priceDecimals)),
+      trailingAmount:   parseFloat(trailingAmount.toFixed(priceDecimals)),
+      callbackRate:     parseFloat(callbackRate.toFixed(2)),
+      tp1Level:         tp1Level,
+      minProfitIfTrailed: parseFloat(minProfitDollar.toFixed(2)),
+      explanation:      `Trail activates at ${((entryToTp1 * 0.75 / entry) * 100).toFixed(2)}% move (75% of TP1). Callback: ${callbackRate.toFixed(2)}% (1.5× ATR).`,
+    };
+
+    steps.push(`📈 Trailing TP: Activate @ $${trailingTP.activationPrice.toFixed(priceDecimals)} | Trail: $${trailingTP.trailingAmount.toFixed(priceDecimals)} (${trailingTP.callbackRate}%) | Min Profit: $${trailingTP.minProfitIfTrailed}`);
+  }
+
   // ── Final Score ────────────────────────────────────────────────
   const tp1Rrr      = tpData?.tps?.[0]?.rrr ?? 0;
 
@@ -1290,6 +1422,7 @@ export async function runAnalysis(allData, config = {}) {
     entry,
     stopLoss:     slData,
     tpDetails:    tpData?.tps || [],
+    trailingTP,
     positionSize: (direction && slData && !slSideInvalid) ? posSize : 0, // Reuse calculated posSize (L1)
     projectedLoss: (direction && slData && !slSideInvalid)
       ? (Math.abs(entry - slData.value) * posSize).toFixed(2)

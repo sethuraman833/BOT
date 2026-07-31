@@ -1,5 +1,6 @@
 import { useMarket } from '../../context/MarketContext.jsx';
 import TradeBox from '../TradeBox/TradeBox.jsx';
+import ChallengeDashboard from '../ChallengeDashboard/ChallengeDashboard.jsx';
 import { useState } from 'react';
 import './AnalysisSidebar.css';
 
@@ -411,6 +412,9 @@ export default function AnalysisSidebar() {
     <aside className="analysis-sidebar">
       <div className="sidebar-scroll fade-in stagger-in">
 
+        {/* ── FUNDING CHALLENGE DASHBOARD ────────────────── */}
+        <ChallengeDashboard />
+
         {/* ── ANALYSIS MODE HEADER ─────────────────────────── */}
         <div className="analysis-mode-header">
           <span
@@ -437,7 +441,7 @@ export default function AnalysisSidebar() {
             <span className="qs-val mono text-blue">{analysis.entry?.toLocaleString() || '—'}</span>
           </div>
           <div className="qs-item">
-            <span className="qs-label">SL (-$5)</span>
+            <span className="qs-label">SL (-$50)</span>
             <span className="qs-val mono text-red">{analysis.stopLoss?.value?.toLocaleString() || '—'}</span>
           </div>
           <div className="qs-item">

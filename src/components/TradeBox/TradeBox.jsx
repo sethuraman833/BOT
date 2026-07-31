@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { formatPrice, formatSize } from '../../utils/formatters.js';
+import { ASSETS } from '../../utils/constants.js';
 import './TradeBox.css';
 
 function CopyBtn({ value }) {
@@ -294,6 +295,49 @@ export default function TradeBox({ analysis }) {
           </div>
         );
       })}
+
+      {/* ── Trailing TP (Bybit) ──────────────────────────────── */}
+      {analysis.trailingTP && (
+        <div className="trailing-tp-section">
+          <div className="trailing-tp-header">
+            <span className="trailing-tp-icon">📈</span>
+            <span className="trailing-tp-title">TRAILING TP</span>
+            <span className="trailing-tp-subtitle">Bybit Perp Settings</span>
+          </div>
+          <div className="trailing-tp-grid">
+            <div className="trailing-tp-item">
+              <span className="ttp-label">Activation Price</span>
+              <span className="ttp-value mono">
+                {formatPrice(analysis.trailingTP.activationPrice, symbol)}
+                <CopyBtn value={analysis.trailingTP.activationPrice} />
+              </span>
+            </div>
+            <div className="trailing-tp-item">
+              <span className="ttp-label">Trail Amount</span>
+              <span className="ttp-value mono">
+                ${analysis.trailingTP.trailingAmount?.toFixed(ASSETS[symbol]?.decimals ?? 2)}
+                <CopyBtn value={analysis.trailingTP.trailingAmount} />
+              </span>
+            </div>
+            <div className="trailing-tp-item">
+              <span className="ttp-label">Callback Rate</span>
+              <span className="ttp-value mono">
+                {analysis.trailingTP.callbackRate}%
+                <CopyBtn value={analysis.trailingTP.callbackRate} />
+              </span>
+            </div>
+            <div className="trailing-tp-item">
+              <span className="ttp-label">Min Locked Profit</span>
+              <span className="ttp-value mono text-green">
+                +${analysis.trailingTP.minProfitIfTrailed}
+              </span>
+            </div>
+          </div>
+          <div className="trailing-tp-explainer">
+            {analysis.trailingTP.explanation}
+          </div>
+        </div>
+      )}
 
       <div className="trade-divider" />
 

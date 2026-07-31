@@ -78,86 +78,118 @@ function isDuplicate(level, existingTPs, risk) {
 }
 
 /**
- * Calculate smart stop loss with 3-layer defense using Risk scaling (M10: risk-scaled buffer).
+ * Calculate smart stop loss — v12 Institutional-Grade 4-Layer Defense.
+ *
+ * Improvements over v11:
+ *  1. ATR-capped FVG displacement (replaces fragile 1.5× distance math)
+ *  2. Wick-Variance Stop-Hunt Buffer (caller passes avgWickSize)
+ *  3. All adjustment reasons surfaced in the return object
+ *
+ * @param {number}  invalidationLevel  - Raw structural level (OB floor / swing / sweep wick)
+ * @param {string}  direction          - 'long' | 'short'
+ * @param {Array}   fvgs               - Array of FVG objects from smcDetector
+ * @param {string}  symbol             - Asset symbol (for decimals / buffers)
+ * @param {object}  [fibData]          - Fibonacci data for Golden Pocket defense
+ * @param {object}  [volumeProfile]    - Volume Profile object for VA Shield
+ * @param {number}  [atr]              - 14-period ATR for capping FVG displacement
+ * @param {number}  [avgWickSize]      - Average wick size for stop-hunt buffer
  */
-export function calculateSmartSL(invalidationLevel, direction, fvgs, symbol, fibData = null, volumeProfile = null) {
+export function calculateSmartSL(
+  invalidationLevel, direction, fvgs, symbol,
+  fibData = null, volumeProfile = null,
+  atr = null, avgWickSize = 0
+) {
   const layer1 = invalidationLevel;
-  
-  // Scale buffer based on asset decimal precision or standard risk scale
-  let bufferPct = 0.0025; // default 0.25%
+  const priceDecimals = (symbol && ASSETS[symbol]) ? ASSETS[symbol].decimals : 4;
+
+  // ── Layer 2: Liquidity Buffer ──────────────────────────────────
+  // Tight for major precision assets (BTC/ETH/XAU), wider for alts
+  let bufferPct = 0.0025; // default 0.25% for alts
   if (symbol && ASSETS[symbol]) {
     const decimals = ASSETS[symbol].decimals;
-    if (decimals === 2) bufferPct = 0.0015; // tighter for BTC/ETH/XAU
+    if (decimals === 2) bufferPct = 0.0015; // 0.15% for BTC/ETH/XAU
   }
-  
-  // Layer 2: buffer above/below Layer 1
+
   const layer2 = direction === 'long'
     ? layer1 * (1 - bufferPct)
     : layer1 * (1 + bufferPct);
 
-  // Layer 3: Imbalance Void Check — pick FVG with best avoidance
-  let layer3 = layer2;
+  // ── Layer 3: Wick-Variance Stop-Hunt Buffer ────────────────────
+  // Adds 50% of the average wick size beyond Layer 2 to absorb
+  // typical market-maker spike beyond structure before true reversal.
+  const wickBuffer = avgWickSize > 0 ? avgWickSize * 0.5 : 0;
+  let layer3 = direction === 'long'
+    ? layer2 - wickBuffer
+    : layer2 + wickBuffer;
+
+  // ── Layer 4: FVG Imbalance Avoidance ─────────────────────────
+  // Push SL outside any FVG that straddles Layer 3 so the fill
+  // doesn't clip the stop. Capped at 3× ATR from entry to prevent
+  // runaway SL when FVGs are far away.
+  const maxFvgExtension = atr ? atr * 3 : Math.abs(layer1 - layer3) * 2;
+  let fvgReason = null;
+
   if (fvgs && fvgs.length > 0) {
     if (direction === 'long') {
-      const nearbyFvgs = fvgs.filter(f => f.type === 'bullish' && f.upper > layer2 && f.lower < layer2);
+      const nearbyFvgs = fvgs.filter(f =>
+        f.type === 'bullish' && f.upper > layer3 && f.lower < layer3
+      );
       if (nearbyFvgs.length > 0) {
-        // Best avoidance for longs = lowest f.lower (furthest push down)
         const bestFvg = nearbyFvgs.reduce((best, f) => f.lower < best.lower ? f : best);
-        layer3 = bestFvg.lower;
+        const candidate = bestFvg.lower;
+        // Only accept if within ATR cap
+        if (layer2 - candidate <= maxFvgExtension) {
+          layer3 = candidate;
+          fvgReason = `FVG Void avoided (SL below FVG @ $${bestFvg.lower.toFixed(priceDecimals)})`;
+        }
       }
     } else {
-      const nearbyFvgs = fvgs.filter(f => f.type === 'bearish' && f.lower < layer2 && f.upper > layer2);
+      const nearbyFvgs = fvgs.filter(f =>
+        f.type === 'bearish' && f.lower < layer3 && f.upper > layer3
+      );
       if (nearbyFvgs.length > 0) {
-        // Best avoidance for shorts = highest f.upper (furthest push up)
         const bestFvg = nearbyFvgs.reduce((best, f) => f.upper > best.upper ? f : best);
-        layer3 = bestFvg.upper;
+        const candidate = bestFvg.upper;
+        if (candidate - layer2 <= maxFvgExtension) {
+          layer3 = candidate;
+          fvgReason = `FVG Void avoided (SL above FVG @ $${bestFvg.upper.toFixed(priceDecimals)})`;
+        }
       }
     }
   }
 
-  // Cap: FVG-adjusted SL cannot be more than 1.5x the original SL distance from entry
-  const maxDisplacement = Math.abs(invalidationLevel - layer2) * 1.5;
-  if (direction === 'long' && layer2 - layer3 > maxDisplacement) {
-    layer3 = layer2 - maxDisplacement;
-  } else if (direction !== 'long' && layer3 - layer2 > maxDisplacement) {
-    layer3 = layer2 + maxDisplacement;
-  }
-
-  // ── AI Module Anchoring (Golden Pocket / Volume Profile) ──
-  let aiBufferReason = null;
+  // ── AI Anchoring (Volume Profile / Fibonacci) ────────────────
+  let aiBufferReason = fvgReason;
 
   if (direction === 'long') {
-    // Volume Shield
     if (volumeProfile && layer3 < volumeProfile.valueAreaLow && layer2 >= volumeProfile.valueAreaLow) {
       layer3 = volumeProfile.valueAreaLow * 0.9985;
-      aiBufferReason = `Volume Shield (SL outside VA Low: $${volumeProfile.valueAreaLow.toFixed(2)})`;
+      aiBufferReason = `Volume Shield — SL anchored outside VA Low ($${volumeProfile.valueAreaLow.toFixed(2)})`;
     }
-    // Golden Pocket Defense
     if (fibData && fibData.goldenPocket && layer3 < fibData.levels['0.786'] && layer2 >= fibData.goldenPocket.low) {
       layer3 = fibData.levels['0.786'] * 0.9985;
-      aiBufferReason = `Fibonacci Defense (SL outside 0.786 level: $${fibData.levels['0.786'].toFixed(2)})`;
+      aiBufferReason = `Fib Defense — SL anchored outside 0.786 ($${fibData.levels['0.786'].toFixed(2)})`;
     }
   } else {
-    // Volume Shield
     if (volumeProfile && layer3 > volumeProfile.valueAreaHigh && layer2 <= volumeProfile.valueAreaHigh) {
       layer3 = volumeProfile.valueAreaHigh * 1.0015;
-      aiBufferReason = `Volume Shield (SL outside VA High: $${volumeProfile.valueAreaHigh.toFixed(2)})`;
+      aiBufferReason = `Volume Shield — SL anchored outside VA High ($${volumeProfile.valueAreaHigh.toFixed(2)})`;
     }
-    // Golden Pocket Defense
     if (fibData && fibData.goldenPocket && layer3 > fibData.levels['0.786'] && layer2 <= fibData.goldenPocket.high) {
       layer3 = fibData.levels['0.786'] * 1.0015;
-      aiBufferReason = `Fibonacci Defense (SL outside 0.786 level: $${fibData.levels['0.786'].toFixed(2)})`;
+      aiBufferReason = `Fib Defense — SL anchored outside 0.786 ($${fibData.levels['0.786'].toFixed(2)})`;
     }
   }
 
-  const priceDecimals = (symbol && ASSETS[symbol]) ? ASSETS[symbol].decimals : 4;
   return {
     value: parseFloat(layer3.toFixed(priceDecimals)),
     rawInvalidation: invalidationLevel,
-    buffer: aiBufferReason || `±${(bufferPct * 100).toFixed(2)}% liquidity buffer`,
+    buffer: aiBufferReason || `±${(bufferPct * 100).toFixed(2)}% liquidity buffer${wickBuffer > 0 ? ` + wick-hunt buffer $${wickBuffer.toFixed(priceDecimals)}` : ''}`,
     layer1,
     layer2,
     layer3,
+    wickBuffer,
+    fvgReason,
   };
 }
 

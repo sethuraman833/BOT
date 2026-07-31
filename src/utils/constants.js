@@ -29,6 +29,17 @@ export const DEFAULT_TIMEFRAME = '15m';
 export const BINANCE_REST = 'https://fapi.binance.com/fapi/v1';
 export const BINANCE_WSS  = 'wss://fstream.binance.com/stream';
 
-export const RISK_AMOUNT  = 5;    // $5 max risk per trade
+export const RISK_AMOUNT  = 50;   // $50 max risk per trade (funding challenge)
 export const CANDLE_LIMIT = 1500; // Binance Futures max per request (was 500)
 
+// ── Funding Challenge Configuration ──────────────────────────────
+export const CHALLENGE_CONFIG = {
+  enabled:          true,       // Toggle challenge mode on/off
+  accountBalance:   10000,      // $10,000 account
+  profitTarget:     1000,       // $1,000 profit target
+  dailyDDLimit:     400,        // Max daily drawdown allowed
+  maxOverallLoss:   600,        // Lifetime max loss cap
+  riskPerTrade:     50,         // $50 per trade
+  ddBudgetPct:      0.50,       // Stop trading at 50% of daily DD limit = -$200
+  maxConsecLosses:  4,          // Hard stop after 4 consecutive losses (-$200)
+};
