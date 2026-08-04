@@ -485,3 +485,53 @@
   .quick-stats-bar { grid-template-columns: 1fr 1fr; }
   .qs-item { border-bottom: 1px solid rgba(255,255,255,0.05); }
 }
+
+/* ── CME All Filled State ──────────────────────────────────── */
+.cme-all-filled {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  margin: 6px 0;
+  background: rgba(0, 229, 180, 0.06);
+  border: 1px solid rgba(0, 229, 180, 0.15);
+  border-radius: 8px;
+  font-size: 0.75rem;
+  color: var(--accent-green);
+  font-weight: 600;
+}
+.cme-filled-icon { font-size: 14px; }
+
+/* ── CME Stats Row ─────────────────────────────────────────── */
+.cme-stats-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.cme-stat {
+  flex: 1;
+  min-width: 48px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px 4px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 8px;
+  gap: 2px;
+}
+.cme-stat-val {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.cme-stat-val.text-green { color: var(--accent-green); }
+.cme-stat-lbl {
+  font-size: 0.6rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  text-align: center;
+}

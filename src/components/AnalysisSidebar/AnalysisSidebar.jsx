@@ -165,7 +165,7 @@ function AIOpinion({ aiAnalysis, staggerIndex }) {
 }
 
 function CMEGapSection({ cmeGapData, staggerIndex }) {
-  if (!cmeGapData || (!cmeGapData.hasUnfilledGaps && (!cmeGapData.filledGaps || cmeGapData.filledGaps.length === 0))) return null;
+  if (!cmeGapData) return null;
 
   const tierColor = (tier) => {
     if (tier === 'VERY_HIGH') return 'var(--accent-green)';
@@ -174,47 +174,76 @@ function CMEGapSection({ cmeGapData, staggerIndex }) {
     return 'var(--accent-red)';
   };
 
+  const stats = cmeGapData.stats || {};
+  const allFilled = !cmeGapData.hasUnfilledGaps;
+
   return (
     <div className="sidebar-section animate-fade-in-up glass-card" style={{ animationDelay: `${staggerIndex * 60}ms` }}>
       <div className="section-header gradient-header">📊 CME Gap Analysis</div>
-      <div className="cme-timeline">
-        {cmeGapData.gapFillBias && (
-          <div className="cme-bias-pill" style={{
-            background: cmeGapData.gapFillBias === 'bullish' ? 'rgba(0,212,100,0.12)' : 'rgba(255,63,94,0.12)',
-            color: cmeGapData.gapFillBias === 'bullish' ? 'var(--accent-green)' : 'var(--accent-red)',
-            border: `1px solid ${cmeGapData.gapFillBias === 'bullish' ? 'var(--accent-green)' : 'var(--accent-red)'}30`,
-          }}>
-            Gap Fill Bias: {cmeGapData.gapFillBias === 'bullish' ? '↑ BULLISH' : '↓ BEARISH'}
-          </div>
-        )}
 
-        {cmeGapData.unfilledGaps && cmeGapData.unfilledGaps.length > 0 && (
-          <div className="cme-gaps-list">
-            {cmeGapData.unfilledGaps.map((g, i) => (
-              <div className="cme-gap-compact-card" key={i}>
-                <div className="cme-timeline-node" style={{ background: g.direction === 'up' ? 'var(--accent-green)' : 'var(--accent-red)' }}></div>
-                <div className="cme-gap-compact-content">
-                  <div className="cme-gap-header">
-                    <span className={`cme-gap-dir ${g.direction}`}>
-                      {g.direction === 'up' ? '⬆' : '⬇'} Gap {g.direction.toUpperCase()} ({g.gapPct.toFixed(2)}%)
-                    </span>
-                    <span className="cme-prob-pct" style={{ color: tierColor(g.fillTier) }}>{g.fillProbability}% Fill</span>
-                  </div>
-                  <div className="cme-gap-range mono">
-                    ${g.gapLower.toFixed(2)} — ${g.gapUpper.toFixed(2)}
-                  </div>
-                  <div className="cme-prob-track-v2">
-                    <div className="cme-prob-fill-v2" style={{ width: `${g.fillProbability}%`, background: tierColor(g.fillTier), boxShadow: `0 0 6px ${tierColor(g.fillTier)}80` }} />
-                  </div>
+      {/* Bias pill */}
+      {cmeGapData.gapFillBias && (
+        <div className="cme-bias-pill" style={{
+          background: cmeGapData.gapFillBias === 'bullish' ? 'rgba(0,229,180,0.10)' : 'rgba(255,63,94,0.10)',
+          color: cmeGapData.gapFillBias === 'bullish' ? 'var(--accent-green)' : 'var(--accent-red)',
+          border: `1px solid ${cmeGapData.gapFillBias === 'bullish' ? 'rgba(0,229,180,0.25)' : 'rgba(255,63,94,0.25)'}`,
+        }}>
+          Gap Fill Bias: {cmeGapData.gapFillBias === 'bullish' ? '↑ BULLISH' : '↓ BEARISH'}
+        </div>
+      )}
+
+      {/* All filled state */}
+      {allFilled ? (
+        <div className="cme-all-filled">
+          <span className="cme-filled-icon">✅</span>
+          <span>All CME gaps filled</span>
+        </div>
+      ) : (
+        /* Unfilled gaps list */
+        <div className="cme-gaps-list">
+          {(cmeGapData.unfilledGaps || []).map((g, i) => (
+            <div className="cme-gap-compact-card" key={i}>
+              <div className="cme-timeline-node" style={{ background: g.direction === 'up' ? 'var(--accent-green)' : 'var(--accent-red)' }} />
+              <div className="cme-gap-compact-content">
+                <div className="cme-gap-header">
+                  <span className={`cme-gap-dir ${g.direction}`}>
+                    {g.direction === 'up' ? '⬆' : '⬇'} Gap {g.direction.toUpperCase()} ({(g.gapPct || 0).toFixed(2)}%)
+                  </span>
+                  <span className="cme-prob-pct" style={{ color: tierColor(g.fillTier) }}>{g.fillProbability}% Fill</span>
+                </div>
+                <div className="cme-gap-range mono">
+                  ${(g.gapLower || 0).toFixed(2)} — ${(g.gapUpper || 0).toFixed(2)}
+                </div>
+                <div className="cme-prob-track-v2">
+                  <div className="cme-prob-fill-v2" style={{ width: `${g.fillProbability}%`, background: tierColor(g.fillTier), boxShadow: `0 0 6px ${tierColor(g.fillTier)}80` }} />
                 </div>
               </div>
-            ))}
-          </div>
-        )}
-      </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Stats row — always shown when available */}
+      {(stats.fillRate !== undefined || stats.gapsFilled !== undefined) && (
+        <div className="cme-stats-row">
+          {stats.fillRate !== undefined && (
+            <div className="cme-stat"><span className="cme-stat-val text-green">{stats.fillRate}%</span><span className="cme-stat-lbl">Fill Rate</span></div>
+          )}
+          {stats.gapsFilled !== undefined && (
+            <div className="cme-stat"><span className="cme-stat-val">{stats.gapsFilled}/{stats.totalGaps ?? '?'}</span><span className="cme-stat-lbl">Filled</span></div>
+          )}
+          {stats.avgFillHours !== undefined && (
+            <div className="cme-stat"><span className="cme-stat-val">{stats.avgFillHours}h</span><span className="cme-stat-lbl">Avg Fill</span></div>
+          )}
+          {stats.fillStreak !== undefined && (
+            <div className="cme-stat"><span className="cme-stat-val text-green">{stats.fillStreak}×</span><span className="cme-stat-lbl">Streak</span></div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
+
 
 function TradeDurationInsight({ duration, timeframe, staggerIndex }) {
   if (!duration) return null;
