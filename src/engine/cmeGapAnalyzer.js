@@ -21,7 +21,7 @@ function isWeekendGapCandle(timestampSec) {
   const hour = d.getUTCHours();
 
   // Friday after 21:00 UTC (CME close)
-  if (day === 5 && hour >= 21) return 'close';
+  if (day === 5 && hour === 21) return 'close';
   // All of Saturday
   if (day === 6) return 'weekend';
   // Sunday before 22:00 UTC (CME open)

@@ -335,15 +335,12 @@ export async function runAnalysis(allData, config = {}) {
 
   // ── EMA Slopes (% deviation over last 5 candles) — for regime detection ─
   const SLOPE_LOOKBACK = 5;
-  const ema20_slope  = ema20_bias.length  > SLOPE_LOOKBACK && e20b  > 0
-    ? ((e20b  - ema20_bias[ema20_bias.length   - 1 - SLOPE_LOOKBACK]) / e20b)  * 100
-    : 0;
-  const ema50_slope  = ema50_bias.length  > SLOPE_LOOKBACK && e50b  > 0
-    ? ((e50b  - ema50_bias[ema50_bias.length   - 1 - SLOPE_LOOKBACK]) / e50b)  * 100
-    : 0;
-  const ema200_slope = ema200_bias.length > SLOPE_LOOKBACK && e200b > 0
-    ? ((e200b - ema200_bias[ema200_bias.length - 1 - SLOPE_LOOKBACK]) / e200b) * 100
-    : 0;
+  const prev20 = ema20_bias[ema20_bias.length - 1 - SLOPE_LOOKBACK];
+  const prev50 = ema50_bias[ema50_bias.length - 1 - SLOPE_LOOKBACK];
+  const prev200 = ema200_bias[ema200_bias.length - 1 - SLOPE_LOOKBACK];
+  const ema20_slope  = prev20  > 0 ? ((e20b  - prev20)  / prev20)  * 100 : 0;
+  const ema50_slope  = prev50  > 0 ? ((e50b  - prev50)  / prev50)  * 100 : 0;
+  const ema200_slope = prev200 > 0 ? ((e200b - prev200) / prev200) * 100 : 0;
 
   // ── EMA crossover / pullback signal (5m scalping only) ────────
   let emaSignalActive = false;
@@ -1254,7 +1251,8 @@ export async function runAnalysis(allData, config = {}) {
     rejectionReason = `No valid Stop Loss level found for this structure`;
   } else if (slSideInvalid) {
     // Distinguish thesis broken vs truly wrong SL side
-    rejectionReason = `⚠️ THESIS INVALIDATED — Structure closed against signal level (${direction === 'long' ? 'bearish' : 'bullish'} close through ${slData?.rawInvalidation?.toFixed(2) ?? 'key level'}). Wait for re-establishment.`;
+    const shiftLevel = lastPrimaryShift ? (lastPrimaryShift.price ?? lastPrimaryShift.level) : null;
+    rejectionReason = `⚠️ THESIS INVALIDATED — Structure closed against signal level (${direction === 'long' ? 'bearish' : 'bullish'} close through ${shiftLevel?.toFixed(2) ?? slData?.rawInvalidation?.toFixed(2) ?? 'key level'}). Wait for re-establishment.`;
   } else if (entryDistPct > profile.maxEntryDist) {
     if (aiConfidence >= profile.minAiConfidence && rrrMeetsMin) {
       decision = 'WAIT';

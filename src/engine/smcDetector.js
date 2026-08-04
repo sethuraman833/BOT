@@ -58,7 +58,7 @@ export function detectOrderBlocks(candles, currentPrice) {
       // H5: Historical mitigation check (loop from i+2 to now)
       let mitigated = false;
       for (let k = i + 2; k < candles.length; k++) {
-        if (candles[k].close <= ob.low) {
+        if (candles[k].low <= ob.low) {
           mitigated = true;
           break;
         }
@@ -97,7 +97,7 @@ export function detectOrderBlocks(candles, currentPrice) {
       // H5: Historical mitigation check (loop from i+2 to now)
       let mitigated = false;
       for (let k = i + 2; k < candles.length; k++) {
-        if (candles[k].close >= ob.high) {
+        if (candles[k].high >= ob.high) {
           mitigated = true;
           break;
         }
