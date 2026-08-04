@@ -339,6 +339,7 @@ export function analyzeCMEGaps(gaps, direction, trendBias, orderBlocks, currentP
     hasUnfilledGaps: analyzed.length > 0,
     unfilledGaps: analyzed,
     filledGaps,
+    allGaps: gaps,          // ← all gaps newest-first, for 4-week timeline
     nearestGap,
     gapFillBias,
     summary,

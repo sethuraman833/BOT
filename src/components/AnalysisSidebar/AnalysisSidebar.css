@@ -547,3 +547,67 @@
   letter-spacing: 0.5px;
   text-align: center;
 }
+
+/* ── CME 4-Week Timeline Rows ──────────────────────────────── */
+.cme-all-gaps-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 4px 0 6px;
+}
+.cme-gap-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.05);
+  transition: background 0.15s;
+}
+.cme-gap-row.filled  { background: rgba(0,229,180,0.03); }
+.cme-gap-row.unfilled { background: rgba(255,63,94,0.03); }
+.cme-gap-row:hover   { background: rgba(255,255,255,0.04); }
+
+.cme-gap-node {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-top: 5px;
+  flex-shrink: 0;
+}
+.cme-gap-row-body { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+
+.cme-gap-row-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.cme-gap-dir-badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+.cme-gap-range-inline {
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+  flex: 1;
+}
+.cme-gap-status-badge {
+  font-size: 0.58rem;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+.cme-gap-status-badge.filled { background: rgba(0,229,180,0.1); color: var(--accent-green); }
+.cme-gap-status-badge.open   { background: rgba(255,63,94,0.1); color: var(--accent-red); }
+
+.cme-gap-row-meta {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.cme-meta-item {
+  font-size: 0.6rem;
+  color: var(--text-dim);
+  font-family: var(--font-mono, monospace);
+}

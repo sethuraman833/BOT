@@ -333,6 +333,18 @@ export async function runAnalysis(allData, config = {}) {
   const e50b  = ema50_bias[ema50_bias.length - 1];
   const e200b = ema200_bias[ema200_bias.length - 1];
 
+  // ── EMA Slopes (% deviation over last 5 candles) — for regime detection ─
+  const SLOPE_LOOKBACK = 5;
+  const ema20_slope  = ema20_bias.length  > SLOPE_LOOKBACK && e20b  > 0
+    ? ((e20b  - ema20_bias[ema20_bias.length   - 1 - SLOPE_LOOKBACK]) / e20b)  * 100
+    : 0;
+  const ema50_slope  = ema50_bias.length  > SLOPE_LOOKBACK && e50b  > 0
+    ? ((e50b  - ema50_bias[ema50_bias.length   - 1 - SLOPE_LOOKBACK]) / e50b)  * 100
+    : 0;
+  const ema200_slope = ema200_bias.length > SLOPE_LOOKBACK && e200b > 0
+    ? ((e200b - ema200_bias[ema200_bias.length - 1 - SLOPE_LOOKBACK]) / e200b) * 100
+    : 0;
+
   // ── EMA crossover / pullback signal (5m scalping only) ────────
   let emaSignalActive = false;
   let emaSignalType   = null;
@@ -1501,5 +1513,14 @@ export async function runAnalysis(allData, config = {}) {
     premiumDiscountZones,
     killZone,
     cmeGapData,
+    // ── EMA Indicators (for MarketRegime component) ────────────────
+    indicators: e20b ? {
+      ema20:        parseFloat(e20b.toFixed(4)),
+      ema50:        parseFloat(e50b.toFixed(4)),
+      ema200:       parseFloat(e200b.toFixed(4)),
+      ema20_slope:  parseFloat(ema20_slope.toFixed(5)),
+      ema50_slope:  parseFloat(ema50_slope.toFixed(5)),
+      ema200_slope: parseFloat(ema200_slope.toFixed(5)),
+    } : null,
   };
 }

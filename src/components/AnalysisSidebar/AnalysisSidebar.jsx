@@ -175,11 +175,21 @@ function CMEGapSection({ cmeGapData, staggerIndex }) {
   };
 
   const stats = cmeGapData.stats || {};
-  const allFilled = !cmeGapData.hasUnfilledGaps;
+  // Use allGaps for 4-week timeline; fallback to combining filled+unfilled
+  const allGaps = cmeGapData.allGaps
+    || [...(cmeGapData.unfilledGaps || []), ...(cmeGapData.filledGaps || [])]
+        .sort((a, b) => (b.fridayCloseTime || 0) - (a.fridayCloseTime || 0));
+
+  const formatAge = (hrs) => {
+    if (!hrs && hrs !== 0) return '?';
+    if (hrs < 24)  return `${Math.round(hrs)}h`;
+    if (hrs < 168) return `${(hrs / 24).toFixed(1)}d`;
+    return `${(hrs / 168).toFixed(1)}w`;
+  };
 
   return (
     <div className="sidebar-section animate-fade-in-up glass-card" style={{ animationDelay: `${staggerIndex * 60}ms` }}>
-      <div className="section-header gradient-header">📊 CME Gap Analysis</div>
+      <div className="section-header gradient-header">📊 CME Gap Analysis — Last 4 Weeks</div>
 
       {/* Bias pill */}
       {cmeGapData.gapFillBias && (
@@ -192,57 +202,80 @@ function CMEGapSection({ cmeGapData, staggerIndex }) {
         </div>
       )}
 
-      {/* All filled state */}
-      {allFilled ? (
-        <div className="cme-all-filled">
-          <span className="cme-filled-icon">✅</span>
-          <span>All CME gaps filled</span>
-        </div>
-      ) : (
-        /* Unfilled gaps list */
-        <div className="cme-gaps-list">
-          {(cmeGapData.unfilledGaps || []).map((g, i) => (
-            <div className="cme-gap-compact-card" key={i}>
-              <div className="cme-timeline-node" style={{ background: g.direction === 'up' ? 'var(--accent-green)' : 'var(--accent-red)' }} />
-              <div className="cme-gap-compact-content">
-                <div className="cme-gap-header">
-                  <span className={`cme-gap-dir ${g.direction}`}>
-                    {g.direction === 'up' ? '⬆' : '⬇'} Gap {g.direction.toUpperCase()} ({(g.gapPct || 0).toFixed(2)}%)
-                  </span>
-                  <span className="cme-prob-pct" style={{ color: tierColor(g.fillTier) }}>{g.fillProbability}% Fill</span>
-                </div>
-                <div className="cme-gap-range mono">
-                  ${(g.gapLower || 0).toFixed(2)} — ${(g.gapUpper || 0).toFixed(2)}
-                </div>
-                <div className="cme-prob-track-v2">
-                  <div className="cme-prob-fill-v2" style={{ width: `${g.fillProbability}%`, background: tierColor(g.fillTier), boxShadow: `0 0 6px ${tierColor(g.fillTier)}80` }} />
+      {/* All gaps timeline */}
+      {allGaps.length > 0 ? (
+        <div className="cme-all-gaps-list">
+          {allGaps.map((g, i) => {
+            const fillProb = g.fillProbability || null;
+            const nodeColor = g.direction === 'up' ? 'var(--accent-green)' : 'var(--accent-red)';
+            return (
+              <div className={`cme-gap-row ${g.filled ? 'filled' : 'unfilled'}`} key={i}>
+                <div className="cme-gap-node" style={{ background: nodeColor }} />
+                <div className="cme-gap-row-body">
+                  <div className="cme-gap-row-top">
+                    <span className="cme-gap-dir-badge" style={{ color: nodeColor }}>
+                      {g.direction === 'up' ? '⬆' : '⬇'} {g.direction.toUpperCase()} {g.gapPct ? `${(g.gapPct * 100).toFixed(2)}%` : ''}
+                    </span>
+                    <span className="cme-gap-range-inline mono">
+                      ${(g.gapLower || 0).toFixed(0)}–${(g.gapUpper || 0).toFixed(0)}
+                    </span>
+                    <span className={`cme-gap-status-badge ${g.filled ? 'filled' : 'open'}`}>
+                      {g.filled ? '✅ Filled' : '⏳ Open'}
+                    </span>
+                  </div>
+                  <div className="cme-gap-row-meta">
+                    <span className="cme-meta-item">Age: {formatAge(g.ageHours)}</span>
+                    {g.filled && g.timeToFillHours != null && (
+                      <span className="cme-meta-item">Filled in: {formatAge(g.timeToFillHours)}</span>
+                    )}
+                    {!g.filled && fillProb != null && (
+                      <span className="cme-meta-item" style={{ color: tierColor(g.fillTier) }}>
+                        {fillProb}% fill prob
+                      </span>
+                    )}
+                  </div>
+                  {!g.filled && fillProb != null && (
+                    <div className="cme-prob-track-v2">
+                      <div className="cme-prob-fill-v2" style={{
+                        width: `${fillProb}%`,
+                        background: tierColor(g.fillTier),
+                        boxShadow: `0 0 6px ${tierColor(g.fillTier)}60`,
+                      }} />
+                    </div>
+                  )}
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
+        </div>
+      ) : (
+        <div className="cme-all-filled">
+          <span className="cme-filled-icon">✅</span>
+          <span>No CME gap data available</span>
         </div>
       )}
 
-      {/* Stats row — always shown when available */}
+      {/* Stats row */}
       {(stats.fillRate !== undefined || stats.gapsFilled !== undefined) && (
         <div className="cme-stats-row">
           {stats.fillRate !== undefined && (
             <div className="cme-stat"><span className="cme-stat-val text-green">{stats.fillRate}%</span><span className="cme-stat-lbl">Fill Rate</span></div>
           )}
-          {stats.gapsFilled !== undefined && (
-            <div className="cme-stat"><span className="cme-stat-val">{stats.gapsFilled}/{stats.totalGaps ?? '?'}</span><span className="cme-stat-lbl">Filled</span></div>
+          {stats.totalFilled !== undefined && (
+            <div className="cme-stat"><span className="cme-stat-val">{stats.totalFilled}/{stats.totalGaps ?? '?'}</span><span className="cme-stat-lbl">Filled</span></div>
           )}
-          {stats.avgFillHours !== undefined && (
-            <div className="cme-stat"><span className="cme-stat-val">{stats.avgFillHours}h</span><span className="cme-stat-lbl">Avg Fill</span></div>
+          {stats.avgFillTimeHours != null && (
+            <div className="cme-stat"><span className="cme-stat-val">{stats.avgFillTimeHours}h</span><span className="cme-stat-lbl">Avg Fill</span></div>
           )}
-          {stats.fillStreak !== undefined && (
-            <div className="cme-stat"><span className="cme-stat-val text-green">{stats.fillStreak}×</span><span className="cme-stat-lbl">Streak</span></div>
+          {stats.consecutiveDir && (
+            <div className="cme-stat"><span className="cme-stat-val text-green">{stats.consecutiveCount}× {stats.consecutiveDir === 'up' ? '↑' : '↓'}</span><span className="cme-stat-lbl">Streak</span></div>
           )}
         </div>
       )}
     </div>
   );
 }
+
 
 
 function TradeDurationInsight({ duration, timeframe, staggerIndex }) {
