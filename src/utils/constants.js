@@ -34,7 +34,7 @@ export const CANDLE_LIMIT = 1500; // Binance Futures max per request (was 500)
 
 // ── Funding Challenge Configuration ──────────────────────────────
 export const CHALLENGE_CONFIG = {
-  enabled:          true,       // Toggle challenge mode on/off
+  enabled:          false,      // Toggle challenge mode on/off
   accountBalance:   10000,      // $10,000 account
   profitTarget:     1000,       // $1,000 profit target
   dailyDDLimit:     400,        // Max daily drawdown allowed

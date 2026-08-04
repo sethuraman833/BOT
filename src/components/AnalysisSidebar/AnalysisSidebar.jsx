@@ -1,6 +1,5 @@
 import { useMarket } from '../../context/MarketContext.jsx';
 import TradeBox from '../TradeBox/TradeBox.jsx';
-import ChallengeDashboard from '../ChallengeDashboard/ChallengeDashboard.jsx';
 import MarketRegime from '../MarketRegime/MarketRegime.jsx';
 import { useState } from 'react';
 import './AnalysisSidebar.css';
@@ -291,11 +290,6 @@ export default function AnalysisSidebar() {
         {/* ── MARKET REGIME (TOP) ───────────────────────── */}
         <div className="animate-fade-in-up" style={{ animationDelay: `${nextDelay() * 60}ms` }}>
            <MarketRegime analysis={analysis} />
-        </div>
-
-        {/* ── FUNDING CHALLENGE DASHBOARD ────────────────── */}
-        <div className="animate-fade-in-up" style={{ animationDelay: `${nextDelay() * 60}ms` }}>
-           <ChallengeDashboard />
         </div>
 
         {/* ── ANALYSIS MODE HEADER ───────────────────────── */}
