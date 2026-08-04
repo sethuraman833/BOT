@@ -2,14 +2,16 @@ import { useMarket, useMarketDispatch } from '../../context/MarketContext.jsx';
 import { ASSETS, ASSET_LIST } from '../../utils/constants.js';
 import { formatPrice, formatPercent } from '../../utils/formatters.js';
 import { useAnalyze } from '../../hooks/useAnalyze.js';
+import { useSession } from '../../hooks/useSession.js';
 import { useRef, useEffect, useState } from 'react';
 import SessionBadge from '../SessionBadge/SessionBadge.jsx';
 import './Header.css';
 
 export default function Header() {
-  const { asset, livePrice, liveChange, isAnalyzing, backtestMode, backtestTime } = useMarket();
+  const { asset, livePrice, liveChange, isAnalyzing, backtestMode, backtestTime, analysis } = useMarket();
   const dispatch = useMarketDispatch();
   const { handleAnalyze } = useAnalyze();
+  const { session } = useSession();
   const isPositive = (liveChange || 0) >= 0;
 
   // Bloomberg-style tick animation
@@ -25,6 +27,26 @@ export default function Header() {
     prevPrice.current = livePrice;
   }, [livePrice]);
 
+  // Regime Pill Logic
+  let regime = 'SIDEWAYS';
+  let regimeClass = 'sideways';
+  if (analysis) {
+    const weeklyBias = analysis.aiModules?.weeklyBias?.bias;
+    const is1HUp = analysis.direction === 'LONG';
+    const is1HDown = analysis.direction === 'SHORT';
+    if (weeklyBias === 'long' && is1HUp) {
+      regime = 'BULL';
+      regimeClass = 'bull';
+    } else if (weeklyBias === 'short' && is1HDown) {
+      regime = 'BEAR';
+      regimeClass = 'bear';
+    }
+  }
+
+  // Session urgency (pulse red if < 30m)
+  const countdown = session?.countdown || '';
+  const isUrgent = countdown && !countdown.includes('h') && parseInt(countdown) < 30;
+
   return (
     <header className="header">
       <div className="header-left">
@@ -35,6 +57,12 @@ export default function Header() {
             <span className="header-subtitle">SMC INTELLIGENCE v12</span>
           </div>
         </div>
+        {analysis && (
+          <div className={`header-regime-pill ${regimeClass}`}>
+            <span className="regime-dot"></span>
+            {regime}
+          </div>
+        )}
       </div>
 
       <nav className="header-center">
@@ -46,6 +74,7 @@ export default function Header() {
             title={ASSETS[key].label}
           >
             {ASSETS[key].symbol.replace('USDT', '')}
+            <div className="tab-indicator"></div>
           </button>
         ))}
       </nav>
@@ -72,7 +101,9 @@ export default function Header() {
             <path d="M16 16h5v5"/>
           </svg>
         </button>
-        <SessionBadge />
+        <div className={`session-wrapper ${isUrgent ? 'urgent' : ''}`}>
+          <SessionBadge />
+        </div>
         <div className="live-dot" title="Live Data Feed" />
       </div>
     </header>

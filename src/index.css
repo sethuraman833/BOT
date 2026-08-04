@@ -36,11 +36,16 @@
   --accent-cyan:    #00d4ff;
   --accent-cyan-dim:  rgba(0, 212, 255, 0.10);
 
-  /* ── Glow effects ─────────────────────────────────────── */
-  --glow-green:   0 0 20px rgba(0, 229, 180, 0.25), 0 0 40px rgba(0, 229, 180, 0.10);
-  --glow-red:     0 0 20px rgba(255, 63, 94, 0.25),  0 0 40px rgba(255, 63, 94, 0.10);
-  --glow-blue:    0 0 16px rgba(59, 142, 240, 0.2);
-  --glow-yellow:  0 0 16px rgba(247, 201, 72, 0.2);
+  /* ── Glass & Effects ──────────────────────────────────── */
+  --glass-bg:       rgba(255, 255, 255, 0.03);
+  --glass-border:   rgba(255, 255, 255, 0.08);
+  --glass-blur:     blur(12px);
+
+  --glow-green:     0 0 20px rgba(0, 229, 180, 0.25), 0 0 40px rgba(0, 229, 180, 0.10);
+  --glow-red:       0 0 20px rgba(255, 63, 94, 0.25), 0 0 40px rgba(255, 63, 94, 0.10);
+  --glow-purple:    0 0 20px rgba(157, 111, 255, 0.25);
+  --glow-blue:      0 0 20px rgba(59, 142, 240, 0.25);
+  --glow-yellow:    0 0 20px rgba(247, 201, 72, 0.25);
 
   /* ── Typography ───────────────────────────────────────── */
   --font-mono:    'JetBrains Mono', monospace;
@@ -107,11 +112,98 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* ── Scrollbar ────────────────────────────────────────────── */
-::-webkit-scrollbar { width: 4px; }
+/* ── Selection & Scrollbar ────────────────────────────────── */
+::selection { background: rgba(0, 229, 180, 0.3); color: #fff; }
+::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--bg-border); border-radius: 2px; }
-::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+::-webkit-scrollbar-thumb { background: var(--border-subtle); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--accent-green); }
+
+/* ── Keyframes ────────────────────────────────────────────── */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes glowPulse {
+  0%, 100% { box-shadow: 0 0 10px rgba(0, 229, 180, 0.1); }
+  50% { box-shadow: 0 0 25px rgba(0, 229, 180, 0.4); }
+}
+
+@keyframes glowPulseRed {
+  0%, 100% { box-shadow: 0 0 10px rgba(255, 63, 94, 0.1); }
+  50% { box-shadow: 0 0 25px rgba(255, 63, 94, 0.4); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes gradientBorder {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes numberPop {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.15); color: var(--text-primary); }
+  100% { transform: scale(1); }
+}
+
+@keyframes rotateSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes priceTick {
+  0% { color: var(--text-primary); }
+  50% { filter: brightness(1.5); color: var(--accent-green); }
+  100% { color: inherit; }
+}
+
+@keyframes progressFill {
+  from { width: 0%; }
+}
+
+/* ── Utility Classes ──────────────────────────────────────── */
+.mono { font-family: var(--font-mono); }
+.glass-card {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-radius: var(--radius-md);
+}
+.glow-green { box-shadow: var(--glow-green); }
+.glow-red { box-shadow: var(--glow-red); }
+.glow-border-green { border-color: rgba(0, 229, 180, 0.4) !important; }
+.animate-fade-in-up { animation: fadeInUp 0.4s var(--ease-out) forwards; }
+.animate-scale-in { animation: scaleIn 0.3s var(--ease-out) forwards; }
+
+.text-green    { color: var(--accent-green); }
+.text-red      { color: var(--accent-red); }
+.text-yellow   { color: var(--accent-yellow); }
+.text-blue     { color: var(--accent-blue); }
+.text-purple   { color: var(--accent-purple); }
+.text-dim      { color: var(--text-dim); }
+.text-secondary{ color: var(--text-secondary); }
 
 /* ── App Shell ────────────────────────────────────────────── */
 .app-shell {
@@ -186,19 +278,9 @@ body {
     background: var(--accent-red);
     border-radius: 50%;
     box-shadow: var(--glow-red);
-    animation: pulse 2s ease-in-out infinite;
+    animation: glowPulseRed 2s ease-in-out infinite;
   }
 }
-
-/* ── Utility Classes ──────────────────────────────────────── */
-.mono          { font-family: var(--font-mono); }
-.text-green    { color: var(--accent-green); }
-.text-red      { color: var(--accent-red); }
-.text-yellow   { color: var(--accent-yellow); }
-.text-blue     { color: var(--accent-blue); }
-.text-purple   { color: var(--accent-purple); }
-.text-dim      { color: var(--text-dim); }
-.text-secondary{ color: var(--text-secondary); }
 
 /* ── Error Banner ─────────────────────────────────────────── */
 .error-banner-fixed {
@@ -228,24 +310,16 @@ body {
 }
 .error-banner-fixed button:hover { opacity: 1; }
 
-/* ── Animations ───────────────────────────────────────────── */
-@keyframes spin     { to { transform: rotate(360deg); } }
-@keyframes fadeIn   { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes slideIn  { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: translateX(0); } }
-@keyframes pulse    { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.6; transform: scale(0.9); } }
-@keyframes shimmer  { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
-@keyframes glow-pulse { 0%,100% { box-shadow: 0 0 8px rgba(0,229,180,0.2); } 50% { box-shadow: 0 0 24px rgba(0,229,180,0.5); } }
-
 .spinner {
   display: inline-block;
   width: 14px; height: 14px;
   border: 2px solid rgba(255,255,255,0.1);
   border-top-color: var(--accent-green);
   border-radius: 50%;
-  animation: spin 0.7s linear infinite;
+  animation: rotateSpin 0.7s linear infinite;
 }
 .fade-in  { animation: fadeIn  0.3s ease-out; }
-.slide-in { animation: slideIn 0.25s ease-out; }
+.slide-in { animation: slideInRight 0.25s ease-out; }
 
 /* ── Accessibility ── */
 :root { color-scheme: dark; }

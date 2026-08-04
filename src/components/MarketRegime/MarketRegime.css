@@ -1,0 +1,111 @@
+.market-regime {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 24px;
+  margin-bottom: 16px;
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.market-regime:hover {
+  transform: scale(1.005);
+}
+
+.market-regime::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background-size: 200% 200%;
+  animation: gradientBorder 3s ease infinite;
+}
+
+.market-regime.bull::before {
+  background-image: linear-gradient(90deg, transparent, var(--accent-green), transparent);
+}
+.market-regime.bear::before {
+  background-image: linear-gradient(90deg, transparent, var(--accent-red), transparent);
+}
+.market-regime.sideways::before {
+  background-image: linear-gradient(90deg, transparent, var(--accent-yellow), transparent);
+}
+
+.regime-status {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.regime-title {
+  font-family: var(--font-heading);
+  font-size: 1.25rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  margin: 0;
+}
+
+.glow-text-bull {
+  color: var(--accent-green);
+  text-shadow: var(--glow-green);
+}
+.glow-text-bear {
+  color: var(--accent-red);
+  text-shadow: var(--glow-red);
+}
+.glow-text-sideways {
+  color: var(--accent-yellow);
+  text-shadow: var(--glow-yellow);
+}
+
+.regime-rec {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+.regime-details {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.tf-pills {
+  display: flex;
+  gap: 8px;
+}
+
+.tf-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.ema-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  font-family: var(--font-mono);
+}
+.ema-status.above { color: var(--accent-green); }
+.ema-status.below { color: var(--accent-red); }
+
+.ema-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.ema-status.above .ema-dot { background: var(--accent-green); box-shadow: var(--glow-green); }
+.ema-status.below .ema-dot { background: var(--accent-red); box-shadow: var(--glow-red); }

@@ -540,7 +540,12 @@ export async function runAnalysis(allData, config = {}) {
   }
 
   // Apply ATR sizing multiplier to risk amount
-  adjustedRiskAmount = (adjustedRiskAmount || riskAmount) * (volRegime.sizingMultiplier || 1.0);
+  // In challenge mode, clamp risk to exactly the configured amount — no volatility scaling
+  if (CHALLENGE_CONFIG.enabled) {
+    adjustedRiskAmount = CHALLENGE_CONFIG.riskPerTrade;
+  } else {
+    adjustedRiskAmount = (adjustedRiskAmount || riskAmount) * (volRegime.sizingMultiplier || 1.0);
+  }
 
   // Fibonacci Golden Pocket (Calculated here for SL/TP anchoring)
   const htfSwingH = swingsBias.filter(s => s.type === 'high').slice(-1)[0];
@@ -1233,8 +1238,11 @@ export async function runAnalysis(allData, config = {}) {
     rejectionReason = `Market ranging — no ${profile.biasKey.toUpperCase()} directional bias & AI consensus insufficient`;
   } else if (emaVetoActive) {
     rejectionReason = emaVetoReason;
-  } else if (slSideInvalid || !slData) {
-    rejectionReason = `Invalid Stop Loss placement relative to entry`;
+  } else if (!slData) {
+    rejectionReason = `No valid Stop Loss level found for this structure`;
+  } else if (slSideInvalid) {
+    // Distinguish thesis broken vs truly wrong SL side
+    rejectionReason = `⚠️ THESIS INVALIDATED — Structure closed against signal level (${direction === 'long' ? 'bearish' : 'bullish'} close through ${slData?.rawInvalidation?.toFixed(2) ?? 'key level'}). Wait for re-establishment.`;
   } else if (entryDistPct > profile.maxEntryDist) {
     if (aiConfidence >= profile.minAiConfidence && rrrMeetsMin) {
       decision = 'WAIT';
