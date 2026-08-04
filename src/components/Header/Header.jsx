@@ -27,20 +27,24 @@ export default function Header() {
     prevPrice.current = livePrice;
   }, [livePrice]);
 
-  // Regime Pill Logic
+  // Regime Pill — mirrors MarketRegime.jsx EMA stack logic
   let regime = 'SIDEWAYS';
   let regimeClass = 'sideways';
-  if (analysis) {
-    const weeklyBias = analysis.aiModules?.weeklyBias?.bias;
-    const is1HUp = analysis.direction === 'LONG';
-    const is1HDown = analysis.direction === 'SHORT';
-    if (weeklyBias === 'long' && is1HUp) {
-      regime = 'BULL';
-      regimeClass = 'bull';
-    } else if (weeklyBias === 'short' && is1HDown) {
-      regime = 'BEAR';
-      regimeClass = 'bear';
-    }
+  if (analysis?.indicators) {
+    const { ema20, ema50, ema200, ema20_slope, ema50_slope } = analysis.indicators;
+    const bullStack = ema20 > ema50 && ema50 > ema200;
+    const bearStack = ema20 < ema50 && ema50 < ema200;
+    const e20Up = ema20_slope > 0.05;
+    const e50Up = ema50_slope > 0.02;
+    const e20Dn = ema20_slope < -0.05;
+    const e50Dn = ema50_slope < -0.02;
+    if      (bullStack && e20Up && e50Up)  { regime = '🐂 STRONG BULL'; regimeClass = 'bull'; }
+    else if (bullStack && (e20Up || e50Up)) { regime = '🐂 BULL';        regimeClass = 'bull'; }
+    else if (bullStack)                    { regime = '🐂 WEAK BULL';    regimeClass = 'bull'; }
+    else if (bearStack && e20Dn && e50Dn)  { regime = '🐻 STRONG BEAR'; regimeClass = 'bear'; }
+    else if (bearStack && (e20Dn || e50Dn)) { regime = '🐻 BEAR';       regimeClass = 'bear'; }
+    else if (bearStack)                    { regime = '🐻 WEAK BEAR';    regimeClass = 'bear'; }
+    else                                   { regime = '〰️ RANGING';      regimeClass = 'sideways'; }
   }
 
   // Session urgency (pulse red if < 30m)
