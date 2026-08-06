@@ -449,22 +449,34 @@ export function calculateTPs(
     }
   }
 
-  // SMC Rule: Single TP at EXACTLY 4R from entry
-  // The structural candidate is used only to confirm the label — the level is always exact 4R.
-  if (tp1) {
-    const slDist = Math.abs(entry - stopLoss);
-    const exact4R = isLong ? entry + slDist * 4 : entry - slDist * 4;
-    const isNearStructural = Math.abs((tp1.level - exact4R) / exact4R) < 0.015; // within 1.5%
-    return {
-      tps: [{
-        level: exact4R,
-        closePercent: 100,
-        reason: isNearStructural ? `1:4 Target — ${tp1.reason}` : '1:4 Target (4R Exact)',
-        rrr: 4.0,
-      }],
-      tpStructure: 'single_4R',
-    };
-  }
+  // ── SMC Rule: ALWAYS return exactly 4R — unconditional ──────────────
+  // Previously this was guarded by `if (tp1)` which meant if all structural
+  // candidates were below 4R, NO TP was returned → RRR = 0.00 → veto.
+  // Now: always compute exact 4R; use nearest structural candidate for label only.
+  const slDist4R = Math.abs(entry - stopLoss);
+  const exact4R   = isLong ? entry + slDist4R * 4 : entry - slDist4R * 4;
+
+  // Find nearest structural candidate (any RRR) for label enhancement
+  const allDirCandidates = dedupedCandidates.filter(c =>
+    isLong ? c.level > entry : c.level < entry
+  );
+  const nearestToTP = allDirCandidates.sort(
+    (a, b) => Math.abs(a.level - exact4R) - Math.abs(b.level - exact4R)
+  )[0];
+  const isNearStructural = nearestToTP &&
+    Math.abs((nearestToTP.level - exact4R) / exact4R) < 0.015; // within 1.5%
+
+  return {
+    tps: [{
+      level: exact4R,
+      closePercent: 100,
+      reason: isNearStructural
+        ? `1:4 Target — ${nearestToTP.reason}`
+        : '1:4 Target (4R Exact)',
+      rrr: 4.0,
+    }],
+    tpStructure: 'single_4R',
+  };
 
   // Find TP2 candidate (first one satisfying RRR >= minTp2Rrr and spacing >= 1.0R from TP1)
   if (tp1) {

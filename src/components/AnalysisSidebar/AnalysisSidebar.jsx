@@ -1,6 +1,7 @@
 import { useMarket } from '../../context/MarketContext.jsx';
 import TradeBox from '../TradeBox/TradeBox.jsx';
 import MarketRegime from '../MarketRegime/MarketRegime.jsx';
+import { formatPrice } from '../../utils/formatters.js';
 import { useState } from 'react';
 import './AnalysisSidebar.css';
 
@@ -164,13 +165,15 @@ function AIOpinion({ aiAnalysis, staggerIndex }) {
   );
 }
 
-// ── SMC Institutional Analysis Block ─────────────────────────────
-function SMCAnalysisBlock({ smcAnalysis, direction, confluenceScore, staggerIndex }) {
+// ── SMC Institutional Analysis Block ─────────────────────────────────────
+function SMCAnalysisBlock({ smcAnalysis, direction, confluenceScore, symbol, staggerIndex }) {
   if (!smcAnalysis) return null;
   const isLong = direction === 'long';
   const confidence = confluenceScore?.aiConfidence || 0;
+  const sym = symbol || 'BTCUSDT';
 
-  const fmt = (val) => val != null ? `$${Number(val).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}` : '—';
+  // Asset-aware price formatter — same as the rest of the app
+  const fmt = (val) => val != null ? formatPrice(val, sym) : '—';
 
   const rows = [
     {
@@ -523,6 +526,7 @@ export default function AnalysisSidebar() {
           smcAnalysis={analysis.smcAnalysis}
           direction={analysis.direction}
           confluenceScore={analysis.confluenceScore}
+          symbol={analysis.symbol}
           staggerIndex={nextDelay()}
         />
 
