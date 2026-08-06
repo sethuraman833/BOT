@@ -232,6 +232,7 @@ export async function runAnalysis(allData, config = {}) {
   const steps   = [];
   steps.push(`Engine v11.0 (Inst Logic) | ${profile.label} | ${symbol}`);
   
+  let smcAnalysis = null;
   let slSideInvalid = false; // H2 validation flag declared early
   let adjustedRiskAmount = riskAmount; // C5: hoisted to outer scope for return object
 
@@ -736,75 +737,99 @@ export async function runAnalysis(allData, config = {}) {
     const effectiveMinDistance = minDistance * sessionSlMult;
     if (isAsianSession) steps.push(`🌏 Asian Session: SL minimum widened ×1.35 for London Open expansion`);
 
-    let inv;
-    if (direction === 'long') {
-      // SL anchor priority for LONG:
-      // 1) Demand OB lowerBound — the structural floor the OB is built on
-      // 2) Most-recent RECENT bullish sweep wick low (time-filtered)
-      // 3) Best swing low (primary → HTF fallback)
-      if (nearestOB && nearestOB.lowerBound < entry) {
-        inv = nearestOB.lowerBound;
-        // Override with recent sweep wick only if it swept deeper than OB floor
-        const recentBullSweeps = sweepsPrimary
-          .filter(s => (s.direction === 'long' || s.type === 'bullish') && s.wickExtreme !== undefined && s.wickExtreme < entry && isRecentSweep(s))
-          .sort((a, b) => b.candleIndex - a.candleIndex);
-        if (recentBullSweeps.length > 0 && recentBullSweeps[0].wickExtreme < inv) {
-          inv = recentBullSweeps[0].wickExtreme;
-          steps.push(`🪤 SL anchored to recent sweep wick low @ $${inv.toFixed(ASSETS[symbol]?.decimals ?? 2)} (within ${maxSweepAge} candles)`);
-        }
-      } else {
-        // No OB: anchor to most recent (time-filtered) sweep wick low, then HTF swing
-        const recentBullSweeps = [
-          ...sweepsPrimary.filter(s => (s.direction === 'long' || s.type === 'bullish') && s.wickExtreme !== undefined && s.wickExtreme < entry && isRecentSweep(s)),
-          ...sweepsStructure.filter(s => (s.direction === 'long' || s.type === 'bullish') && s.wickExtreme !== undefined && s.wickExtreme < entry && isRecentSweep(s)),
-        ].sort((a, b) => b.candleIndex - a.candleIndex);
-        if (recentBullSweeps.length > 0) {
-          inv = recentBullSweeps[0].wickExtreme;
-          steps.push(`🪤 SL anchored to recent sweep wick low @ $${inv.toFixed(ASSETS[symbol]?.decimals ?? 2)}`);
+    // ── PRIMARY: SL strictly beyond BOS/CHoCH structural candle ────────────
+    let inv = null;
+    if (lastPrimaryShift && lastPrimaryShift.candleIndex != null) {
+      const shiftCandle = candlesPrimary[lastPrimaryShift.candleIndex];
+      if (shiftCandle) {
+        inv = direction === 'long' ? shiftCandle.low : shiftCandle.high;
+        steps.push(`📌 SL anchored to BOS/CHoCH candle [${lastPrimaryShift.candleIndex}]: ${direction === 'long' ? 'low' : 'high'} = ${inv?.toFixed(2)}`);
+      }
+    }
+
+    // FALLBACK: No BOS/CHoCH candle — use most recent swing high/low
+    if (inv === null || (direction === 'long' && inv >= entry) || (direction === 'short' && inv <= entry)) {
+      inv = null; // reset to let existing logic run
+      if (direction === 'long') {
+        // SL anchor priority for LONG:
+        // 1) Demand OB lowerBound — the structural floor the OB is built on
+        // 2) Most-recent RECENT bullish sweep wick low (time-filtered)
+        // 3) Best swing low (primary → HTF fallback)
+        if (nearestOB && nearestOB.lowerBound < entry) {
+          inv = nearestOB.lowerBound;
+          // Override with recent sweep wick only if it swept deeper than OB floor
+          const recentBullSweeps = sweepsPrimary
+            .filter(s => (s.direction === 'long' || s.type === 'bullish') && s.wickExtreme !== undefined && s.wickExtreme < entry && isRecentSweep(s))
+            .sort((a, b) => b.candleIndex - a.candleIndex);
+          if (recentBullSweeps.length > 0 && recentBullSweeps[0].wickExtreme < inv) {
+            inv = recentBullSweeps[0].wickExtreme;
+            steps.push(`🪤 SL anchored to recent sweep wick low @ $${inv.toFixed(ASSETS[symbol]?.decimals ?? 2)} (within ${maxSweepAge} candles)`);
+          }
         } else {
-          inv = bestSwingLow;
-          const anchor = nearestSwingLows.length > 0 ? 'Primary' : 'HTF';
-          steps.push(`📌 SL anchored to ${anchor} swing low @ $${inv.toFixed(ASSETS[symbol]?.decimals ?? 2)}`);
+          // No OB: anchor to most recent (time-filtered) sweep wick low, then HTF swing
+          const recentBullSweeps = [
+            ...sweepsPrimary.filter(s => (s.direction === 'long' || s.type === 'bullish') && s.wickExtreme !== undefined && s.wickExtreme < entry && isRecentSweep(s)),
+            ...sweepsStructure.filter(s => (s.direction === 'long' || s.type === 'bullish') && s.wickExtreme !== undefined && s.wickExtreme < entry && isRecentSweep(s)),
+          ].sort((a, b) => b.candleIndex - a.candleIndex);
+          if (recentBullSweeps.length > 0) {
+            inv = recentBullSweeps[0].wickExtreme;
+            steps.push(`🪤 SL anchored to recent sweep wick low @ $${inv.toFixed(ASSETS[symbol]?.decimals ?? 2)}`);
+          } else {
+            inv = bestSwingLow;
+            const anchor = nearestSwingLows.length > 0 ? 'Primary' : 'HTF';
+            steps.push(`📌 SL anchored to ${anchor} swing low @ $${inv.toFixed(ASSETS[symbol]?.decimals ?? 2)}`);
+          }
+        }
+
+        // Safety guard: SL must be below entry
+        if (inv >= entry) inv = bestSwingLow;
+        // Enforce session-aware minimum distance
+        if (entry - inv < effectiveMinDistance) inv = entry - effectiveMinDistance;
+      } else {
+        // SL anchor priority for SHORT:
+        // 1) Supply OB upperBound — structural ceiling
+        // 2) Most-recent RECENT bearish sweep wick high (time-filtered)
+        // 3) Best swing high (primary → HTF fallback)
+        if (nearestOB && nearestOB.upperBound > entry) {
+          inv = nearestOB.upperBound;
+          const recentBearSweeps = sweepsPrimary
+            .filter(s => (s.direction === 'short' || s.type === 'bearish') && s.wickExtreme !== undefined && s.wickExtreme > entry && isRecentSweep(s))
+            .sort((a, b) => b.candleIndex - a.candleIndex);
+          if (recentBearSweeps.length > 0 && recentBearSweeps[0].wickExtreme > inv) {
+            inv = recentBearSweeps[0].wickExtreme;
+            steps.push(`🪤 SL anchored to recent sweep wick high @ $${inv.toFixed(ASSETS[symbol]?.decimals ?? 2)} (within ${maxSweepAge} candles)`);
+          }
+        } else {
+          const recentBearSweeps = [
+            ...sweepsPrimary.filter(s => (s.direction === 'short' || s.type === 'bearish') && s.wickExtreme !== undefined && s.wickExtreme > entry && isRecentSweep(s)),
+            ...sweepsStructure.filter(s => (s.direction === 'short' || s.type === 'bearish') && s.wickExtreme !== undefined && s.wickExtreme > entry && isRecentSweep(s)),
+          ].sort((a, b) => b.candleIndex - a.candleIndex);
+          if (recentBearSweeps.length > 0) {
+            inv = recentBearSweeps[0].wickExtreme;
+            steps.push(`🪤 SL anchored to recent sweep wick high @ $${inv.toFixed(ASSETS[symbol]?.decimals ?? 2)}`);
+          } else {
+            inv = bestSwingHigh;
+            const anchor = nearestSwingHighs.length > 0 ? 'Primary' : 'HTF';
+            steps.push(`📌 SL anchored to ${anchor} swing high @ $${inv.toFixed(ASSETS[symbol]?.decimals ?? 2)}`);
+          }
+        }
+
+        // Safety guard: SL must be above entry
+        if (inv <= entry) inv = bestSwingHigh;
+        // Enforce session-aware minimum distance
+        if (inv - entry < effectiveMinDistance) inv = entry + effectiveMinDistance;
+      }
+      
+      // If still null after all that, use most recent swing
+      if (inv === null) {
+        if (direction === 'long' && nearestSwingLows?.length > 0) {
+          inv = nearestSwingLows[0].price;
+          steps.push(`SL fallback: most recent swing low = ${inv?.toFixed(2)}`);
+        } else if (direction === 'short' && nearestSwingHighs?.length > 0) {
+          inv = nearestSwingHighs[0].price;
+          steps.push(`SL fallback: most recent swing high = ${inv?.toFixed(2)}`);
         }
       }
-
-      // Safety guard: SL must be below entry
-      if (inv >= entry) inv = bestSwingLow;
-      // Enforce session-aware minimum distance
-      if (entry - inv < effectiveMinDistance) inv = entry - effectiveMinDistance;
-    } else {
-      // SL anchor priority for SHORT:
-      // 1) Supply OB upperBound — structural ceiling
-      // 2) Most-recent RECENT bearish sweep wick high (time-filtered)
-      // 3) Best swing high (primary → HTF fallback)
-      if (nearestOB && nearestOB.upperBound > entry) {
-        inv = nearestOB.upperBound;
-        const recentBearSweeps = sweepsPrimary
-          .filter(s => (s.direction === 'short' || s.type === 'bearish') && s.wickExtreme !== undefined && s.wickExtreme > entry && isRecentSweep(s))
-          .sort((a, b) => b.candleIndex - a.candleIndex);
-        if (recentBearSweeps.length > 0 && recentBearSweeps[0].wickExtreme > inv) {
-          inv = recentBearSweeps[0].wickExtreme;
-          steps.push(`🪤 SL anchored to recent sweep wick high @ $${inv.toFixed(ASSETS[symbol]?.decimals ?? 2)} (within ${maxSweepAge} candles)`);
-        }
-      } else {
-        const recentBearSweeps = [
-          ...sweepsPrimary.filter(s => (s.direction === 'short' || s.type === 'bearish') && s.wickExtreme !== undefined && s.wickExtreme > entry && isRecentSweep(s)),
-          ...sweepsStructure.filter(s => (s.direction === 'short' || s.type === 'bearish') && s.wickExtreme !== undefined && s.wickExtreme > entry && isRecentSweep(s)),
-        ].sort((a, b) => b.candleIndex - a.candleIndex);
-        if (recentBearSweeps.length > 0) {
-          inv = recentBearSweeps[0].wickExtreme;
-          steps.push(`🪤 SL anchored to recent sweep wick high @ $${inv.toFixed(ASSETS[symbol]?.decimals ?? 2)}`);
-        } else {
-          inv = bestSwingHigh;
-          const anchor = nearestSwingHighs.length > 0 ? 'Primary' : 'HTF';
-          steps.push(`📌 SL anchored to ${anchor} swing high @ $${inv.toFixed(ASSETS[symbol]?.decimals ?? 2)}`);
-        }
-      }
-
-      // Safety guard: SL must be above entry
-      if (inv <= entry) inv = bestSwingHigh;
-      // Enforce session-aware minimum distance
-      if (inv - entry < effectiveMinDistance) inv = entry + effectiveMinDistance;
     }
 
     // ── Thesis Invalidation Cross-Check ─────────────────────────
@@ -1281,6 +1306,101 @@ export async function runAnalysis(allData, config = {}) {
     decision = 'TAKE_NOW';
   }
 
+  // ── SMC Rule: Validate 1:4 TP is structurally clear ────────────────
+  if (direction && slData && entry) {
+    const slDist = Math.abs(entry - slData.value);
+    const tp4R = direction === 'long' ? entry + slDist * 4 : entry - slDist * 4;
+  
+    // Collect obstacles between entry and 1:4 TP
+    const obstacles = [];
+  
+    // Check OBs in the path
+    for (const ob of [...(obsOB || []), ...(obsPrimary || [])]) {
+      if (ob.status !== 'active') continue;
+      const obMid = (ob.high + ob.low) / 2;
+      if (direction === 'long') {
+        // Supply OBs between entry and 1:4 TP block longs
+        if (ob.type === 'supply' && obMid > entry && obMid < tp4R) {
+          obstacles.push({ reason: `Supply OB`, level: obMid });
+        }
+      } else {
+        // Demand OBs between entry and 1:4 TP block shorts
+        if (ob.type === 'demand' && obMid < entry && obMid > tp4R) {
+          obstacles.push({ reason: `Demand OB`, level: obMid });
+        }
+      }
+    }
+  
+    // Check FVGs in the path
+    for (const fvg of allFVGs || []) {
+      if (fvg.filled) continue;
+      const fvgMid = (fvg.upper + fvg.lower) / 2;
+      if (direction === 'long') {
+        if (fvg.type === 'bearish' && fvgMid > entry && fvgMid < tp4R) {
+          obstacles.push({ reason: `Bearish FVG`, level: fvgMid });
+        }
+      } else {
+        if (fvg.type === 'bullish' && fvgMid < entry && fvgMid > tp4R) {
+          obstacles.push({ reason: `Bullish FVG`, level: fvgMid });
+        }
+      }
+    }
+  
+    // Check swing highs/lows in path
+    if (direction === 'long' && lastHighsBias) {
+      for (const sh of lastHighsBias) {
+        if (sh.price > entry && sh.price < tp4R) {
+          obstacles.push({ reason: `Swing High`, level: sh.price });
+        }
+      }
+    }
+    if (direction === 'short' && lastLowsBias) {
+      for (const sl of lastLowsBias) {
+        if (sl.price < entry && sl.price > tp4R) {
+          obstacles.push({ reason: `Swing Low`, level: sl.price });
+        }
+      }
+    }
+  
+    // Build smcAnalysis object for UI
+    const bos = allShifts?.find(s => !s.isChoch);
+    const choch = allShifts?.find(s => s.isChoch);
+    const recentSweep = allSweeps?.length > 0 ? allSweeps[allSweeps.length - 1] : null;
+    const nearActiveOB = direction === 'long'
+      ? [...(obsOB || []), ...(obsPrimary || [])].find(o => o.type === 'demand' && o.status === 'active')
+      : [...(obsOB || []), ...(obsPrimary || [])].find(o => o.type === 'supply' && o.status === 'active');
+    const nearActiveFVG = direction === 'long'
+      ? allFVGs?.find(f => !f.filled && f.type === 'bullish')
+      : allFVGs?.find(f => !f.filled && f.type === 'bearish');
+    const structTarget = direction === 'long'
+      ? (eqHiLo?.eqHighs?.[0] || drawOnLiquidity)
+      : (eqHiLo?.eqLows?.[0] || drawOnLiquidity);
+  
+    const tp4RAchievable = obstacles.length === 0;
+  
+    smcAnalysis = {
+      bos: bos ? { confirmed: true, level: bos.price ?? bos.level, tf: profile.primaryKey } : { confirmed: false },
+      choch: choch ? { confirmed: true, level: choch.price ?? choch.level } : { confirmed: false },
+      liquiditySweep: recentSweep ? { confirmed: true, level: recentSweep.sweptLevel ?? recentSweep.level, direction: recentSweep.direction } : { confirmed: false },
+      orderBlock: nearActiveOB ? { confirmed: true, high: nearActiveOB.high, low: nearActiveOB.low, type: nearActiveOB.type } : { confirmed: false },
+      fvg: nearActiveFVG ? { confirmed: true, upper: nearActiveFVG.upper, lower: nearActiveFVG.lower, type: nearActiveFVG.type } : { confirmed: false },
+      structuralTarget: structTarget ? { level: structTarget.price ?? structTarget.level ?? structTarget.eqPrice, description: structTarget.description ?? structTarget.type ?? 'Liquidity Draw' } : null,
+      tp4R,
+      tp4RAchievable,
+      obstacles,
+      slLevel: slData?.value,
+    };
+  
+    // STRICT REJECTION: Any obstacle in path = NO TRADE
+    if (!tp4RAchievable && decision === 'TAKE_NOW') {
+      decision = 'NO_TRADE';
+      rejectionReason = `🚧 Trade skipped — 1:4 target ($${tp4R.toFixed(2)}) not structurally supported. ${obstacles[0].reason} at $${obstacles[0].level.toFixed(2)} blocks path.`;
+      steps.push(`1:4 TP REJECTED: ${obstacles.map(o => `${o.reason} @ ${o.level.toFixed(2)}`).join(', ')}`);
+    } else {
+      steps.push(`✅ 1:4 TP ($${tp4R.toFixed(2)}) structurally clear — path has no obstacles`);
+    }
+  }
+
   // ── Filter C: News Caution Downgrade ──────────────────────────
   // During NY Economic Release window (12:30-15:00 UTC), downgrade TAKE_NOW to WAIT
   // unless Signal Grade is A+ or AI Confidence >= 75%.
@@ -1511,6 +1631,7 @@ export async function runAnalysis(allData, config = {}) {
     premiumDiscountZones,
     killZone,
     cmeGapData,
+    smcAnalysis,
     // ── EMA Indicators (for MarketRegime component) ────────────────
     indicators: e20b ? {
       ema20:        parseFloat(e20b.toFixed(4)),

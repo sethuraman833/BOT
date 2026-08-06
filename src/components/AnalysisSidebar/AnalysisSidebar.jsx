@@ -164,6 +164,109 @@ function AIOpinion({ aiAnalysis, staggerIndex }) {
   );
 }
 
+// ── SMC Institutional Analysis Block ─────────────────────────────
+function SMCAnalysisBlock({ smcAnalysis, direction, confluenceScore, staggerIndex }) {
+  if (!smcAnalysis) return null;
+  const isLong = direction === 'long';
+  const confidence = confluenceScore?.aiConfidence || 0;
+
+  const fmt = (val) => val != null ? `$${Number(val).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}` : '—';
+
+  const rows = [
+    {
+      label: 'BOS',
+      value: smcAnalysis.bos?.confirmed
+        ? `✅ Confirmed ${smcAnalysis.bos.type || ''} at ${fmt(smcAnalysis.bos.level)} (${smcAnalysis.bos.tf || ''})`
+        : '— Not detected',
+      met: smcAnalysis.bos?.confirmed,
+    },
+    {
+      label: 'CHoCH',
+      value: smcAnalysis.choch?.confirmed
+        ? `✅ Confirmed at ${fmt(smcAnalysis.choch.level)}`
+        : '— Not detected',
+      met: smcAnalysis.choch?.confirmed,
+    },
+    {
+      label: 'Liquidity Sweep',
+      value: smcAnalysis.liquiditySweep?.confirmed
+        ? `✅ ${smcAnalysis.liquiditySweep.direction || ''} sweep at ${fmt(smcAnalysis.liquiditySweep.level)}`
+        : '— Not detected',
+      met: smcAnalysis.liquiditySweep?.confirmed,
+    },
+    {
+      label: 'Order Block',
+      value: smcAnalysis.orderBlock?.confirmed
+        ? `✅ ${smcAnalysis.orderBlock.type === 'demand' ? 'Demand' : 'Supply'} OB  ${fmt(smcAnalysis.orderBlock.low)}–${fmt(smcAnalysis.orderBlock.high)}`
+        : '— Not detected',
+      met: smcAnalysis.orderBlock?.confirmed,
+    },
+    {
+      label: 'FVG',
+      value: smcAnalysis.fvg?.confirmed
+        ? `✅ ${smcAnalysis.fvg.type === 'bullish' ? 'Bullish' : 'Bearish'} FVG  ${fmt(smcAnalysis.fvg.lower)}–${fmt(smcAnalysis.fvg.upper)}`
+        : '— Not detected',
+      met: smcAnalysis.fvg?.confirmed,
+    },
+    {
+      label: 'Structural Target',
+      value: smcAnalysis.structuralTarget
+        ? `${smcAnalysis.structuralTarget.description || 'Liquidity Draw'} at ${fmt(smcAnalysis.structuralTarget.level)}`
+        : '— None identified',
+      met: !!smcAnalysis.structuralTarget,
+    },
+  ];
+
+  const tp4RAchievable = smcAnalysis.tp4RAchievable;
+  const obstacleText = smcAnalysis.obstacles?.length > 0
+    ? smcAnalysis.obstacles.map(o => `${o.reason} @ ${fmt(o.level)}`).join(' · ')
+    : null;
+
+  return (
+    <div className="sidebar-section animate-fade-in-up glass-card smc-analysis-block" style={{ animationDelay: `${staggerIndex * 60}ms` }}>
+      <div className="section-header accent-border">⚔️ SMC Structural Validation</div>
+
+      <div className="smc-rows">
+        {rows.map(({ label, value, met }) => (
+          <div className={`smc-row ${met ? 'met' : 'unmet'}`} key={label}>
+            <span className="smc-row-label">{label}</span>
+            <span className="smc-row-value">{value}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* 1:4 TP achievability */}
+      <div className={`smc-tp4r-block ${tp4RAchievable ? 'achievable' : 'blocked'}`}>
+        <div className="smc-tp4r-header">
+          <span className="smc-tp4r-label">1:4 Target ({fmt(smcAnalysis.tp4R)})</span>
+          <span className={`smc-tp4r-badge ${tp4RAchievable ? 'yes' : 'no'}`}>
+            {tp4RAchievable ? '✅ CLEAR PATH' : '🚧 BLOCKED'}
+          </span>
+        </div>
+        {!tp4RAchievable && obstacleText && (
+          <div className="smc-obstacle-text">Obstacle: {obstacleText}</div>
+        )}
+        {tp4RAchievable && (
+          <div className="smc-clear-text">No structural obstacles between entry and 1:4 TP</div>
+        )}
+      </div>
+
+      {/* Probability + verdict */}
+      <div className="smc-verdict-row">
+        <div className="smc-confidence">
+          <span className="smc-conf-label">Confidence</span>
+          <span className="smc-conf-val">{confidence}%</span>
+        </div>
+        <div className={`smc-verdict-pill ${tp4RAchievable ? (direction ? 'take' : 'skip') : 'skip'}`}>
+          {tp4RAchievable && direction
+            ? `TAKE ${isLong ? 'LONG' : 'SHORT'}`
+            : 'SKIP TRADE'}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CMEGapSection({ cmeGapData, staggerIndex }) {
   if (!cmeGapData) return null;
 
@@ -414,6 +517,14 @@ export default function AnalysisSidebar() {
 
         {/* ── CONFLUENCE ─────────────────────────────────── */}
         <ConfluenceSection score={analysis.confluenceScore} signalGrade={analysis.signalGrade} staggerIndex={nextDelay()} />
+
+        {/* ── SMC STRUCTURAL VALIDATION ──────────────────── */}
+        <SMCAnalysisBlock
+          smcAnalysis={analysis.smcAnalysis}
+          direction={analysis.direction}
+          confluenceScore={analysis.confluenceScore}
+          staggerIndex={nextDelay()}
+        />
 
         {/* ── AI ─────────────────────────────────────────── */}
         <AIOpinion aiAnalysis={analysis.aiAnalysis} staggerIndex={nextDelay()} />

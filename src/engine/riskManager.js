@@ -229,7 +229,7 @@ export function calculateTPs(
   if (risk === 0) return { tps: [], tpStructure: 'single' };
 
   const isLong = direction === 'long';
-  const minTp1Rrr = minRrr;
+  const minTp1Rrr = 4.0;
   const minTp2Rrr = minRrr + 1.0;
   const minTp3Rrr = minRrr + 2.0;
   const priceDecimals = (symbol && ASSETS[symbol]) ? ASSETS[symbol].decimals : 4;
@@ -447,6 +447,11 @@ export function calculateTPs(
       tp1 = { ...cand, rrr: candRrr };
       break;
     }
+  }
+
+  // SMC Rule: Single TP only at 4R
+  if (tp1) {
+    return { tps: [{ ...tp1, closePercent: 100, reason: tp1.reason || '1:4 Structural Target' }], tpStructure: 'single_4R' };
   }
 
   // Find TP2 candidate (first one satisfying RRR >= minTp2Rrr and spacing >= 1.0R from TP1)
