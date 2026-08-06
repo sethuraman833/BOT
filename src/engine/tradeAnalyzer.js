@@ -1342,13 +1342,10 @@ export async function runAnalysis(allData, config = {}) {
       }
     }
 
-    // EQH/EQL liquidity pools only — multiple-touch clusters = real reversal zones
-    const eqObstacles = direction === 'long'
-      ? (eqHiLo?.eqh || []).filter(e => e.level > entry && e.level < tp4R)
-      : (eqHiLo?.eql || []).filter(e => e.level < entry && e.level > tp4R);
-    for (const eq of eqObstacles) {
-      obstacles.push({ reason: eq.label || (direction === 'long' ? 'Equal Highs' : 'Equal Lows'), level: eq.level });
-    }
+    // EQH and EQL are NOT obstacles — they are DRAW ON LIQUIDITY targets.
+    // For LONG: Equal Highs above price = where price is going (target, not blocker)
+    // For SHORT: Equal Lows below price = where price is going (target, not blocker)
+    // Only HTF OBs (supply/demand) are real institutional obstacles.
   
     // Build smcAnalysis object for UI
     const bos = allShifts?.find(s => !s.isChoch);
@@ -1380,13 +1377,23 @@ export async function runAnalysis(allData, config = {}) {
       slLevel: slData?.value,
     };
   
+    // Price-magnitude-aware formatter for rejection messages
+    const fmtP = (v) => {
+      if (!v) return '?';
+      if (v < 0.01)  return v.toFixed(6);
+      if (v < 1)     return v.toFixed(5);
+      if (v < 100)   return v.toFixed(4);
+      if (v < 10000) return v.toFixed(2);
+      return v.toLocaleString('en-US', { maximumFractionDigits: 0 });
+    };
+
     // STRICT REJECTION: Any obstacle in path = NO TRADE
     if (!tp4RAchievable && decision === 'TAKE_NOW') {
       decision = 'NO_TRADE';
-      rejectionReason = `🚧 Trade skipped — 1:4 target ($${tp4R.toFixed(2)}) not structurally supported. ${obstacles[0].reason} at $${obstacles[0].level.toFixed(2)} blocks path.`;
-      steps.push(`1:4 TP REJECTED: ${obstacles.map(o => `${o.reason} @ ${o.level.toFixed(2)}`).join(', ')}`);
+      rejectionReason = `🚧 Trade skipped — 1:4 target ($${fmtP(tp4R)}) not structurally supported. ${obstacles[0].reason} at $${fmtP(obstacles[0].level)} blocks path.`;
+      steps.push(`1:4 TP REJECTED: ${obstacles.map(o => `${o.reason} @ $${fmtP(o.level)}`).join(', ')}`);
     } else {
-      steps.push(`✅ 1:4 TP ($${tp4R.toFixed(2)}) structurally clear — path has no obstacles`);
+      steps.push(`✅ 1:4 TP ($${fmtP(tp4R)}) structurally clear — path has no obstacles`);
     }
   }
 
