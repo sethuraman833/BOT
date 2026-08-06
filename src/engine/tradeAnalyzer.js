@@ -737,13 +737,27 @@ export async function runAnalysis(allData, config = {}) {
     const effectiveMinDistance = minDistance * sessionSlMult;
     if (isAsianSession) steps.push(`🌏 Asian Session: SL minimum widened ×1.35 for London Open expansion`);
 
-    // ── PRIMARY: SL strictly beyond BOS/CHoCH structural candle ────────────
+    // ── PRIMARY: SL beyond sweep/displacement candle wick (ICT correct) ──
+    // The wickExtreme of the sweep candle is the TRUE invalidation level.
+    // The BOS candle can be several candles after the actual sweep — using it
+    // gives a misplaced SL that doesn't reflect the real structural swing.
     let inv = null;
-    if (lastPrimaryShift && lastPrimaryShift.candleIndex != null) {
+
+    const relevantSweeps = direction === 'long'
+      ? allSweeps.filter(s => s.type === 'bearish' && s.wickExtreme != null && s.wickExtreme < entry)
+          .sort((a, b) => b.candleIndex - a.candleIndex)
+      : allSweeps.filter(s => s.type === 'bullish' && s.wickExtreme != null && s.wickExtreme > entry)
+          .sort((a, b) => b.candleIndex - a.candleIndex);
+
+    if (relevantSweeps.length > 0) {
+      inv = relevantSweeps[0].wickExtreme;
+      steps.push(`📌 SL anchored to sweep wick extreme @ $${inv?.toFixed(ASSETS[symbol]?.decimals ?? 2)} (displacement candle)`);
+    } else if (lastPrimaryShift && lastPrimaryShift.candleIndex != null) {
+      // Fallback 1: BOS/CHoCH candle
       const shiftCandle = candlesPrimary[lastPrimaryShift.candleIndex];
       if (shiftCandle) {
         inv = direction === 'long' ? shiftCandle.low : shiftCandle.high;
-        steps.push(`📌 SL anchored to BOS/CHoCH candle [${lastPrimaryShift.candleIndex}]: ${direction === 'long' ? 'low' : 'high'} = ${inv?.toFixed(2)}`);
+        steps.push(`📌 SL fallback → BOS/CHoCH candle [${lastPrimaryShift.candleIndex}]: ${direction === 'long' ? 'low' : 'high'} = ${inv?.toFixed(2)}`);
       }
     }
 
@@ -1311,55 +1325,29 @@ export async function runAnalysis(allData, config = {}) {
     const slDist = Math.abs(entry - slData.value);
     const tp4R = direction === 'long' ? entry + slDist * 4 : entry - slDist * 4;
   
-    // Collect obstacles between entry and 1:4 TP
+    // ── Obstacle Filter: HTF OBs + EQH/EQL only (correct SMC filter) ─────
+    // Rationale: 5m micro-OBs and individual swing highs are NOT obstacles for
+    // a 4R move. Only HTF institutional OBs and equal highs/lows (liquidity
+    // pools with multiple touches) are real reversal magnets that block price.
     const obstacles = [];
-  
-    // Check OBs in the path
-    for (const ob of [...(obsOB || []), ...(obsPrimary || [])]) {
+
+    // HTF OBs only (obsOB = bias/structure timeframe, NOT obsPrimary = 5m)
+    for (const ob of (obsOB || [])) {
       if (ob.status !== 'active') continue;
       const obMid = (ob.high + ob.low) / 2;
-      if (direction === 'long') {
-        // Supply OBs between entry and 1:4 TP block longs
-        if (ob.type === 'supply' && obMid > entry && obMid < tp4R) {
-          obstacles.push({ reason: `Supply OB`, level: obMid });
-        }
-      } else {
-        // Demand OBs between entry and 1:4 TP block shorts
-        if (ob.type === 'demand' && obMid < entry && obMid > tp4R) {
-          obstacles.push({ reason: `Demand OB`, level: obMid });
-        }
+      if (direction === 'long' && ob.type === 'supply' && obMid > entry && obMid < tp4R) {
+        obstacles.push({ reason: `HTF Supply OB`, level: obMid });
+      } else if (direction === 'short' && ob.type === 'demand' && obMid < entry && obMid > tp4R) {
+        obstacles.push({ reason: `HTF Demand OB`, level: obMid });
       }
     }
-  
-    // Check FVGs in the path
-    for (const fvg of allFVGs || []) {
-      if (fvg.filled) continue;
-      const fvgMid = (fvg.upper + fvg.lower) / 2;
-      if (direction === 'long') {
-        if (fvg.type === 'bearish' && fvgMid > entry && fvgMid < tp4R) {
-          obstacles.push({ reason: `Bearish FVG`, level: fvgMid });
-        }
-      } else {
-        if (fvg.type === 'bullish' && fvgMid < entry && fvgMid > tp4R) {
-          obstacles.push({ reason: `Bullish FVG`, level: fvgMid });
-        }
-      }
-    }
-  
-    // Check swing highs/lows in path
-    if (direction === 'long' && lastHighsBias) {
-      for (const sh of lastHighsBias) {
-        if (sh.price > entry && sh.price < tp4R) {
-          obstacles.push({ reason: `Swing High`, level: sh.price });
-        }
-      }
-    }
-    if (direction === 'short' && lastLowsBias) {
-      for (const sl of lastLowsBias) {
-        if (sl.price < entry && sl.price > tp4R) {
-          obstacles.push({ reason: `Swing Low`, level: sl.price });
-        }
-      }
+
+    // EQH/EQL liquidity pools only — multiple-touch clusters = real reversal zones
+    const eqObstacles = direction === 'long'
+      ? (eqHiLo?.eqh || []).filter(e => e.level > entry && e.level < tp4R)
+      : (eqHiLo?.eql || []).filter(e => e.level < entry && e.level > tp4R);
+    for (const eq of eqObstacles) {
+      obstacles.push({ reason: eq.label || (direction === 'long' ? 'Equal Highs' : 'Equal Lows'), level: eq.level });
     }
   
     // Build smcAnalysis object for UI
@@ -1372,9 +1360,10 @@ export async function runAnalysis(allData, config = {}) {
     const nearActiveFVG = direction === 'long'
       ? allFVGs?.find(f => !f.filled && f.type === 'bullish')
       : allFVGs?.find(f => !f.filled && f.type === 'bearish');
+    // eqHiLo fields: { eqh: [...], eql: [...] } — each has .level, .label, .priority
     const structTarget = direction === 'long'
-      ? (eqHiLo?.eqHighs?.[0] || drawOnLiquidity)
-      : (eqHiLo?.eqLows?.[0] || drawOnLiquidity);
+      ? (eqHiLo?.eqh?.[0] || drawOnLiquidity)
+      : (eqHiLo?.eql?.[0] || drawOnLiquidity);
   
     const tp4RAchievable = obstacles.length === 0;
   

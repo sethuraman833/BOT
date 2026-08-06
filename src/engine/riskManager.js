@@ -449,9 +449,21 @@ export function calculateTPs(
     }
   }
 
-  // SMC Rule: Single TP only at 4R
+  // SMC Rule: Single TP at EXACTLY 4R from entry
+  // The structural candidate is used only to confirm the label — the level is always exact 4R.
   if (tp1) {
-    return { tps: [{ ...tp1, closePercent: 100, reason: tp1.reason || '1:4 Structural Target' }], tpStructure: 'single_4R' };
+    const slDist = Math.abs(entry - stopLoss);
+    const exact4R = isLong ? entry + slDist * 4 : entry - slDist * 4;
+    const isNearStructural = Math.abs((tp1.level - exact4R) / exact4R) < 0.015; // within 1.5%
+    return {
+      tps: [{
+        level: exact4R,
+        closePercent: 100,
+        reason: isNearStructural ? `1:4 Target — ${tp1.reason}` : '1:4 Target (4R Exact)',
+        rrr: 4.0,
+      }],
+      tpStructure: 'single_4R',
+    };
   }
 
   // Find TP2 candidate (first one satisfying RRR >= minTp2Rrr and spacing >= 1.0R from TP1)
