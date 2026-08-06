@@ -1,3 +1,4 @@
+import { formatPrice } from '../../utils/formatters.js';
 import './MarketRegime.css';
 
 // ── EMA Regime Detection Engine ──────────────────────────────────────────────
@@ -70,6 +71,7 @@ export default function MarketRegime({ analysis }) {
   if (!analysis) return null;
 
   const ind = analysis.indicators;
+  const symbol = analysis.symbol || 'BTCUSDT';
   const currentPrice = analysis.entry || analysis.currentPrice || 0;
   const result = computeRegime(ind, currentPrice);
 
@@ -130,7 +132,7 @@ export default function MarketRegime({ analysis }) {
             ].map(({ name, val, slope, dev: deviation }) => (
               <div className="regime-ema-row" key={name}>
                 <span className="ema-row-name">{name}</span>
-                <span className="ema-row-val mono">{val ? val.toFixed(2) : '—'}</span>
+                <span className="ema-row-val mono">{val ? formatPrice(val, symbol) : '—'}</span>
                 <span className="ema-row-slope" style={{ color: slope?.color }}>
                   {slope?.arrow} {slope?.text}
                 </span>
