@@ -449,33 +449,53 @@ export function calculateTPs(
     }
   }
 
-  // ── SMC Rule: ALWAYS return exactly 4R — unconditional ──────────────
-  // Previously this was guarded by `if (tp1)` which meant if all structural
-  // candidates were below 4R, NO TP was returned → RRR = 0.00 → veto.
-  // Now: always compute exact 4R; use nearest structural candidate for label only.
-  const slDist4R = Math.abs(entry - stopLoss);
-  const exact4R   = isLong ? entry + slDist4R * 4 : entry - slDist4R * 4;
+  // ── HYBRID: 3-TP system with ICT-correct targets + 4R final ──────────
+  // TP1: First structural level ≥ 1.5R → 40% close (protect capital early)
+  // TP2: First structural level ≥ 2.5R → 35% close (lock profit mid-way)
+  // TP3: Always exactly 4R → 25% close (institutional final target)
 
-  // Find nearest structural candidate (any RRR) for label enhancement
-  const allDirCandidates = dedupedCandidates.filter(c =>
-    isLong ? c.level > entry : c.level < entry
-  );
-  const nearestToTP = allDirCandidates.sort(
-    (a, b) => Math.abs(a.level - exact4R) - Math.abs(b.level - exact4R)
-  )[0];
-  const isNearStructural = nearestToTP &&
-    Math.abs((nearestToTP.level - exact4R) / exact4R) < 0.015; // within 1.5%
+  // TP1: structural candidate ≥ 1.5R, else exact 1.5R
+  let hybridTp1 = null;
+  for (const cand of dedupedCandidates) {
+    const rr = calculateRRR(entry, stopLoss, cand.level, direction);
+    if (rr >= 1.5) { hybridTp1 = { ...cand, rrr: rr }; break; }
+  }
+  if (!hybridTp1) {
+    const lvl = isLong ? entry + risk * 1.5 : entry - risk * 1.5;
+    hybridTp1 = { level: lvl, rrr: 1.5, reason: '1.5R Target' };
+  }
+
+  // TP2: structural candidate ≥ 2.5R beyond TP1, else exact 2.5R
+  let hybridTp2 = null;
+  for (const cand of dedupedCandidates) {
+    const rr = calculateRRR(entry, stopLoss, cand.level, direction);
+    const isFurther = isLong ? cand.level > hybridTp1.level : cand.level < hybridTp1.level;
+    if (rr >= 2.5 && isFurther) { hybridTp2 = { ...cand, rrr: rr }; break; }
+  }
+  if (!hybridTp2) {
+    const lvl = isLong ? entry + risk * 2.5 : entry - risk * 2.5;
+    hybridTp2 = { level: lvl, rrr: 2.5, reason: '2.5R Target' };
+  }
+
+  // TP3: always exactly 4R (label enhanced if structural level within 1.5%)
+  const exact4R = isLong ? entry + risk * 4 : entry - risk * 4;
+  const nearTP3 = dedupedCandidates
+    .filter(c => isLong ? c.level > hybridTp2.level : c.level < hybridTp2.level)
+    .sort((a, b) => Math.abs(a.level - exact4R) - Math.abs(b.level - exact4R))[0];
+  const tp3NearStructural = nearTP3 && Math.abs((nearTP3.level - exact4R) / exact4R) < 0.015;
+  const hybridTp3 = {
+    level: exact4R,
+    rrr: 4.0,
+    reason: tp3NearStructural ? `1:4 Final — ${nearTP3.reason}` : '1:4 Final Target (4R)',
+  };
 
   return {
-    tps: [{
-      level: exact4R,
-      closePercent: 100,
-      reason: isNearStructural
-        ? `1:4 Target — ${nearestToTP.reason}`
-        : '1:4 Target (4R Exact)',
-      rrr: 4.0,
-    }],
-    tpStructure: 'single_4R',
+    tps: [
+      { ...hybridTp1, closePercent: 40 },
+      { ...hybridTp2, closePercent: 35 },
+      { ...hybridTp3, closePercent: 25 },
+    ],
+    tpStructure: 'hybrid_3tp_4R',
   };
 
   // Find TP2 candidate (first one satisfying RRR >= minTp2Rrr and spacing >= 1.0R from TP1)

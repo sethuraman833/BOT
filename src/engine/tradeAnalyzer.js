@@ -1387,13 +1387,36 @@ export async function runAnalysis(allData, config = {}) {
       return v.toLocaleString('en-US', { maximumFractionDigits: 0 });
     };
 
-    // STRICT REJECTION: Any obstacle in path = NO TRADE
-    if (!tp4RAchievable && decision === 'TAKE_NOW') {
+    // HYBRID REJECTION: Only reject if obstacle blocks path to TP1 (40% close level)
+    // If obstacle is only between TP1→4R, allow — partial at TP1 protects capital
+    const tp1Level = tpData?.tps?.[0]?.level; // first partial exit level (~1.5R)
+    const criticalObstacles = obstacles.filter(o =>
+      direction === 'long'
+        ? (tp1Level ? o.level < tp1Level : true)   // obstacle before TP1
+        : (tp1Level ? o.level > tp1Level : true)    // obstacle before TP1 (shorts: TP1 is below entry)
+    );
+    const warningObstacles = obstacles.filter(o =>
+      direction === 'long'
+        ? (tp1Level ? o.level >= tp1Level : false)
+        : (tp1Level ? o.level <= tp1Level : false)
+    );
+
+    if (criticalObstacles.length > 0 && decision === 'TAKE_NOW') {
+      // Obstacle before TP1 — can't even get first partial → reject
       decision = 'NO_TRADE';
-      rejectionReason = `🚧 Trade skipped — 1:4 target ($${fmtP(tp4R)}) not structurally supported. ${obstacles[0].reason} at $${fmtP(obstacles[0].level)} blocks path.`;
-      steps.push(`1:4 TP REJECTED: ${obstacles.map(o => `${o.reason} @ $${fmtP(o.level)}`).join(', ')}`);
+      rejectionReason = `🚧 Trade skipped — ${criticalObstacles[0].reason} at $${fmtP(criticalObstacles[0].level)} blocks path before TP1 ($${fmtP(tp1Level)}). No partial exit achievable.`;
+      steps.push(`1:4 PATH BLOCKED before TP1: ${criticalObstacles.map(o => `${o.reason} @ $${fmtP(o.level)}`).join(', ')}`);
+    } else if (warningObstacles.length > 0) {
+      // Obstacle between TP1 and 4R — partial at TP1 protects capital, allow trade
+      steps.push(`⚠️ ${warningObstacles[0].reason} at $${fmtP(warningObstacles[0].level)} between TP1→4R — TP1 partial (40%) protects capital`);
     } else {
-      steps.push(`✅ 1:4 TP ($${fmtP(tp4R)}) structurally clear — path has no obstacles`);
+      steps.push(`✅ Path clear: No HTF obstacles between entry and 1:4 target ($${fmtP(tp4R)})`);
+    }
+
+    // Update smcAnalysis achievability based on critical obstacles only
+    if (smcAnalysis) {
+      smcAnalysis.tp4RAchievable = criticalObstacles.length === 0;
+      smcAnalysis.obstacles = criticalObstacles;
     }
   }
 
