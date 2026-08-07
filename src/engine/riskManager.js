@@ -454,11 +454,11 @@ export function calculateTPs(
   // TP2: First structural level ≥ 2.5R → 35% close (lock profit mid-way)
   // TP3: Always exactly 4R → 25% close (institutional final target)
 
-  // TP1: structural candidate ≥ 1.5R, else exact 1.5R
+  // TP1: structural candidate ≥ 1.5R AND ≤ 2.4R (cap prevents TP1 jumping past TP2)
   let hybridTp1 = null;
   for (const cand of dedupedCandidates) {
     const rr = calculateRRR(entry, stopLoss, cand.level, direction);
-    if (rr >= 1.5) { hybridTp1 = { ...cand, rrr: rr }; break; }
+    if (rr >= 1.5 && rr <= 2.4) { hybridTp1 = { ...cand, rrr: rr }; break; }
   }
   if (!hybridTp1) {
     const lvl = isLong ? entry + risk * 1.5 : entry - risk * 1.5;
@@ -482,7 +482,6 @@ export function calculateTPs(
   }
 
   // Safety: ensure TP2 is at least 0.5R away from TP3 (4R)
-  // If structural TP2 landed too close to 4R, fall back to exact 2.5R
   const tp2to4RSpacing = Math.abs(exact4R - hybridTp2.level) / risk;
   if (tp2to4RSpacing < 0.5) {
     const lvl = isLong ? entry + risk * 2.5 : entry - risk * 2.5;
@@ -507,12 +506,21 @@ export function calculateTPs(
     reason: tp3NearStructural ? `1:4 Final — ${nearTP3.reason}` : '1:4 Final Target (4R)',
   };
 
+  // Final sort guard: ensure TP1 always closest to entry, TP3 always furthest.
+  // Sorts by distance from entry ascending so TP1=closest, TP2=middle, TP3=furthest.
+  const rawTps = [
+    { ...hybridTp1, closePercent: 40 },
+    { ...hybridTp2, closePercent: 35 },
+    { ...hybridTp3, closePercent: 25 },
+  ];
+  rawTps.sort((a, b) =>
+    isLong
+      ? a.level - b.level          // LONG: lowest price first (closest above entry)
+      : b.level - a.level          // SHORT: highest price first (closest below entry)
+  );
+
   return {
-    tps: [
-      { ...hybridTp1, closePercent: 40 },
-      { ...hybridTp2, closePercent: 35 },
-      { ...hybridTp3, closePercent: 25 },
-    ],
+    tps: rawTps,
     tpStructure: 'hybrid_3tp_4R',
   };
 
