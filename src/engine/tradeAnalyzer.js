@@ -1360,6 +1360,9 @@ export async function runAnalysis(allData, config = {}) {
     rejectionReason = `Low confluence: only ${checksMetCount}/${checksTotalCount} checks met (${(checksMetPct * 100).toFixed(0)}% < 25% min)`;
   } else if (aiConfidence < profile.minAiConfidence && signalGrade.grade !== 'A+' && signalGrade.grade !== 'A') {
     rejectionReason = `AI Confidence too low: ${aiConfidence}% < ${profile.minAiConfidence}% min for ${profile.label} (Inst Grade: ${signalGrade.grade})`;
+  } else if (signalGrade.score < 45) {
+    // Grade D/F gate: below 45/100 is too weak to trade regardless of structure
+    rejectionReason = `Signal grade too low: ${signalGrade.grade} (${signalGrade.score}/100) — minimum B (45+) required. ${signalGrade.label}`;
   } else {
     decision = 'TAKE_NOW';
   }

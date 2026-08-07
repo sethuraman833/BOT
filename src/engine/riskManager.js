@@ -465,14 +465,30 @@ export function calculateTPs(
     hybridTp1 = { level: lvl, rrr: 1.5, reason: '1.5R Target' };
   }
 
-  // TP2: structural candidate ≥ 2.5R beyond TP1, else exact 2.5R
+  // TP2: structural candidate ≥ 2.5R beyond TP1, CAPPED at 3.5R max
+  // Cap ensures TP3 (4R) always has meaningful separation from TP2
   let hybridTp2 = null;
   for (const cand of dedupedCandidates) {
     const rr = calculateRRR(entry, stopLoss, cand.level, direction);
     const isFurther = isLong ? cand.level > hybridTp1.level : cand.level < hybridTp1.level;
-    if (rr >= 2.5 && isFurther) { hybridTp2 = { ...cand, rrr: rr }; break; }
+    if (rr >= 2.5 && rr <= 3.5 && isFurther) { hybridTp2 = { ...cand, rrr: rr }; break; }
   }
   if (!hybridTp2) {
+    const lvl = isLong ? entry + risk * 2.5 : entry - risk * 2.5;
+    hybridTp2 = { level: lvl, rrr: 2.5, reason: '2.5R Target' };
+  }
+
+  // Safety: ensure TP2 is at least 0.5R away from TP3 (4R)
+  // If structural TP2 landed too close to 4R, fall back to exact 2.5R
+  const tp2to4RSpacing = Math.abs(exact4R - hybridTp2.level) / risk;
+  if (tp2to4RSpacing < 0.5) {
+    const lvl = isLong ? entry + risk * 2.5 : entry - risk * 2.5;
+    hybridTp2 = { level: lvl, rrr: 2.5, reason: '2.5R Target' };
+  }
+
+  // Safety: ensure TP2 is on the correct side of TP3 (ordering sanity)
+  const tp2WrongSide = isLong ? hybridTp2.level >= exact4R : hybridTp2.level <= exact4R;
+  if (tp2WrongSide) {
     const lvl = isLong ? entry + risk * 2.5 : entry - risk * 2.5;
     hybridTp2 = { level: lvl, rrr: 2.5, reason: '2.5R Target' };
   }
