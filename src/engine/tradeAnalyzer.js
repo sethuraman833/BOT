@@ -847,38 +847,40 @@ export async function runAnalysis(allData, config = {}) {
     }
 
     // ── Thesis Invalidation Cross-Check ─────────────────────────
-    // If the BOS/CHOCH that generated the trade signal has since been broken
-    // by a *closed* candle in the opposite direction, the setup is invalid.
+    // If the BOS/CHOCH structural level has been violated by recent closed
+    // candles, the setup is no longer valid.
     //
-    // PULLBACK ENTRY EXCEPTION (critical fix):
-    // For SHORT: entry is often ABOVE the BOS level (pullback to supply zone).
-    //   Being above BOS is EXPECTED — it is the entry zone, not an invalidation.
-    //   Only fire if entry is already BELOW BOS (trade direction) and reverses.
-    // For LONG: entry is often BELOW the BOS level (pullback to demand zone).
-    //   Same logic — only fire if entry is already ABOVE BOS and reverses.
+    // Two-part guard against false vetoes:
+    // 1. PULLBACK EXCEPTION: If entry is on the far side of BOS (e.g. short
+    //    entry ABOVE BOS level) → skip entirely. That is a normal pullback
+    //    entry — the SL handles invalidation.
+    // 2. LOOKBACK LIMIT: Only check the last 10 candles, not the full history
+    //    since the BOS. A temporary cross that happened 30 candles ago and
+    //    since re-established structure should NOT veto a valid current setup.
+    const THESIS_LOOKBACK = 10;
     const thesisBroken = (() => {
       if (!lastPrimaryShift) return false;
       const triggerIdx   = lastPrimaryShift.candleIndex;
-      const recentClosed = candlesPrimary.slice(triggerIdx + 1);
-      if (recentClosed.length === 0) return false;
-      const shiftLevel = lastPrimaryShift.price ?? lastPrimaryShift.level;
+      const allSince     = candlesPrimary.slice(triggerIdx + 1);
+      if (allSince.length === 0) return false;
+      // Only inspect last 10 candles — older violations are stale
+      const recentClosed = allSince.slice(-THESIS_LOOKBACK);
+      const shiftLevel   = lastPrimaryShift.price ?? lastPrimaryShift.level;
       if (!shiftLevel) return false;
 
       if (direction === 'long') {
-        // Pullback LONG: entry below BOS (demand zone) is normal — skip check.
-        // Only invalidate if entry is already ABOVE BOS and a candle closes below it.
-        if (entry < shiftLevel) return false; // pullback entry below BOS — SL handles it
+        // Pullback LONG: entry below BOS (demand zone) is normal — skip
+        if (entry < shiftLevel) return false;
         return recentClosed.some(c => c.close < shiftLevel);
       } else {
-        // Pullback SHORT: entry above BOS (supply zone) is normal — skip check.
-        // Only invalidate if entry is already BELOW BOS and a candle closes above it.
-        if (entry > shiftLevel) return false; // pullback entry above BOS — SL handles it
+        // Pullback SHORT: entry above BOS (supply zone) is normal — skip
+        if (entry > shiftLevel) return false;
         return recentClosed.some(c => c.close > shiftLevel);
       }
     })();
     if (thesisBroken) {
       slSideInvalid = true;
-      steps.push(`⚠️ THESIS INVALIDATED: BOS/CHOCH level closed through — structural edge lost`);
+      steps.push(`⚠️ THESIS INVALIDATED: BOS/CHOCH level recently closed through — structural edge lost`);
     }
 
 
