@@ -13,9 +13,15 @@ const getSavedAsset = () => {
   return saved && ASSETS[saved] ? saved : DEFAULT_ASSET;
 };
 
+const VALID_TFS = ['5m', '15m', '1h', '4h', '1d'];
+const getSavedTimeframe = () => {
+  const saved = localStorage.getItem('terminus_tf');
+  return saved && VALID_TFS.includes(saved) ? saved : DEFAULT_TIMEFRAME;
+};
+
 const initialState = {
   asset: getSavedAsset(),
-  timeframe: DEFAULT_TIMEFRAME,
+  timeframe: getSavedTimeframe(),
   candles: {},       // { [symbol_tf]: [...candles] }
   livePrice: null,
   liveChange: 0,
@@ -36,6 +42,7 @@ function reducer(state, action) {
     case 'SET_LOADING':
       return { ...state, isLoading: action.payload };
     case 'SET_TIMEFRAME':
+      localStorage.setItem('terminus_tf', action.payload);
       return { ...state, timeframe: action.payload, backtestTime: null };
     case 'TOGGLE_BACKTEST':
       return { ...state, backtestMode: !state.backtestMode, backtestTime: null, analysis: null };

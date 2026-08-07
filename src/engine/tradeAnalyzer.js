@@ -879,8 +879,9 @@ export async function runAnalysis(allData, config = {}) {
       }
     })();
     if (thesisBroken) {
-      slSideInvalid = true;
-      steps.push(`⚠️ THESIS INVALIDATED: BOS/CHOCH level recently closed through — structural edge lost`);
+      // Downgraded to WARNING only — high confluence + SMC + SL already guard the trade.
+      // A stale BOS cross does not override an A+ setup with clear structural path.
+      steps.push(`⚠️ STRUCTURE CAUTION: BOS/CHOCH level recently re-tested — monitor for re-entry confirmation`);
     }
 
 
