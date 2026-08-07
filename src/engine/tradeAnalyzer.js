@@ -870,8 +870,35 @@ export async function runAnalysis(allData, config = {}) {
       steps.push(`⚠️ THESIS INVALIDATED: BOS/CHOCH level closed through — structural edge lost`);
     }
 
+    // ── EMA200 Confluence SL Snap ────────────────────────────────────────
+    // If the structural inv is within 0.5% of the HTF EMA200, snap SL just
+    // beyond EMA200. When structure AND EMA200 converge, EMA200 is the
+    // stronger institutional level — price respects it more cleanly.
+    if (inv && e200b && e200b > 0) {
+      const pctDiff = Math.abs(inv - e200b) / e200b;
+      if (pctDiff < 0.005) { // within 0.5% of EMA200
+        const dec = ASSETS[symbol]?.decimals ?? 2;
+        if (direction === 'long' && e200b < entry) {
+          // EMA200 is below entry (acting as support) → SL just below it
+          const snapped = e200b * 0.9990; // 0.1% below EMA200
+          if (snapped < entry) {
+            inv = snapped;
+            steps.push(`📌 SL snapped below EMA200 @ $${e200b.toFixed(dec)} (structure + EMA200 confluence)`);
+          }
+        } else if (direction === 'short' && e200b > entry) {
+          // EMA200 is above entry (acting as resistance) → SL just above it
+          const snapped = e200b * 1.0010; // 0.1% above EMA200
+          if (snapped > entry) {
+            inv = snapped;
+            steps.push(`📌 SL snapped above EMA200 @ $${e200b.toFixed(dec)} (structure + EMA200 confluence)`);
+          }
+        }
+      }
+    }
+
     // Pass ATR and avgWickSize to calculateSmartSL for improved capping
     slData = calculateSmartSL(inv, direction, allFVGs, symbol, fibData, volumeProfile, slAtr, avgWickSize);
+
     
     // Stop Loss side validation (H2)
     if (slData) {
