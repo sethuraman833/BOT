@@ -849,19 +849,30 @@ export async function runAnalysis(allData, config = {}) {
     // ── Thesis Invalidation Cross-Check ─────────────────────────
     // If the BOS/CHOCH that generated the trade signal has since been broken
     // by a *closed* candle in the opposite direction, the setup is invalid.
-    // This is the true structural SL — if triggered, mark slSideInvalid.
+    //
+    // PULLBACK ENTRY EXCEPTION (critical fix):
+    // For SHORT: entry is often ABOVE the BOS level (pullback to supply zone).
+    //   Being above BOS is EXPECTED — it is the entry zone, not an invalidation.
+    //   Only fire if entry is already BELOW BOS (trade direction) and reverses.
+    // For LONG: entry is often BELOW the BOS level (pullback to demand zone).
+    //   Same logic — only fire if entry is already ABOVE BOS and reverses.
     const thesisBroken = (() => {
       if (!lastPrimaryShift) return false;
       const triggerIdx   = lastPrimaryShift.candleIndex;
-      const recentClosed = candlesPrimary.slice(triggerIdx + 1); // candles AFTER the shift
+      const recentClosed = candlesPrimary.slice(triggerIdx + 1);
       if (recentClosed.length === 0) return false;
       const shiftLevel = lastPrimaryShift.price ?? lastPrimaryShift.level;
       if (!shiftLevel) return false;
+
       if (direction === 'long') {
-        // Thesis broken if a full candle closed BELOW the BOS level after it formed
+        // Pullback LONG: entry below BOS (demand zone) is normal — skip check.
+        // Only invalidate if entry is already ABOVE BOS and a candle closes below it.
+        if (entry < shiftLevel) return false; // pullback entry below BOS — SL handles it
         return recentClosed.some(c => c.close < shiftLevel);
       } else {
-        // Thesis broken if a full candle closed ABOVE the BOS level after it formed
+        // Pullback SHORT: entry above BOS (supply zone) is normal — skip check.
+        // Only invalidate if entry is already BELOW BOS and a candle closes above it.
+        if (entry > shiftLevel) return false; // pullback entry above BOS — SL handles it
         return recentClosed.some(c => c.close > shiftLevel);
       }
     })();
@@ -869,6 +880,7 @@ export async function runAnalysis(allData, config = {}) {
       slSideInvalid = true;
       steps.push(`⚠️ THESIS INVALIDATED: BOS/CHOCH level closed through — structural edge lost`);
     }
+
 
     // ── EMA200 Confluence SL Snap ────────────────────────────────────────
     // If the structural inv is within 0.5% of the HTF EMA200, snap SL just
