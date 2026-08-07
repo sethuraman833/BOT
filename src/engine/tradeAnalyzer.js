@@ -37,6 +37,7 @@ import { detectCMEGaps, analyzeCMEGaps } from './cmeGapAnalyzer.js';
 import { getFundingOISentiment } from './fundingRate.js';
 import { RISK_AMOUNT, ASSETS, CHALLENGE_CONFIG } from '../utils/constants.js';
 import { canTrade as challengeCanTrade, getChallengeStatus } from './challengeTracker.js';
+import { computeRegime } from './marketRegime.js';
 
 // ─── ATR-BASED MINIMUM SL DISTANCE ────────────────────────
 // Computes the minimum SL distance as a multiple of ATR,
@@ -343,6 +344,21 @@ export async function runAnalysis(allData, config = {}) {
   const ema50_slope  = prev50  > 0 ? ((e50b  - prev50)  / prev50)  * 100 : 0;
   const ema200_slope = prev200 > 0 ? ((e200b - prev200) / prev200) * 100 : 0;
 
+  // ── Market Regime Calculation ─────────────────────────────────
+  const indicators = e20b ? {
+    ema20:        parseFloat(e20b.toFixed(4)),
+    ema50:        parseFloat(e50b.toFixed(4)),
+    ema200:       parseFloat(e200b.toFixed(4)),
+    ema20_slope:  parseFloat(ema20_slope.toFixed(5)),
+    ema50_slope:  parseFloat(ema50_slope.toFixed(5)),
+    ema200_slope: parseFloat(ema200_slope.toFixed(5)),
+  } : null;
+
+  const marketRegime  = computeRegime(indicators, currentPrice);
+  const isStrongBull  = marketRegime.regime === 'BULL' && marketRegime.strength === 'STRONG';
+  const isStrongBear  = marketRegime.regime === 'BEAR' && marketRegime.strength === 'STRONG';
+  const isStrongRegime = isStrongBull || isStrongBear;
+
   // ── EMA crossover / pullback signal (5m scalping only) ────────
   let emaSignalActive = false;
   let emaSignalType   = null;
@@ -528,6 +544,7 @@ export async function runAnalysis(allData, config = {}) {
   }
 
   steps.push(`Direction: ${direction || 'RANGING'} | Bull: ${upProb}% Bear: ${downProb}%`);
+  steps.push(`🏛️ Market Regime: ${marketRegime.label} (${marketRegime.rec}) — ${isStrongRegime ? '✅ STRONG TREND REGIME' : '⛔ MIDDLE REGIME VETO'}`);
 
   // ── Direction-dependent Institutional Logic ────────────────────
   let inducementData   = { hasInducement: false };
@@ -1328,6 +1345,12 @@ export async function runAnalysis(allData, config = {}) {
 
   if (!direction) {
     rejectionReason = `Market ranging — no ${profile.biasKey.toUpperCase()} directional bias & AI consensus insufficient`;
+  } else if (!isStrongRegime) {
+    rejectionReason = `Trade skipped — Market is in ${marketRegime.label} regime. Trades allowed ONLY in STRONG BULL or STRONG BEAR regimes.`;
+  } else if (isStrongBull && direction === 'short') {
+    rejectionReason = `Short trade skipped — Market is in STRONG BULL regime (Longs only allowed).`;
+  } else if (isStrongBear && direction === 'long') {
+    rejectionReason = `Long trade skipped — Market is in STRONG BEAR regime (Shorts only allowed).`;
   } else if (emaVetoActive) {
     rejectionReason = emaVetoReason;
   } else if (!slData) {
@@ -1698,14 +1721,8 @@ export async function runAnalysis(allData, config = {}) {
     killZone,
     cmeGapData,
     smcAnalysis,
-    // ── EMA Indicators (for MarketRegime component) ────────────────
-    indicators: e20b ? {
-      ema20:        parseFloat(e20b.toFixed(4)),
-      ema50:        parseFloat(e50b.toFixed(4)),
-      ema200:       parseFloat(e200b.toFixed(4)),
-      ema20_slope:  parseFloat(ema20_slope.toFixed(5)),
-      ema50_slope:  parseFloat(ema50_slope.toFixed(5)),
-      ema200_slope: parseFloat(ema200_slope.toFixed(5)),
-    } : null,
+    // ── EMA Indicators & Regime (for MarketRegime component) ──────
+    marketRegime,
+    indicators,
   };
 }
