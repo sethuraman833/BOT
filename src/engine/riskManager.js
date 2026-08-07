@@ -465,6 +465,9 @@ export function calculateTPs(
     hybridTp1 = { level: lvl, rrr: 1.5, reason: '1.5R Target' };
   }
 
+  // TP3 level computed first — needed for TP2 safety checks below
+  const exact4R = isLong ? entry + risk * 4 : entry - risk * 4;
+
   // TP2: structural candidate ≥ 2.5R beyond TP1, CAPPED at 3.5R max
   // Cap ensures TP3 (4R) always has meaningful separation from TP2
   let hybridTp2 = null;
@@ -494,7 +497,6 @@ export function calculateTPs(
   }
 
   // TP3: always exactly 4R (label enhanced if structural level within 1.5%)
-  const exact4R = isLong ? entry + risk * 4 : entry - risk * 4;
   const nearTP3 = dedupedCandidates
     .filter(c => isLong ? c.level > hybridTp2.level : c.level < hybridTp2.level)
     .sort((a, b) => Math.abs(a.level - exact4R) - Math.abs(b.level - exact4R))[0];
