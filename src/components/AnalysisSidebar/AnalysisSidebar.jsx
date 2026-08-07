@@ -53,21 +53,33 @@ function ConfluenceSection({ score, signalGrade, staggerIndex }) {
   );
 }
 
-function DecisionBadge({ decision, waitCondition, staggerIndex }) {
+function DecisionBadge({ decision, waitCondition, confidence, staggerIndex }) {
   const isTakeNow = decision === 'TAKE_NOW';
   const isWait = decision === 'WAIT';
-  
+
   const map = {
     TAKE_NOW: { label: '⚡ TAKE TRADE NOW', color: 'var(--accent-green)' },
     WAIT:     { label: '⏳ WAIT FOR SETUP', color: 'var(--accent-yellow)' },
     NO_TRADE: { label: '✗ NO TRADE',        color: 'var(--accent-red)' },
   };
   const cfg = map[decision] || { label: decision, color: 'var(--text-secondary)' };
-  
+
+  // Confidence pill color
+  const confColor = confidence >= 70 ? 'var(--accent-green)'
+                  : confidence >= 50 ? 'var(--accent-yellow)'
+                  : 'var(--accent-red)';
+
   return (
     <div className={`sidebar-section animate-fade-in-up badge-container ${isTakeNow ? 'badge-take-now' : isWait ? 'badge-wait' : 'badge-normal'}`} style={{ animationDelay: `${staggerIndex * 60}ms` }}>
-      <div className="decision-badge" style={{ color: cfg.color }}>
-        {cfg.label}
+      <div className="decision-badge-row">
+        <div className="decision-badge" style={{ color: cfg.color }}>
+          {cfg.label}
+        </div>
+        {confidence > 0 && (
+          <div className="decision-confidence-pill" style={{ color: confColor, borderColor: confColor }}>
+            {confidence}% confidence
+          </div>
+        )}
       </div>
       {waitCondition && <div className="wait-note">{waitCondition}</div>}
     </div>
@@ -492,8 +504,12 @@ export default function AnalysisSidebar() {
           </div>
         </div>
 
-        {/* ── DECISION ───────────────────────────────────── */}
-        <DecisionBadge decision={analysis.decision} waitCondition={analysis.waitCondition} staggerIndex={nextDelay()} />
+        <DecisionBadge
+          decision={analysis.decision}
+          waitCondition={analysis.waitCondition}
+          confidence={analysis.confluenceScore?.aiConfidence || 0}
+          staggerIndex={nextDelay()}
+        />
 
         {/* ── TRADE BOX ──────────────────────────────────── */}
         <div className="animate-fade-in-up" style={{ animationDelay: `${nextDelay() * 60}ms` }}>

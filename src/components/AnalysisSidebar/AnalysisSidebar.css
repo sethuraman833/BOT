@@ -178,6 +178,38 @@
   z-index: 1;
 }
 
+/* Row wrapping label + confidence pill */
+.decision-badge-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--bg-panel);
+  border-radius: 10px;
+  padding: 14px 16px;
+  position: relative;
+  z-index: 1;
+}
+.decision-badge-row .decision-badge {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  flex: 1;
+  text-align: left;
+}
+.decision-confidence-pill {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 4px 10px;
+  border-radius: 20px;
+  border: 1px solid;
+  white-space: nowrap;
+  opacity: 0.9;
+  background: rgba(0,0,0,0.25);
+  flex-shrink: 0;
+}
+
 .wait-note {
   position: relative;
   z-index: 1;
