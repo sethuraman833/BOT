@@ -554,7 +554,9 @@ export async function runAnalysis(allData, config = {}) {
   if (CHALLENGE_CONFIG.enabled) {
     adjustedRiskAmount = CHALLENGE_CONFIG.riskPerTrade;
   } else {
-    adjustedRiskAmount = (adjustedRiskAmount || riskAmount) * (volRegime.sizingMultiplier || 1.0);
+    const scaled = (adjustedRiskAmount || riskAmount) * (volRegime.sizingMultiplier || 1.0);
+    // Hard cap: volatility multiplier can scale risk DOWN but NEVER above the $50 limit
+    adjustedRiskAmount = Math.min(scaled, RISK_AMOUNT);
   }
 
   // Fibonacci Golden Pocket (Calculated here for SL/TP anchoring)
