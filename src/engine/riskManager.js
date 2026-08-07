@@ -464,6 +464,14 @@ export function calculateTPs(
     const lvl = isLong ? entry + risk * 1.5 : entry - risk * 1.5;
     hybridTp1 = { level: lvl, rrr: 1.5, reason: '1.5R Target' };
   }
+  // Safety: ensure TP1 is at least 0.5R away from TP2 (2.5R)
+  // If structural TP1 is too close to 2.5R, fall back to exact 1.5R for clear separation
+  const exact2p5R = isLong ? entry + risk * 2.5 : entry - risk * 2.5;
+  const tp1toTp2Spacing = Math.abs(exact2p5R - hybridTp1.level) / risk;
+  if (tp1toTp2Spacing < 0.5) {
+    const lvl = isLong ? entry + risk * 1.5 : entry - risk * 1.5;
+    hybridTp1 = { level: lvl, rrr: 1.5, reason: '1.5R Target' };
+  }
 
   // TP3 level computed first — needed for TP2 safety checks below
   const exact4R = isLong ? entry + risk * 4 : entry - risk * 4;
