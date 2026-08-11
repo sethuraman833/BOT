@@ -450,57 +450,58 @@ export function calculateTPs(
   }
 
   // ── HYBRID: 3-TP system with ICT-correct targets + 4R final ──────────
-  // TP1: First structural level ≥ 1.5R → 40% close (protect capital early)
-  // TP2: First structural level ≥ 2.5R → 35% close (lock profit mid-way)
-  // TP3: Always exactly 4R → 25% close (institutional final target)
+  // TP1: First structural level ≥ 2.0R (matches minRRR = 1:2) → 40% close
+  // TP2: First structural level ≥ 3.0R → 35% close
+  // TP3: Always exactly 4.0R → 25% close
 
-  // TP1: structural candidate ≥ 1.5R AND ≤ 2.4R (cap prevents TP1 jumping past TP2)
+  const targetTp1Rrr = Math.max(2.0, Math.min(3.0, minRrr || 2.0));
+  const targetTp2Rrr = Math.min(3.5, targetTp1Rrr + 1.0);
+
+  // TP1: structural candidate ≥ targetTp1Rrr AND ≤ (targetTp1Rrr + 0.7)
   let hybridTp1 = null;
   for (const cand of dedupedCandidates) {
     const rr = calculateRRR(entry, stopLoss, cand.level, direction);
-    if (rr >= 1.5 && rr <= 2.4) { hybridTp1 = { ...cand, rrr: rr }; break; }
+    if (rr >= targetTp1Rrr && rr <= targetTp1Rrr + 0.7) { hybridTp1 = { ...cand, rrr: rr }; break; }
   }
   if (!hybridTp1) {
-    const lvl = isLong ? entry + risk * 1.5 : entry - risk * 1.5;
-    hybridTp1 = { level: lvl, rrr: 1.5, reason: '1.5R Target' };
+    const lvl = isLong ? entry + risk * targetTp1Rrr : entry - risk * targetTp1Rrr;
+    hybridTp1 = { level: lvl, rrr: targetTp1Rrr, reason: `${targetTp1Rrr.toFixed(1)}R Target (1:${targetTp1Rrr.toFixed(0)})` };
   }
-  // Safety: ensure TP1 is at least 0.5R away from TP2 (2.5R)
-  // If structural TP1 is too close to 2.5R, fall back to exact 1.5R for clear separation
-  const exact2p5R = isLong ? entry + risk * 2.5 : entry - risk * 2.5;
-  const tp1toTp2Spacing = Math.abs(exact2p5R - hybridTp1.level) / risk;
+  // Safety: ensure TP1 is at least 0.5R away from TP2
+  const exactTp2Lvl = isLong ? entry + risk * targetTp2Rrr : entry - risk * targetTp2Rrr;
+  const tp1toTp2Spacing = Math.abs(exactTp2Lvl - hybridTp1.level) / risk;
   if (tp1toTp2Spacing < 0.5) {
-    const lvl = isLong ? entry + risk * 1.5 : entry - risk * 1.5;
-    hybridTp1 = { level: lvl, rrr: 1.5, reason: '1.5R Target' };
+    const lvl = isLong ? entry + risk * targetTp1Rrr : entry - risk * targetTp1Rrr;
+    hybridTp1 = { level: lvl, rrr: targetTp1Rrr, reason: `${targetTp1Rrr.toFixed(1)}R Target (1:${targetTp1Rrr.toFixed(0)})` };
   }
 
   // TP3 level computed first — needed for TP2 safety checks below
   const exact4R = isLong ? entry + risk * 4 : entry - risk * 4;
 
-  // TP2: structural candidate ≥ 2.5R beyond TP1, CAPPED at 3.5R max
-  // Cap ensures TP3 (4R) always has meaningful separation from TP2
+  // TP2: structural candidate ≥ targetTp2Rrr beyond TP1, CAPPED at 3.5R max
   let hybridTp2 = null;
   for (const cand of dedupedCandidates) {
     const rr = calculateRRR(entry, stopLoss, cand.level, direction);
     const isFurther = isLong ? cand.level > hybridTp1.level : cand.level < hybridTp1.level;
-    if (rr >= 2.5 && rr <= 3.5 && isFurther) { hybridTp2 = { ...cand, rrr: rr }; break; }
+    if (rr >= targetTp2Rrr && rr <= 3.5 && isFurther) { hybridTp2 = { ...cand, rrr: rr }; break; }
   }
   if (!hybridTp2) {
-    const lvl = isLong ? entry + risk * 2.5 : entry - risk * 2.5;
-    hybridTp2 = { level: lvl, rrr: 2.5, reason: '2.5R Target' };
+    const lvl = isLong ? entry + risk * targetTp2Rrr : entry - risk * targetTp2Rrr;
+    hybridTp2 = { level: lvl, rrr: targetTp2Rrr, reason: `${targetTp2Rrr.toFixed(1)}R Target` };
   }
 
   // Safety: ensure TP2 is at least 0.5R away from TP3 (4R)
   const tp2to4RSpacing = Math.abs(exact4R - hybridTp2.level) / risk;
   if (tp2to4RSpacing < 0.5) {
-    const lvl = isLong ? entry + risk * 2.5 : entry - risk * 2.5;
-    hybridTp2 = { level: lvl, rrr: 2.5, reason: '2.5R Target' };
+    const lvl = isLong ? entry + risk * targetTp2Rrr : entry - risk * targetTp2Rrr;
+    hybridTp2 = { level: lvl, rrr: targetTp2Rrr, reason: `${targetTp2Rrr.toFixed(1)}R Target` };
   }
 
   // Safety: ensure TP2 is on the correct side of TP3 (ordering sanity)
   const tp2WrongSide = isLong ? hybridTp2.level >= exact4R : hybridTp2.level <= exact4R;
   if (tp2WrongSide) {
-    const lvl = isLong ? entry + risk * 2.5 : entry - risk * 2.5;
-    hybridTp2 = { level: lvl, rrr: 2.5, reason: '2.5R Target' };
+    const lvl = isLong ? entry + risk * targetTp2Rrr : entry - risk * targetTp2Rrr;
+    hybridTp2 = { level: lvl, rrr: targetTp2Rrr, reason: `${targetTp2Rrr.toFixed(1)}R Target` };
   }
 
   // TP3: always exactly 4R (label enhanced if structural level within 1.5%)
@@ -635,7 +636,7 @@ export function calculateBreakevenMove(entry, stopLoss, symbol) {
   const risk = Math.abs(entry - stopLoss);
   const dir = entry > stopLoss ? 1 : -1;
   const decimals = (symbol && ASSETS[symbol]) ? ASSETS[symbol].decimals : 2;
-  return parseFloat((entry + dir * risk * 1.5).toFixed(decimals));
+  return parseFloat((entry + dir * risk * 2.0).toFixed(decimals));
 }
 
 // ─── TRAILING STOP LOGIC ───────────────────────────────────────
@@ -659,13 +660,13 @@ export function calculateTrailingSchedule(entry, stopLoss, tpLevels, direction, 
 
   const schedule = [];
 
-  // Milestone 1: At 1.5R profit → move SL to breakeven (entry)
+  // Milestone 1: At 2.0R profit → move SL to breakeven (entry)
   const risk = Math.abs(entry - stopLoss);
-  const beTrigger = direction === 'long' ? entry + risk * 1.5 : entry - risk * 1.5;
+  const beTrigger = direction === 'long' ? entry + risk * 2.0 : entry - risk * 2.0;
   schedule.push({
     trigger: fmt(beTrigger),
     newSL: fmt(entry),
-    label: 'Move SL to Breakeven (1.5R)',
+    label: 'Move SL to Breakeven (2.0R)',
   });
 
   // Milestone 2: TP1 hit → trail SL to entry + 0.5R (lock in small profit)
