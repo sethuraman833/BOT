@@ -113,7 +113,7 @@ const TF_PROFILES = {
     biasKey:             '1h',
     obKey:               '1h',
     swingLookback:       3,     // raised from 2 to filter micro-swing noise (requires 15min confirmation per side)
-    minAiConfidence:     40, // AI Confidence % threshold for TAKE_NOW
+    minAiConfidence:     60, // AI Confidence % threshold for TAKE_NOW (raised from 40 for strict institutional quality)
     maxSlPct:            0.015,  // 1.5% max SL for scalping
     maxTpPct:            0.030,  // 3.0% window — wide enough for minRRR=3.0 with SLs up to ~1% (targets hit in 4-6h)
     maxEntryDist:        0.003,  // 0.3% max entry distance
@@ -134,7 +134,7 @@ const TF_PROFILES = {
     biasKey:             '4h',
     obKey:               '4h',
     swingLookback:       3,
-    minAiConfidence:     45, // AI Confidence % threshold for TAKE_NOW
+    minAiConfidence:     60, // AI Confidence % threshold for TAKE_NOW (raised from 45 for strict institutional quality)
     maxSlPct:            0.020,  // 2% max SL
     maxTpPct:            0.07,   // 7% max TP range
     maxEntryDist:        0.005,  // 0.5% max entry distance
@@ -1310,12 +1310,42 @@ export async function runAnalysis(allData, config = {}) {
                         : 'SKIP';
 
   // ── Filter B: Min Confluence Count Gate ─────────────────────
-  // Require at least 25% of checks (or 6 checks) to be met.
+  // Require at least 35% of checks (or 12 checks) to be met.
   // Bypass if signal grade is A/A+ or AI confidence is sufficient.
   const checksMetCount = preRrrChecks.filter(c => c.met).length;
   const checksTotalCount = preRrrChecks.length;
   const checksMetPct = checksTotalCount > 0 ? checksMetCount / checksTotalCount : 0;
-  const minConfluenceCountOk = checksMetPct >= 0.25 || checksMetCount >= 6;
+  const minConfluenceCountOk = checksMetPct >= 0.35 || checksMetCount >= 12;
+
+  // ══════════════════════════════════════════════════════════════════
+  // ── PAKA RULE: SMC STRUCTURAL PILLARS (Must pass ≥ 3 of 5) ─────
+  // ══════════════════════════════════════════════════════════════════
+  // These are non-negotiable institutional structure requirements.
+  // No trade fires unless real SMC footprint is confirmed.
+  const smcPillars = [
+    { label: 'BOS/CHoCH Confirmed',     met: structureShift,                key: true },
+    { label: 'Liquidity Sweep',          met: liquidityEvent,                key: true },
+    { label: 'Valid Order Block',        met: nearOB,                        key: true },
+    { label: 'Displacement Confirmed',   met: dispValidation.valid,          key: true },
+    { label: 'Draw on Liquidity',        met: !!(drawOnLiquidity?.primary),  key: true },
+  ];
+  const smcPillarsMet = smcPillars.filter(p => p.met).length;
+  const smcPillarsOk = smcPillarsMet >= 3;
+  steps.push(`⚔️ SMC Pillars: ${smcPillarsMet}/5 ${smcPillarsOk ? '✅' : '❌'} (min 3 required) — ${smcPillars.filter(p => p.met).map(p => p.label).join(', ') || 'NONE'}`);
+
+  // ══════════════════════════════════════════════════════════════════
+  // ── PAKA RULE: CONFLUENCE QUALITY GATE (Must pass ≥ 2 of 4) ────
+  // ══════════════════════════════════════════════════════════════════
+  // Validates that SMC structure isn't stale — fresh momentum required.
+  const confluenceQuality = [
+    { label: 'HTF Trend Aligned',        met: trend4HAligned },
+    { label: 'Golden Pocket / OTE',      met: inGoldenPocket || inOTE },
+    { label: 'Momentum Confirmed',       met: !!macdAligned || !!stochAligned },
+    { label: 'VWAP or Daily Bias',       met: vwapAligned || dailyAligned },
+  ];
+  const confluenceQualityMet = confluenceQuality.filter(c => c.met).length;
+  const confluenceQualityOk = confluenceQualityMet >= 2;
+  steps.push(`🎯 Confluence Quality: ${confluenceQualityMet}/4 ${confluenceQualityOk ? '✅' : '❌'} (min 2 required) — ${confluenceQuality.filter(c => c.met).map(c => c.label).join(', ') || 'NONE'}`);
 
   // ── Signal Grade (A+ / A / B / C / D) ─────────────────────────
   const inOTECheck = checks.find(c => c.label.includes('OTE Zone'));
@@ -1356,9 +1386,16 @@ export async function runAnalysis(allData, config = {}) {
   } else if (!slData) {
     rejectionReason = `No valid Stop Loss level found for this structure`;
   } else if (slSideInvalid) {
-    // Distinguish thesis broken vs truly wrong SL side
     const shiftLevel = lastPrimaryShift ? (lastPrimaryShift.price ?? lastPrimaryShift.level) : null;
     rejectionReason = `⚠️ THESIS INVALIDATED — Structure closed against signal level (${direction === 'long' ? 'bearish' : 'bullish'} close through ${shiftLevel?.toFixed(2) ?? slData?.rawInvalidation?.toFixed(2) ?? 'key level'}). Wait for re-establishment.`;
+  // ══ PAKA RULE: SMC STRUCTURAL PILLARS GATE ══════════════════════
+  } else if (!smcPillarsOk) {
+    const failed = smcPillars.filter(p => !p.met).map(p => p.label).join(', ');
+    rejectionReason = `⚔️ SMC Structure insufficient: only ${smcPillarsMet}/5 pillars met (min 3). Missing: ${failed}`;
+  // ══ PAKA RULE: CONFLUENCE QUALITY GATE ══════════════════════════
+  } else if (!confluenceQualityOk) {
+    const failed = confluenceQuality.filter(c => !c.met).map(c => c.label).join(', ');
+    rejectionReason = `🎯 Confluence quality insufficient: only ${confluenceQualityMet}/4 met (min 2). Missing: ${failed}`;
   } else if (entryDistPct > profile.maxEntryDist) {
     if (aiConfidence >= profile.minAiConfidence && rrrMeetsMin) {
       decision = 'WAIT';
@@ -1369,23 +1406,19 @@ export async function runAnalysis(allData, config = {}) {
       rejectionReason = `Price too far from entry zone: ${(entryDistPct * 100).toFixed(2)}% > ${(profile.maxEntryDist * 100).toFixed(2)}% max for ${profile.label}`;
     }
   } else if (isVolatilitySpike) {
-    // Filter D: Reject during extreme parabolic non-directional volatility spikes
     rejectionReason = `Volatility spike: current candle body (${(volSpikeRatio).toFixed(1)}x ATR) exceeds 4.5x ATR — wait for pullback`;
   } else if (slPct > profile.maxSlPct) {
     rejectionReason = `SL too wide: ${(slPct * 100).toFixed(2)}% > ${(profile.maxSlPct * 100).toFixed(2)}% max for ${profile.label}`;
   } else if (leverageExceeded) {
-    // Filter A: Reject if effective leverage exceeds 75x
     rejectionReason = `Leverage too high: ${earlyLeverage.toFixed(1)}x > ${MAX_LEVERAGE}x cap — SL too tight for account size`;
   } else if (!rrrMeetsMin) {
     rejectionReason = `RRR too low: ${tp1Rrr.toFixed(2)} < ${effectiveMinRrr.toFixed(1)} minimum`;
   } else if (!minConfluenceCountOk && signalGrade.grade !== 'A+' && signalGrade.grade !== 'A') {
-    // Filter B: Reject if too few confluence checks are met (by count)
-    rejectionReason = `Low confluence: only ${checksMetCount}/${checksTotalCount} checks met (${(checksMetPct * 100).toFixed(0)}% < 25% min)`;
+    rejectionReason = `Low confluence: only ${checksMetCount}/${checksTotalCount} checks met (${(checksMetPct * 100).toFixed(0)}% < 35% min)`;
   } else if (aiConfidence < profile.minAiConfidence && signalGrade.grade !== 'A+' && signalGrade.grade !== 'A') {
     rejectionReason = `AI Confidence too low: ${aiConfidence}% < ${profile.minAiConfidence}% min for ${profile.label} (Inst Grade: ${signalGrade.grade})`;
-  } else if (signalGrade.score < 45) {
-    // Grade D/F gate: below 45/100 is too weak to trade regardless of structure
-    rejectionReason = `Signal grade too low: ${signalGrade.grade} (${signalGrade.score}/100) — minimum B (45+) required. ${signalGrade.label}`;
+  } else if (signalGrade.score < 55) {
+    rejectionReason = `Signal grade too low: ${signalGrade.grade} (${signalGrade.score}/100) — minimum B (55+) required. ${signalGrade.label}`;
   } else {
     decision = 'TAKE_NOW';
   }
@@ -1724,5 +1757,10 @@ export async function runAnalysis(allData, config = {}) {
     // ── EMA Indicators & Regime (for MarketRegime component) ──────
     marketRegime,
     indicators,
+    // ── Paka Rules: SMC Pillars + Confluence Quality ──────────────
+    smcPillars,
+    smcPillarsMet,
+    confluenceQuality,
+    confluenceQualityMet,
   };
 }

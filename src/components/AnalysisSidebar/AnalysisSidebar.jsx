@@ -534,8 +534,50 @@ export default function AnalysisSidebar() {
           </div>
         )}
 
+
+        {/* ── PAKA RULES: SMC PILLARS + CONFLUENCE QUALITY ── */}
+        {analysis.smcPillars && (
+          <div className="sidebar-section animate-fade-in-up glass-card" style={{ animationDelay: `${nextDelay() * 60}ms` }}>
+            <div className="section-header gradient-header">⚔️ SMC Structural Pillars</div>
+            <div className="pillar-count-box" style={{ marginBottom: '8px' }}>
+              <span className={`pillar-count ${analysis.smcPillarsMet >= 3 ? 'text-green' : 'text-red'}`}>
+                {analysis.smcPillarsMet}/5 Pillars {analysis.smcPillarsMet >= 3 ? '✅ PASS' : '❌ FAIL'} <span style={{ opacity: 0.6 }}>(min 3)</span>
+              </span>
+            </div>
+            <ul className="check-list-grid" style={{ gap: '4px' }}>
+              {analysis.smcPillars.map((p, i) => (
+                <li key={i} className={`check-item-card ${p.met ? 'met' : 'unmet'}`}>
+                  <div className="check-icon">{p.met ? '✓' : '✗'}</div>
+                  <span className="check-label">{p.label}</span>
+                  <span className="pillar-tag-key">PILLAR</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {analysis.confluenceQuality && (
+          <div className="sidebar-section animate-fade-in-up glass-card" style={{ animationDelay: `${nextDelay() * 60}ms` }}>
+            <div className="section-header gradient-header">🎯 Confluence Quality Gate</div>
+            <div className="pillar-count-box" style={{ marginBottom: '8px' }}>
+              <span className={`pillar-count ${analysis.confluenceQualityMet >= 2 ? 'text-green' : 'text-red'}`}>
+                {analysis.confluenceQualityMet}/4 Quality Checks {analysis.confluenceQualityMet >= 2 ? '✅ PASS' : '❌ FAIL'} <span style={{ opacity: 0.6 }}>(min 2)</span>
+              </span>
+            </div>
+            <ul className="check-list-grid" style={{ gap: '4px' }}>
+              {analysis.confluenceQuality.map((c, i) => (
+                <li key={i} className={`check-item-card ${c.met ? 'met' : 'unmet'}`}>
+                  <div className="check-icon">{c.met ? '✓' : '✗'}</div>
+                  <span className="check-label">{c.label}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         {/* ── CONFLUENCE ─────────────────────────────────── */}
         <ConfluenceSection score={analysis.confluenceScore} signalGrade={analysis.signalGrade} staggerIndex={nextDelay()} />
+
 
         {/* ── SMC STRUCTURAL VALIDATION ──────────────────── */}
         <SMCAnalysisBlock
