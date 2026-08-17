@@ -250,10 +250,10 @@ function SMCAnalysisBlock({ smcAnalysis, direction, confluenceScore, symbol, sta
         ))}
       </div>
 
-      {/* 1:4 TP achievability */}
+      {/* 1:3 TP achievability */}
       <div className={`smc-tp4r-block ${tp4RAchievable ? 'achievable' : 'blocked'}`}>
         <div className="smc-tp4r-header">
-          <span className="smc-tp4r-label">1:4 Target ({fmt(smcAnalysis.tp4R)})</span>
+          <span className="smc-tp4r-label">1:3 Target ({fmt(smcAnalysis.tp4R)})</span>
           <span className={`smc-tp4r-badge ${tp4RAchievable ? 'yes' : 'no'}`}>
             {tp4RAchievable ? '✅ CLEAR PATH' : '🚧 BLOCKED'}
           </span>
@@ -262,7 +262,7 @@ function SMCAnalysisBlock({ smcAnalysis, direction, confluenceScore, symbol, sta
           <div className="smc-obstacle-text">Obstacle: {obstacleText}</div>
         )}
         {tp4RAchievable && (
-          <div className="smc-clear-text">No structural obstacles between entry and 1:4 TP</div>
+          <div className="smc-clear-text">No structural obstacles between entry and 1:3 TP</div>
         )}
       </div>
 
@@ -491,11 +491,11 @@ export default function AnalysisSidebar() {
             <span className="qs-val mono text-blue">{analysis.entry?.toLocaleString() || '—'}</span>
           </div>
           <div className="qs-item">
-            <span className="qs-label">SL (-$50)</span>
+            <span className="qs-label">SL (-${analysis.riskAmount || 10})</span>
             <span className="qs-val mono text-red">{analysis.stopLoss?.value?.toLocaleString() || '—'}</span>
           </div>
           <div className="qs-item">
-            <span className="qs-label">TP1</span>
+            <span className="qs-label">TP</span>
             <span className="qs-val mono text-green">{analysis.tpDetails?.[0]?.level?.toLocaleString() || '—'}</span>
           </div>
           <div className="qs-item">

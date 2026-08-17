@@ -376,9 +376,6 @@ export async function runAnalysis(allData, config = {}) {
   } : null;
 
   const marketRegime  = computeRegime(indicators, currentPrice);
-  const isStrongBull  = marketRegime.regime === 'BULL' && marketRegime.strength === 'STRONG';
-  const isStrongBear  = marketRegime.regime === 'BEAR' && marketRegime.strength === 'STRONG';
-  const isStrongRegime = isStrongBull || isStrongBear;
 
   // ── EMA crossover / pullback signal (5m scalping only) ────────
   let emaSignalActive = false;
@@ -565,7 +562,7 @@ export async function runAnalysis(allData, config = {}) {
   }
 
   steps.push(`Direction: ${direction || 'RANGING'} | Bull: ${upProb}% Bear: ${downProb}%`);
-  steps.push(`🏛️ Market Regime: ${marketRegime.label} (${marketRegime.rec}) — ${isStrongRegime ? '✅ STRONG TREND REGIME' : '⛔ MIDDLE REGIME VETO'}`);
+  steps.push(`🏛️ Market Regime: ${marketRegime.label} (${marketRegime.rec})`);
 
   // ── Direction-dependent Institutional Logic ────────────────────
   let inducementData   = { hasInducement: false };
@@ -593,7 +590,7 @@ export async function runAnalysis(allData, config = {}) {
     adjustedRiskAmount = CHALLENGE_CONFIG.riskPerTrade;
   } else {
     const scaled = (adjustedRiskAmount || riskAmount) * (volRegime.sizingMultiplier || 1.0);
-    // Hard cap: volatility multiplier can scale risk DOWN but NEVER above the $50 limit
+    // Hard cap: volatility multiplier can scale risk DOWN but NEVER above the configured limit
     adjustedRiskAmount = Math.min(scaled, RISK_AMOUNT);
   }
 
@@ -1310,7 +1307,7 @@ export async function runAnalysis(allData, config = {}) {
   const tp1Rrr      = tpData?.tps?.[0]?.rrr ?? 0;
 
   // ── RRR Filters ──────────────────────────────────────────────
-  const effectiveMinRrr = profile.minRrr || 2.0;
+  const effectiveMinRrr = profile.minRrr || 3.0;
   const rrrMeetsMin = tp1Rrr >= effectiveMinRrr;
 
   // Full check list including RRR
@@ -1438,10 +1435,10 @@ export async function runAnalysis(allData, config = {}) {
     decision = 'TAKE_NOW';
   }
 
-  // ── SMC Rule: Validate 1:4 TP is structurally clear ────────────────
+  // ── SMC Rule: Validate 1:3 TP path is structurally clear ────────────────
   if (direction && slData && entry) {
     const slDist = Math.abs(entry - slData.value);
-    const tp4R = direction === 'long' ? entry + slDist * 4 : entry - slDist * 4;
+    const tp3R = direction === 'long' ? entry + slDist * 3 : entry - slDist * 3;
   
     // ── Obstacle Filter: HTF OBs + EQH/EQL only (correct SMC filter) ─────
     // Rationale: 5m micro-OBs and individual swing highs are NOT obstacles for
@@ -1453,9 +1450,9 @@ export async function runAnalysis(allData, config = {}) {
     for (const ob of (obsOB || [])) {
       if (ob.status !== 'active') continue;
       const obMid = (ob.high + ob.low) / 2;
-      if (direction === 'long' && ob.type === 'supply' && obMid > entry && obMid < tp4R) {
+      if (direction === 'long' && ob.type === 'supply' && obMid > entry && obMid < tp3R) {
         obstacles.push({ reason: `HTF Supply OB`, level: obMid });
-      } else if (direction === 'short' && ob.type === 'demand' && obMid < entry && obMid > tp4R) {
+      } else if (direction === 'short' && ob.type === 'demand' && obMid < entry && obMid > tp3R) {
         obstacles.push({ reason: `HTF Demand OB`, level: obMid });
       }
     }
@@ -1480,7 +1477,7 @@ export async function runAnalysis(allData, config = {}) {
       ? (eqHiLo?.eqh?.[0] || drawOnLiquidity)
       : (eqHiLo?.eql?.[0] || drawOnLiquidity);
   
-    const tp4RAchievable = obstacles.length === 0;
+    const tpAchievable = obstacles.length === 0;
   
     smcAnalysis = {
       bos: bos ? { confirmed: true, level: bos.price ?? bos.level, tf: profile.primaryKey } : { confirmed: false },
@@ -1489,8 +1486,11 @@ export async function runAnalysis(allData, config = {}) {
       orderBlock: nearActiveOB ? { confirmed: true, high: nearActiveOB.high, low: nearActiveOB.low, type: nearActiveOB.type } : { confirmed: false },
       fvg: nearActiveFVG ? { confirmed: true, upper: nearActiveFVG.upper, lower: nearActiveFVG.lower, type: nearActiveFVG.type } : { confirmed: false },
       structuralTarget: structTarget ? { level: structTarget.price ?? structTarget.level ?? structTarget.eqPrice, description: structTarget.description ?? structTarget.type ?? 'Liquidity Draw' } : null,
-      tp4R,
-      tp4RAchievable,
+      tp3R,
+      tpAchievable,
+      // Legacy aliases for UI compatibility
+      tp4R: tp3R,
+      tp4RAchievable: tpAchievable,
       obstacles,
       slLevel: slData?.value,
     };
@@ -1505,34 +1505,25 @@ export async function runAnalysis(allData, config = {}) {
       return v.toLocaleString('en-US', { maximumFractionDigits: 0 });
     };
 
-    // HYBRID REJECTION: Only reject if obstacle blocks path to TP1 (40% close level)
-    // If obstacle is only between TP1→4R, allow — partial at TP1 protects capital
-    const tp1Level = tpData?.tps?.[0]?.level; // first partial exit level (~1.5R)
+    // Reject if HTF obstacle blocks path to TP (1:3 target)
+    const tpLevel = tpData?.tps?.[0]?.level;
     const criticalObstacles = obstacles.filter(o =>
       direction === 'long'
-        ? (tp1Level ? o.level < tp1Level : true)   // obstacle before TP1
-        : (tp1Level ? o.level > tp1Level : true)    // obstacle before TP1 (shorts: TP1 is below entry)
-    );
-    const warningObstacles = obstacles.filter(o =>
-      direction === 'long'
-        ? (tp1Level ? o.level >= tp1Level : false)
-        : (tp1Level ? o.level <= tp1Level : false)
+        ? (tpLevel ? o.level < tpLevel : true)
+        : (tpLevel ? o.level > tpLevel : true)
     );
 
     if (criticalObstacles.length > 0 && decision === 'TAKE_NOW') {
-      // Obstacle before TP1 — can't even get first partial → reject
       decision = 'NO_TRADE';
-      rejectionReason = `🚧 Trade skipped — ${criticalObstacles[0].reason} at $${fmtP(criticalObstacles[0].level)} blocks path before TP1 ($${fmtP(tp1Level)}). No partial exit achievable.`;
-      steps.push(`1:4 PATH BLOCKED before TP1: ${criticalObstacles.map(o => `${o.reason} @ $${fmtP(o.level)}`).join(', ')}`);
-    } else if (warningObstacles.length > 0) {
-      // Obstacle between TP1 and 4R — partial at TP1 protects capital, allow trade
-      steps.push(`⚠️ ${warningObstacles[0].reason} at $${fmtP(warningObstacles[0].level)} between TP1→4R — TP1 partial (40%) protects capital`);
-    } else {
-      steps.push(`✅ Path clear: No HTF obstacles between entry and 1:4 target ($${fmtP(tp4R)})`);
+      rejectionReason = `🚧 Trade skipped — ${criticalObstacles[0].reason} at $${fmtP(criticalObstacles[0].level)} blocks path before TP ($${fmtP(tpLevel)}).`;
+      steps.push(`1:3 PATH BLOCKED: ${criticalObstacles.map(o => `${o.reason} @ $${fmtP(o.level)}`).join(', ')}`);
+    } else if (obstacles.length === 0) {
+      steps.push(`✅ Path clear: No HTF obstacles between entry and 1:3 target ($${fmtP(tp3R)})`);
     }
 
-    // Update smcAnalysis achievability based on critical obstacles only
+    // Update smcAnalysis achievability
     if (smcAnalysis) {
+      smcAnalysis.tpAchievable = criticalObstacles.length === 0;
       smcAnalysis.tp4RAchievable = criticalObstacles.length === 0;
       smcAnalysis.obstacles = criticalObstacles;
     }

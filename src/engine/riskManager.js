@@ -229,9 +229,6 @@ export function calculateTPs(
   if (risk === 0) return { tps: [], tpStructure: 'single' };
 
   const isLong = direction === 'long';
-  const minTp1Rrr = 4.0;
-  const minTp2Rrr = minRrr + 1.0;
-  const minTp3Rrr = minRrr + 2.0;
   const priceDecimals = (symbol && ASSETS[symbol]) ? ASSETS[symbol].decimals : 4;
 
   // Compute absolute maximum allowed price based on profile maxTpPct
@@ -401,51 +398,19 @@ export function calculateTPs(
 
   // Systematic fallback ONLY when no structural candidate exists at all
   if (dedupedCandidates.length === 0) {
+    const fallbackRrr = Math.max(3.0, minRrr || 3.0);
     if (isLong) {
       dedupedCandidates.push({
-        level: entry + risk * minTp1Rrr,
-        reason: `${minTp1Rrr.toFixed(1)}R Target (No structures)`,
-        isStructural: false,
-      });
-      dedupedCandidates.push({
-        level: entry + risk * (minTp1Rrr + MIN_TP_SPACING_RRR),
-        reason: `${(minTp1Rrr + MIN_TP_SPACING_RRR).toFixed(1)}R Target (No structures)`,
-        isStructural: false,
-      });
-      dedupedCandidates.push({
-        level: entry + risk * (minTp1Rrr + 2 * MIN_TP_SPACING_RRR),
-        reason: `${(minTp1Rrr + 2 * MIN_TP_SPACING_RRR).toFixed(1)}R Target (No structures)`,
+        level: entry + risk * fallbackRrr,
+        reason: `${fallbackRrr.toFixed(1)}R Target (No structures)`,
         isStructural: false,
       });
     } else {
       dedupedCandidates.push({
-        level: entry - risk * minTp1Rrr,
-        reason: `${minTp1Rrr.toFixed(1)}R Target (No structures)`,
+        level: entry - risk * fallbackRrr,
+        reason: `${fallbackRrr.toFixed(1)}R Target (No structures)`,
         isStructural: false,
       });
-      dedupedCandidates.push({
-        level: entry - risk * (minTp1Rrr + MIN_TP_SPACING_RRR),
-        reason: `${(minTp1Rrr + MIN_TP_SPACING_RRR).toFixed(1)}R Target (No structures)`,
-        isStructural: false,
-      });
-      dedupedCandidates.push({
-        level: entry - risk * (minTp1Rrr + 2 * MIN_TP_SPACING_RRR),
-        reason: `${(minTp1Rrr + 2 * MIN_TP_SPACING_RRR).toFixed(1)}R Target (No structures)`,
-        isStructural: false,
-      });
-    }
-  }
-
-  let tp1 = null;
-  let tp2 = null;
-  let tp3 = null;
-
-  // Find TP1 candidate (first one satisfying RRR >= minTp1Rrr)
-  for (const cand of dedupedCandidates) {
-    const candRrr = calculateRRR(entry, stopLoss, cand.level, direction);
-    if (candRrr >= minTp1Rrr) {
-      tp1 = { ...cand, rrr: candRrr };
-      break;
     }
   }
 
@@ -462,8 +427,8 @@ export function calculateTPs(
   let structuralTp = null;
   for (const cand of dedupedCandidates) {
     const rr = calculateRRR(entry, stopLoss, cand.level, direction);
-    // Accept structural levels between 2.5R and 3.5R (±0.5R around target)
-    if (rr >= targetRrr - 0.5 && rr <= targetRrr + 0.5) {
+    // Accept structural levels between 3.0R and 3.5R (must meet minRrr)
+    if (rr >= targetRrr && rr <= targetRrr + 0.5) {
       structuralTp = { ...cand, rrr: rr };
       break;
     }
@@ -490,105 +455,10 @@ export function calculateTPs(
     tps: [singleTp],
     tpStructure: 'single_1to3',
   };
-
-  // Find TP2 candidate (first one satisfying RRR >= minTp2Rrr and spacing >= 1.0R from TP1)
-  if (tp1) {
-    for (const cand of dedupedCandidates) {
-      const candRrr = calculateRRR(entry, stopLoss, cand.level, direction);
-      const spacingRrr = Math.abs(cand.level - tp1.level) / risk;
-      const isFurther = isLong ? cand.level > tp1.level : cand.level < tp1.level;
-      if (candRrr >= minTp2Rrr && spacingRrr >= MIN_TP_SPACING_RRR && isFurther) {
-        tp2 = { ...cand, rrr: candRrr };
-        break;
-      }
-    }
-  }
-
-  // Find TP3 candidate (first one satisfying RRR >= minTp3Rrr and spacing >= 1.0R from TP2)
-  if (tp2) {
-    for (const cand of dedupedCandidates) {
-      const candRrr = calculateRRR(entry, stopLoss, cand.level, direction);
-      const spacingRrr = Math.abs(cand.level - tp2.level) / risk;
-      const isFurther = isLong ? cand.level > tp2.level : cand.level < tp2.level;
-      if (candRrr >= minTp3Rrr && spacingRrr >= MIN_TP_SPACING_RRR && isFurther) {
-        tp3 = { ...cand, rrr: candRrr };
-        break;
-      }
-    }
-  }
-
-  // If no TP1 satisfies RRR >= minTp1Rrr, reject the trade — never accept sub-minRRR targets
-  if (!tp1) {
-    return { tps: [], tpStructure: 'rejected', rejectReason: `No TP candidate meets minimum ${minTp1Rrr}R requirement` };
-  }
-
-  // If we only have TP1
-  if (!tp2) {
-    return {
-      tps: [{
-        level: parseFloat(tp1.level.toFixed(priceDecimals)),
-        reason: tp1.reason,
-        rrr: tp1.rrr,
-        isStructural: tp1.isStructural,
-        closePercent: 100,
-      }],
-      tpStructure: 'single'
-    };
-  }
-
-  // If we have TP1 and TP2
-  if (!tp3) {
-    const tps = [
-      {
-        level: parseFloat(tp1.level.toFixed(priceDecimals)),
-        reason: tp1.reason,
-        rrr: tp1.rrr,
-        isStructural: tp1.isStructural,
-      },
-      {
-        level: parseFloat(tp2.level.toFixed(priceDecimals)),
-        reason: tp2.reason,
-        rrr: tp2.rrr,
-        isStructural: tp2.isStructural,
-      }
-    ];
-    const scaling = getDynamicScaling(tier, sessionName, 2);
-    tps.forEach((tp, idx) => {
-      tp.closePercent = scaling[idx];
-    });
-    return { tps, tpStructure: 'multiple' };
-  }
-
-  // If we have all three
-  const tps = [
-    {
-      level: parseFloat(tp1.level.toFixed(priceDecimals)),
-      reason: tp1.reason,
-      rrr: tp1.rrr,
-      isStructural: tp1.isStructural,
-    },
-    {
-      level: parseFloat(tp2.level.toFixed(priceDecimals)),
-      reason: tp2.reason,
-      rrr: tp2.rrr,
-      isStructural: tp2.isStructural,
-    },
-    {
-      level: parseFloat(tp3.level.toFixed(priceDecimals)),
-      reason: tp3.reason,
-      rrr: tp3.rrr,
-      isStructural: tp3.isStructural,
-    }
-  ];
-  const scaling = getDynamicScaling(tier, sessionName, 3);
-  tps.forEach((tp, idx) => {
-    tp.closePercent = scaling[idx];
-  });
-  return { tps, tpStructure: 'multiple' };
 }
 
 /**
- * Breakeven price calculation (move SL to entry when 1.5R reached - L10: asset decimals).
+ * Breakeven price calculation (move SL to entry when 2.0R reached).
  */
 export function calculateBreakevenMove(entry, stopLoss, symbol) {
   const risk = Math.abs(entry - stopLoss);

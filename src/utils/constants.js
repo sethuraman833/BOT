@@ -42,5 +42,5 @@ export const CHALLENGE_CONFIG = {
   maxOverallLoss:   600,        // Lifetime max loss cap
   riskPerTrade:     10,         // $10 per trade
   ddBudgetPct:      0.50,       // Stop trading at 50% of daily DD limit = -$200
-  maxConsecLosses:  4,          // Hard stop after 4 consecutive losses (-$200)
+  maxConsecLosses:  4,          // Hard stop after 4 consecutive losses (-$40)
 };
