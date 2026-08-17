@@ -55,7 +55,7 @@ import { computeRegime } from './marketRegime.js';
 //   XRP, ADA → ×1.2 scale (wider spread, more erratic moves)
 //   LINK     → ×1.1 scale
 const ATR_TF_MULT = {
-  '5m': 1.0, '15m': 1.2, '1h': 1.5, '4h': 2.0, '1d': 2.5,
+  '1m': 0.8, '5m': 1.0, '15m': 1.2, '1h': 1.5, '4h': 2.0, '1d': 2.5,
 };
 const ATR_SYMBOL_SCALE = {
   BTCUSDT: 1.0,   // BTC — tight, liquid
@@ -105,6 +105,27 @@ function computeMinSlDistance(candlesPrimary, entry, activeTimeframe, symbol) {
 // ─── TIMEFRAME PROFILES ────────────────────────────────────────
 // Each profile defines the full analysis context for that timeframe.
 const TF_PROFILES = {
+  '1m': {
+    label:               '1m Micro-Scalp',
+    modeColor:           '#ff6b35',
+    primaryKey:          '1m',
+    structureKey:        '5m',
+    biasKey:             '15m',
+    obKey:               '15m',
+    swingLookback:       3,
+    minAiConfidence:     60,
+    maxSlPct:            0.008,  // 0.8% max SL for micro-scalps
+    maxTpPct:            0.025,  // 2.5% max TP range
+    maxEntryDist:        0.002,  // 0.2% max entry distance
+    sweepThreshold:      0.0005,
+    hasEmaSignal:        true,
+    sessionAllowNyClose: true,
+    isScalping:          true,
+    timeCap:             '1H',
+    riskAmount:          10,
+    minRrr:              3.0,   // Standard 1:3 RRR
+    minShiftAge:         1,     // BOS/CHOCH must hold for 1 closed candle (1min)
+  },
   '5m': {
     label:               '5m Scalping',
     modeColor:           '#00d4ff',
@@ -112,19 +133,19 @@ const TF_PROFILES = {
     structureKey:        '15m',
     biasKey:             '1h',
     obKey:               '1h',
-    swingLookback:       3,     // raised from 2 to filter micro-swing noise (requires 15min confirmation per side)
-    minAiConfidence:     60, // AI Confidence % threshold for TAKE_NOW (raised from 40 for strict institutional quality)
+    swingLookback:       3,
+    minAiConfidence:     60,
     maxSlPct:            0.015,  // 1.5% max SL for scalping
-    maxTpPct:            0.030,  // 3.0% window — wide enough for minRRR=3.0 with SLs up to ~1% (targets hit in 4-6h)
+    maxTpPct:            0.030,  // 3.0% window
     maxEntryDist:        0.003,  // 0.3% max entry distance
     sweepThreshold:      0.0008,
     hasEmaSignal:        true,
     sessionAllowNyClose: true,
     isScalping:          true,
     timeCap:             '4H',
-    riskAmount:          50,    // $50 risk per trade (funding challenge)
-    minRrr:              2.0,   // Capped min RRR at 1:2 for scalps
-    minShiftAge:         2,     // BOS/CHOCH must hold for 2 closed candles (10min) before counting
+    riskAmount:          10,
+    minRrr:              3.0,   // Standard 1:3 RRR
+    minShiftAge:         2,
   },
   '15m': {
     label:               '15m Intraday',
@@ -134,7 +155,7 @@ const TF_PROFILES = {
     biasKey:             '4h',
     obKey:               '4h',
     swingLookback:       3,
-    minAiConfidence:     60, // AI Confidence % threshold for TAKE_NOW (raised from 45 for strict institutional quality)
+    minAiConfidence:     60,
     maxSlPct:            0.020,  // 2% max SL
     maxTpPct:            0.07,   // 7% max TP range
     maxEntryDist:        0.005,  // 0.5% max entry distance
@@ -143,9 +164,9 @@ const TF_PROFILES = {
     sessionAllowNyClose: false,
     isScalping:          false,
     timeCap:             '6H',
-    riskAmount:          50,
-    minRrr:              2.5,   // Capped min RRR at 1:2.5 for intraday
-    minShiftAge:         1,     // BOS/CHOCH confirmation (H6)
+    riskAmount:          10,
+    minRrr:              3.0,   // Standard 1:3 RRR
+    minShiftAge:         1,
   },
   '1h': {
     label:               '1H Swing',
@@ -155,7 +176,7 @@ const TF_PROFILES = {
     biasKey:             '1d',
     obKey:               '4h',
     swingLookback:       3,
-    minAiConfidence:     50, // AI Confidence % threshold for TAKE_NOW
+    minAiConfidence:     50,
     maxSlPct:            0.025,
     maxTpPct:            0.12,   // 12% max TP range
     maxEntryDist:        0.010,  // 1.0% max entry distance
@@ -164,9 +185,9 @@ const TF_PROFILES = {
     sessionAllowNyClose: false,
     isScalping:          false,
     timeCap:             '24H',
-    riskAmount:          50,
+    riskAmount:          10,
     minRrr:              3.0,
-    minShiftAge:         1,     // BOS/CHOCH confirmation (H6)
+    minShiftAge:         1,
   },
   '4h': {
     label:               '4H Position',
@@ -176,7 +197,7 @@ const TF_PROFILES = {
     biasKey:             '1w',
     obKey:               '1d',
     swingLookback:       5,
-    minAiConfidence:     50, // AI Confidence % threshold for TAKE_NOW
+    minAiConfidence:     50,
     maxSlPct:            0.030,
     maxTpPct:            0.20,   // 20% max TP range
     maxEntryDist:        0.020,  // 2.0% max entry distance
@@ -185,9 +206,9 @@ const TF_PROFILES = {
     sessionAllowNyClose: false,
     isScalping:          false,
     timeCap:             '48H',
-    riskAmount:          50,
+    riskAmount:          10,
     minRrr:              3.0,
-    minShiftAge:         1,     // BOS/CHOCH confirmation (H6)
+    minShiftAge:         1,
   },
   '1d': {
     label:               '1D Trend',
@@ -197,7 +218,7 @@ const TF_PROFILES = {
     biasKey:             '1w',
     obKey:               '1w',
     swingLookback:       7,
-    minAiConfidence:     40, // AI Confidence % threshold for TAKE_NOW
+    minAiConfidence:     40,
     maxSlPct:            0.050,
     maxTpPct:            0.30,
     maxEntryDist:        0.030,  // 3.0% max entry distance
@@ -206,9 +227,9 @@ const TF_PROFILES = {
     sessionAllowNyClose: false,
     isScalping:          false,
     timeCap:             '5D',
-    riskAmount:          50,
+    riskAmount:          10,
     minRrr:              3.0,
-    minShiftAge:         1,     // BOS/CHOCH confirmation (H6)
+    minShiftAge:         1,
   },
 };
 

@@ -13,7 +13,7 @@ const getSavedAsset = () => {
   return saved && ASSETS[saved] ? saved : DEFAULT_ASSET;
 };
 
-const VALID_TFS = ['5m', '15m', '1h', '4h', '1d'];
+const VALID_TFS = ['1m', '5m', '15m', '1h', '4h', '1d'];
 const getSavedTimeframe = () => {
   const saved = localStorage.getItem('terminus_tf');
   return saved && VALID_TFS.includes(saved) ? saved : DEFAULT_TIMEFRAME;

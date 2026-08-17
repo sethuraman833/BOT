@@ -15,7 +15,8 @@ export const ASSETS = {
 export const ASSET_LIST = Object.keys(ASSETS);
 
 export const TIMEFRAMES = [
-  { key: '5m',  label: '5m',  seconds: 300   },  // NEW — scalping
+  { key: '1m',  label: '1m',  seconds: 60    },  // micro-scalping
+  { key: '5m',  label: '5m',  seconds: 300   },  // scalping
   { key: '15m', label: '15m', seconds: 900   },
   { key: '1h',  label: '1H',  seconds: 3600  },
   { key: '4h',  label: '4H',  seconds: 14400 },
@@ -29,7 +30,7 @@ export const DEFAULT_TIMEFRAME = '15m';
 export const BINANCE_REST = 'https://fapi.binance.com/fapi/v1';
 export const BINANCE_WSS  = 'wss://fstream.binance.com/stream';
 
-export const RISK_AMOUNT  = 50;   // $50 max risk per trade (funding challenge)
+export const RISK_AMOUNT  = 10;   // $10 max risk per trade
 export const CANDLE_LIMIT = 1500; // Binance Futures max per request (was 500)
 
 // ── Funding Challenge Configuration ──────────────────────────────
@@ -39,7 +40,7 @@ export const CHALLENGE_CONFIG = {
   profitTarget:     1000,       // $1,000 profit target
   dailyDDLimit:     400,        // Max daily drawdown allowed
   maxOverallLoss:   600,        // Lifetime max loss cap
-  riskPerTrade:     50,         // $50 per trade
+  riskPerTrade:     10,         // $10 per trade
   ddBudgetPct:      0.50,       // Stop trading at 50% of daily DD limit = -$200
   maxConsecLosses:  4,          // Hard stop after 4 consecutive losses (-$200)
 };

@@ -449,88 +449,46 @@ export function calculateTPs(
     }
   }
 
-  // ── HYBRID: 3-TP system with ICT-correct targets + 4R final ──────────
-  // TP1: First structural level ≥ 2.0R (matches minRRR = 1:2) → 40% close
-  // TP2: First structural level ≥ 3.0R → 35% close
-  // TP3: Always exactly 4.0R → 25% close
+  // ── SINGLE 1:3 TARGET — Structurally Validated ────────────────────
+  // Standard RRR: One target at exactly 3R (1:3).
+  // Searches for a structural level near 3R (±0.5R tolerance).
+  // If a structural level exists at 3R, it's used (more reliable).
+  // If none, exact 3R is used. 100% position close at TP.
 
-  const targetTp1Rrr = Math.max(2.0, Math.min(3.0, minRrr || 2.0));
-  const targetTp2Rrr = Math.min(3.5, targetTp1Rrr + 1.0);
+  const targetRrr = Math.max(3.0, minRrr || 3.0);
+  const exact3R = isLong ? entry + risk * targetRrr : entry - risk * targetRrr;
 
-  // TP1: structural candidate ≥ targetTp1Rrr AND ≤ (targetTp1Rrr + 0.7)
-  let hybridTp1 = null;
+  // Search for structural level within tolerance of target RRR
+  let structuralTp = null;
   for (const cand of dedupedCandidates) {
     const rr = calculateRRR(entry, stopLoss, cand.level, direction);
-    if (rr >= targetTp1Rrr && rr <= targetTp1Rrr + 0.7) { hybridTp1 = { ...cand, rrr: rr }; break; }
-  }
-  if (!hybridTp1) {
-    const lvl = isLong ? entry + risk * targetTp1Rrr : entry - risk * targetTp1Rrr;
-    hybridTp1 = { level: lvl, rrr: targetTp1Rrr, reason: `${targetTp1Rrr.toFixed(1)}R Target (1:${targetTp1Rrr.toFixed(0)})` };
-  }
-  // Safety: ensure TP1 is at least 0.5R away from TP2
-  const exactTp2Lvl = isLong ? entry + risk * targetTp2Rrr : entry - risk * targetTp2Rrr;
-  const tp1toTp2Spacing = Math.abs(exactTp2Lvl - hybridTp1.level) / risk;
-  if (tp1toTp2Spacing < 0.5) {
-    const lvl = isLong ? entry + risk * targetTp1Rrr : entry - risk * targetTp1Rrr;
-    hybridTp1 = { level: lvl, rrr: targetTp1Rrr, reason: `${targetTp1Rrr.toFixed(1)}R Target (1:${targetTp1Rrr.toFixed(0)})` };
+    // Accept structural levels between 2.5R and 3.5R (±0.5R around target)
+    if (rr >= targetRrr - 0.5 && rr <= targetRrr + 0.5) {
+      structuralTp = { ...cand, rrr: rr };
+      break;
+    }
   }
 
-  // TP3 level computed first — needed for TP2 safety checks below
-  const exact4R = isLong ? entry + risk * 4 : entry - risk * 4;
-
-  // TP2: structural candidate ≥ targetTp2Rrr beyond TP1, CAPPED at 3.5R max
-  let hybridTp2 = null;
-  for (const cand of dedupedCandidates) {
-    const rr = calculateRRR(entry, stopLoss, cand.level, direction);
-    const isFurther = isLong ? cand.level > hybridTp1.level : cand.level < hybridTp1.level;
-    if (rr >= targetTp2Rrr && rr <= 3.5 && isFurther) { hybridTp2 = { ...cand, rrr: rr }; break; }
-  }
-  if (!hybridTp2) {
-    const lvl = isLong ? entry + risk * targetTp2Rrr : entry - risk * targetTp2Rrr;
-    hybridTp2 = { level: lvl, rrr: targetTp2Rrr, reason: `${targetTp2Rrr.toFixed(1)}R Target` };
-  }
-
-  // Safety: ensure TP2 is at least 0.5R away from TP3 (4R)
-  const tp2to4RSpacing = Math.abs(exact4R - hybridTp2.level) / risk;
-  if (tp2to4RSpacing < 0.5) {
-    const lvl = isLong ? entry + risk * targetTp2Rrr : entry - risk * targetTp2Rrr;
-    hybridTp2 = { level: lvl, rrr: targetTp2Rrr, reason: `${targetTp2Rrr.toFixed(1)}R Target` };
-  }
-
-  // Safety: ensure TP2 is on the correct side of TP3 (ordering sanity)
-  const tp2WrongSide = isLong ? hybridTp2.level >= exact4R : hybridTp2.level <= exact4R;
-  if (tp2WrongSide) {
-    const lvl = isLong ? entry + risk * targetTp2Rrr : entry - risk * targetTp2Rrr;
-    hybridTp2 = { level: lvl, rrr: targetTp2Rrr, reason: `${targetTp2Rrr.toFixed(1)}R Target` };
-  }
-
-  // TP3: always exactly 4R (label enhanced if structural level within 1.5%)
-  const nearTP3 = dedupedCandidates
-    .filter(c => isLong ? c.level > hybridTp2.level : c.level < hybridTp2.level)
-    .sort((a, b) => Math.abs(a.level - exact4R) - Math.abs(b.level - exact4R))[0];
-  const tp3NearStructural = nearTP3 && Math.abs((nearTP3.level - exact4R) / exact4R) < 0.015;
-  const hybridTp3 = {
-    level: exact4R,
-    rrr: 4.0,
-    reason: tp3NearStructural ? `1:4 Final — ${nearTP3.reason}` : '1:4 Final Target (4R)',
-  };
-
-  // Final sort guard: ensure TP1 always closest to entry, TP3 always furthest.
-  // Sorts by distance from entry ascending so TP1=closest, TP2=middle, TP3=furthest.
-  const rawTps = [
-    { ...hybridTp1, closePercent: 40 },
-    { ...hybridTp2, closePercent: 35 },
-    { ...hybridTp3, closePercent: 25 },
-  ];
-  rawTps.sort((a, b) =>
-    isLong
-      ? a.level - b.level          // LONG: lowest price first (closest above entry)
-      : b.level - a.level          // SHORT: highest price first (closest below entry)
-  );
+  // Build the single TP
+  const singleTp = structuralTp
+    ? {
+        level: structuralTp.level,
+        rrr: structuralTp.rrr,
+        reason: `1:${targetRrr.toFixed(0)} Structural — ${structuralTp.reason}`,
+        isStructural: true,
+        closePercent: 100,
+      }
+    : {
+        level: exact3R,
+        rrr: targetRrr,
+        reason: `1:${targetRrr.toFixed(0)} Target (${targetRrr.toFixed(0)}R)`,
+        isStructural: false,
+        closePercent: 100,
+      };
 
   return {
-    tps: rawTps,
-    tpStructure: 'hybrid_3tp_4R',
+    tps: [singleTp],
+    tpStructure: 'single_1to3',
   };
 
   // Find TP2 candidate (first one satisfying RRR >= minTp2Rrr and spacing >= 1.0R from TP1)
