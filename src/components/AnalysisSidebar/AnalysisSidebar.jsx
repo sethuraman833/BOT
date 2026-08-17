@@ -394,11 +394,56 @@ function CMEGapSection({ cmeGapData, staggerIndex }) {
   );
 }
 
+function FundingRateSection({ fundingSentiment, direction, staggerIndex }) {
+  if (!fundingSentiment) return null;
+  const { fundingRate, fundingRatePct, sentiment, openInterest, aligned } = fundingSentiment;
+  const isPositive = fundingRate > 0;
+  const isNegative = fundingRate < 0;
 
+  const sentimentLabel = sentiment === 'overleveraged_longs'
+    ? { title: 'Crowd Long', desc: 'Contrarian Short Bias', color: 'var(--accent-red)' }
+    : sentiment === 'overleveraged_shorts'
+    ? { title: 'Crowd Short', desc: 'Contrarian Long Bias', color: 'var(--accent-green)' }
+    : { title: 'Neutral', desc: 'Balanced Long/Short', color: 'var(--text-secondary)' };
+
+  const formattedOI = openInterest != null
+    ? (openInterest >= 1e6 ? `${(openInterest / 1e6).toFixed(2)}M` : openInterest >= 1e3 ? `${(openInterest / 1e3).toFixed(1)}k` : openInterest.toFixed(0))
+    : '—';
+
+  return (
+    <div className="sidebar-section funding-section animate-fade-in-up glass-card" style={{ animationDelay: `${staggerIndex * 60}ms` }}>
+      <div className="section-header gradient-header">⚡ Funding Rate & Sentiment</div>
+      <div className="funding-card-grid">
+        <div className="funding-stat-card">
+          <span className="funding-stat-label">Funding Rate</span>
+          <span className={`funding-stat-value mono ${isNegative ? 'text-green' : isPositive ? 'text-yellow' : ''}`}>
+            {fundingRatePct || `${(fundingRate * 100).toFixed(4)}%`}
+          </span>
+        </div>
+        <div className="funding-stat-card">
+          <span className="funding-stat-label">Open Interest</span>
+          <span className="funding-stat-value mono text-blue">{formattedOI}</span>
+        </div>
+      </div>
+      <div className="funding-sentiment-row">
+        <div className="funding-sentiment-badge" style={{ borderColor: sentimentLabel.color, color: sentimentLabel.color }}>
+          <span className="funding-sentiment-dot" style={{ background: sentimentLabel.color }} />
+          {sentimentLabel.title}
+        </div>
+        <span className="funding-sentiment-desc">{sentimentLabel.desc}</span>
+        {direction && (
+          <span className={`funding-alignment-pill ${aligned ? 'aligned' : 'opposing'}`}>
+            {aligned ? '✓ Aligned' : '— Neutral'}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function TradeDurationInsight({ duration, timeframe, staggerIndex }) {
   if (!duration) return null;
-  const tfLabels = { '5m': 'Scalp', '15m': 'Intraday', '1h': 'Swing', '4h': 'Position', '1d': 'Trend' };
+  const tfLabels = { '1m': 'Micro-Scalp', '5m': 'Scalp', '15m': 'Intraday', '1h': 'Swing', '4h': 'Position', '1d': 'Trend' };
   const speed = parseFloat(duration.compositeScore || '1');
   const speedLabel = speed < 0.65 ? { text: 'Very Fast', color: '#00e5b4' }
     : speed < 0.85 ? { text: 'Fast',      color: '#00d4ff' }
@@ -428,7 +473,7 @@ function TradeDurationInsight({ duration, timeframe, staggerIndex }) {
   );
 }
 
-const MODE_COLORS = { '5m':  '#00d4ff', '15m': '#3b8ef0', '1h':  '#f7c948', '4h':  '#9d6fff', '1d':  '#ff3f5e' };
+const MODE_COLORS = { '1m': '#ff6b35', '5m':  '#00d4ff', '15m': '#3b8ef0', '1h':  '#f7c948', '4h':  '#9d6fff', '1d':  '#ff3f5e' };
 
 export default function AnalysisSidebar() {
   const { analysis, isAnalyzing, timeframe } = useMarket();
@@ -599,6 +644,13 @@ export default function AnalysisSidebar() {
 
         {/* ── CME GAP ANALYSIS ───────────────────────────── */}
         <CMEGapSection cmeGapData={analysis.cmeGapData} staggerIndex={nextDelay()} />
+
+        {/* ── FUNDING RATE & SENTIMENT ────────────────────── */}
+        <FundingRateSection
+          fundingSentiment={analysis.aiModules?.fundingSentiment || analysis.fundingSentiment}
+          direction={analysis.direction}
+          staggerIndex={nextDelay()}
+        />
 
         {/* ── STEPS LOG ──────────────────────────────────── */}
         <StepAccordion steps={analysis.analysisSteps} staggerIndex={nextDelay()} />

@@ -111,7 +111,7 @@ export default function TradeBox({ analysis }) {
             <span>Size</span> <strong>{formatSize(positionSize, symbol)} units</strong>
           </div>
           <div className="echip risk">
-            <span>Risk</span> <strong>${analysis.riskAmount ? analysis.riskAmount.toFixed(2) : '5.00'}</strong>
+            <span>Risk</span> <strong>${analysis.riskAmount ? analysis.riskAmount.toFixed(2) : '10.00'}</strong>
           </div>
           <div className="echip slpct">
             <span>SL Dist</span> <strong>−{slPct}%</strong>
@@ -128,12 +128,13 @@ export default function TradeBox({ analysis }) {
           const i = tpDetails.length - 1 - revIdx;
           if (!tp || !tp.level) return null;
           const pctMove  = (entry && tp.level) ? ((Math.abs(tp.level - entry) / entry) * 100).toFixed(2) : '—';
+          const tpLabel = tpDetails.length === 1 ? 'TP' : `TP${i + 1}`;
           return (
             <div className="timeline-item tp-item" key={`tp-${i}`}>
               <div className={`timeline-node tp-node-${i+1}`}></div>
               <div className="timeline-card glass-card">
                 <div className="tcard-left">
-                  <span className={`tcard-badge tp-badge-${i+1}`}>TP{i+1}</span>
+                  <span className={`tcard-badge tp-badge-${i+1}`}>{tpLabel}</span>
                   <span className="tcard-reason">{tp.reason || 'Target'}</span>
                 </div>
                 <div className="tcard-right">
@@ -201,20 +202,13 @@ export default function TradeBox({ analysis }) {
             <div className="mgmt-num text-yellow">1</div>
             <div className="mgmt-text">Move SL to Breakeven at <strong className="text-yellow">{formatPrice(breakevenMove, symbol)}</strong></div>
           </div>
-          {tpDetails && tpDetails.length >= 3 ? (
-            <div className="mgmt-step">
-              <div className="mgmt-num text-blue">2</div>
-              <div className="mgmt-text">Close 40% at TP1, trail SL to Entry. TP2 closes 35%.</div>
-            </div>
-          ) : (
-            <div className="mgmt-step">
-              <div className="mgmt-num text-blue">2</div>
-              <div className="mgmt-text">Close 100% at TP.</div>
-            </div>
-          )}
+          <div className="mgmt-step">
+            <div className="mgmt-num text-blue">2</div>
+            <div className="mgmt-text">Take 100% Profit at Target (1:3 RRR).</div>
+          </div>
           <div className="mgmt-step">
             <div className="mgmt-num text-purple">3</div>
-            <div className="mgmt-text">Time Cap: {analysis.timeCap || '6H'} — Exit if stalled.</div>
+            <div className="mgmt-text">Time Cap: {analysis.timeCap || '4H'} — Exit if stalled.</div>
           </div>
         </div>
       </div>

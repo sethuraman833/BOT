@@ -369,7 +369,8 @@ export default function ChartPanel() {
     
     if (analysis.tpDetails && Array.isArray(analysis.tpDetails)) {
       analysis.tpDetails.forEach((tp, i) => {
-        add(tp.level, '#00d4aa', `TP${i + 1}`);
+        const label = analysis.tpDetails.length === 1 ? 'TP (1:3)' : `TP${i + 1}`;
+        add(tp.level, '#00d4aa', label);
       });
     }
   }, [analysis, backtestMode]);
@@ -429,7 +430,7 @@ export default function ChartPanel() {
           </div>
           {analysis.tpDetails?.map((tp, i) => (
             <div className="ribbon-sec" key={i}>
-              <span className="ribbon-label">TP{i + 1} ({tp.closePercent}%)</span>
+              <span className="ribbon-label">{analysis.tpDetails.length === 1 ? 'TP' : `TP${i + 1}`} ({tp.closePercent}%)</span>
               <span className="ribbon-val mono text-green">
                 {formatPrice(tp.level, asset)}
                 <small style={{ marginLeft: '4px', opacity: 0.8 }}>(+${tp.projectedProfit ?? '—'})</small>
