@@ -1396,12 +1396,6 @@ export async function runAnalysis(allData, config = {}) {
 
   if (!direction) {
     rejectionReason = `Market ranging — no ${profile.biasKey.toUpperCase()} directional bias & AI consensus insufficient`;
-  } else if (!isStrongRegime) {
-    rejectionReason = `Trade skipped — Market is in ${marketRegime.label} regime. Trades allowed ONLY in STRONG BULL or STRONG BEAR regimes.`;
-  } else if (isStrongBull && direction === 'short') {
-    rejectionReason = `Short trade skipped — Market is in STRONG BULL regime (Longs only allowed).`;
-  } else if (isStrongBear && direction === 'long') {
-    rejectionReason = `Long trade skipped — Market is in STRONG BEAR regime (Shorts only allowed).`;
   } else if (emaVetoActive) {
     rejectionReason = emaVetoReason;
   } else if (!slData) {
