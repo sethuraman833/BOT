@@ -1,12 +1,16 @@
-// ─────────────────────────────────────────────────────────
-//  SMC Detector v9.0 — Breaker Blocks, VWAP, Volume-Weighted OBs
-// ─────────────────────────────────────────────────────────
+/**
+ * SMC Detector - Smart Money Concepts & Institutional Grade Technical Analysis Engine
+ * Provides robust detection of liquidity, structure, order blocks, and momentum.
+ */
 
 /**
- * Find swing highs and lows using a configurable lookback.
+ * Finds swing highs and lows using a configurable lookback period.
+ * @param {Array} candles - Array of candle objects.
+ * @param {number} lookback - Number of candles to look back and forward.
+ * @returns {Array} Array of swing points.
  */
 export function findSwingPoints(candles, lookback = 5) {
-  if (!candles || candles.length === 0) return []; // L6 null guard
+  if (!candles || candles.length === 0) return [];
   const swings = [];
   for (let i = lookback; i < candles.length - lookback; i++) {
     let isHigh = true, isLow = true;
@@ -14,7 +18,6 @@ export function findSwingPoints(candles, lookback = 5) {
       if (candles[i].high <= candles[i - j].high || candles[i].high <= candles[i + j].high) isHigh = false;
       if (candles[i].low >= candles[i - j].low || candles[i].low >= candles[i + j].low) isLow = false;
     }
-    // L4: Mutually exclusive swing high/low check
     if (isHigh && isLow) {
       const bodyMid = (candles[i].open + candles[i].close) / 2;
       if (candles[i].high - bodyMid > bodyMid - candles[i].low) {
@@ -30,101 +33,68 @@ export function findSwingPoints(candles, lookback = 5) {
 }
 
 /**
- * Detect Order Blocks (v7: breaker blocks, volume weighting).
- * When an OB is mitigated, it becomes a "breaker block" — flipped S/R.
+ * Detects Order Blocks and Breaker Blocks using volume weighting and mitigation checks.
+ * @param {Array} candles - Array of candle objects.
+ * @param {number} currentPrice - The current market price.
+ * @returns {Array} Sorted array of detected order blocks.
  */
 export function detectOrderBlocks(candles, currentPrice) {
-  if (!candles || candles.length === 0) return []; // L6 null guard
+  if (!candles || candles.length === 0) return [];
   const obs = [];
   const recencyCutoff = Math.max(0, candles.length - 50);
 
-  // Pre-calculate average volume for volume weighting
   const recentCandles = candles.slice(-20);
-  const avgVolume = recentCandles.reduce((s, c) => s + (c.volume || 0), 0) / recentCandles.length;
+  const avgVolume = recentCandles.length > 0 ? (recentCandles.reduce((s, c) => s + (c.volume || 0), 0) / recentCandles.length) : 0;
 
-  for (let i = 0; i < candles.length - 1; i++) { // start at 0 (M7)
+  for (let i = 0; i < candles.length - 1; i++) {
     const ob = candles[i];
     const impulse = candles[i + 1];
     if (!ob || !impulse) continue;
+    
     const obBody = Math.abs(ob.close - ob.open);
     const impulseBody = Math.abs(impulse.close - impulse.open);
-    if (obBody === 0) continue; // skip doji
+    if (obBody === 0) continue;
 
-    // Volume weight multiplier (impulse volume vs average)
     const volMult = (avgVolume > 0 && impulse.volume) ? Math.max(0.5, impulse.volume / avgVolume) : 1.0;
 
-    // Demand OB: bearish candle followed by strong bullish impulse
+    // Demand OB
     if (ob.close < ob.open && impulse.close > impulse.open && impulseBody >= obBody * 2.5) {
-      // H5: Historical mitigation check (loop from i+2 to now)
       let mitigated = false;
       for (let k = i + 2; k < candles.length; k++) {
-        if (candles[k].low <= ob.low) {
-          mitigated = true;
-          break;
-        }
+        if (candles[k].low <= ob.low) { mitigated = true; break; }
       }
       const baseStrength = (impulseBody / obBody) * volMult;
-      if (!mitigated && i >= recencyCutoff) {
+      if (i >= recencyCutoff) {
         obs.push({
-          type: 'demand',
+          type: mitigated ? 'supply' : 'demand',
           upperBound: ob.high,
           lowerBound: ob.low,
-          entryBoundary: ob.high,
+          entryBoundary: mitigated ? ob.high : ob.high,
           slBoundary: ob.low,
-          status: 'active',
-          strength: baseStrength,
-          candleIndex: i,
-          time: ob.time,
-        });
-      } else if (mitigated && i >= recencyCutoff) {
-        // Breaker block: mitigated demand OB becomes supply (resistance)
-        obs.push({
-          type: 'supply',
-          upperBound: ob.high,
-          lowerBound: ob.low,
-          entryBoundary: ob.high,
-          slBoundary: ob.low,
-          status: 'breaker',
-          strength: baseStrength * 0.7, // breakers are slightly weaker than fresh OBs
+          status: mitigated ? 'breaker' : 'active',
+          strength: baseStrength * (mitigated ? 0.7 : 1.0),
           candleIndex: i,
           time: ob.time,
         });
       }
     }
 
-    // Supply OB: bullish candle followed by strong bearish impulse
+    // Supply OB
     if (ob.close > ob.open && impulse.close < impulse.open && impulseBody >= obBody * 2.5) {
-      // H5: Historical mitigation check (loop from i+2 to now)
       let mitigated = false;
       for (let k = i + 2; k < candles.length; k++) {
-        if (candles[k].high >= ob.high) {
-          mitigated = true;
-          break;
-        }
+        if (candles[k].high >= ob.high) { mitigated = true; break; }
       }
       const baseStrength = (impulseBody / obBody) * volMult;
-      if (!mitigated && i >= recencyCutoff) {
+      if (i >= recencyCutoff) {
         obs.push({
-          type: 'supply',
+          type: mitigated ? 'demand' : 'supply',
           upperBound: ob.high,
           lowerBound: ob.low,
-          entryBoundary: ob.low,
+          entryBoundary: mitigated ? ob.low : ob.low,
           slBoundary: ob.high,
-          status: 'active',
-          strength: baseStrength,
-          candleIndex: i,
-          time: ob.time,
-        });
-      } else if (mitigated && i >= recencyCutoff) {
-        // Breaker block: mitigated supply OB becomes demand (support)
-        obs.push({
-          type: 'demand',
-          upperBound: ob.high,
-          lowerBound: ob.low,
-          entryBoundary: ob.low,
-          slBoundary: ob.high,
-          status: 'breaker',
-          strength: baseStrength * 0.7,
+          status: mitigated ? 'breaker' : 'active',
+          strength: baseStrength * (mitigated ? 0.7 : 1.0),
           candleIndex: i,
           time: ob.time,
         });
@@ -132,173 +102,121 @@ export function detectOrderBlocks(candles, currentPrice) {
     }
   }
 
-  // Sort by proximity to price, strongest first, limit to 8 (increased for breakers)
   return obs
-    .sort((a, b) => {
-      const distA = Math.abs(a.entryBoundary - (currentPrice || 0));
-      const distB = Math.abs(b.entryBoundary - (currentPrice || 0));
-      return distA - distB;
-    })
+    .sort((a, b) => Math.abs(a.entryBoundary - (currentPrice || 0)) - Math.abs(b.entryBoundary - (currentPrice || 0)))
     .slice(0, 8);
 }
 
 /**
- * Detect only Breaker Blocks — mitigated Order Blocks with flipped type.
- * Convenience wrapper around detectOrderBlocks.
+ * Detects mitigated Order Blocks (Breaker Blocks).
+ * @param {Array} candles - Array of candle objects.
+ * @param {number} currentPrice - Current market price.
+ * @returns {Array} Array of breaker blocks.
  */
 export function detectBreakerBlocks(candles, currentPrice) {
-  const allOBs = detectOrderBlocks(candles, currentPrice);
-  return allOBs.filter(ob => ob.status === 'breaker');
+  return detectOrderBlocks(candles, currentPrice).filter(ob => ob.status === 'breaker');
 }
 
 /**
- * Detect Fair Value Gaps. Only unfilled, recent (last 60 bars), with minimum size filter.
+ * Detects Fair Value Gaps (FVG) that are unfilled.
+ * @param {Array} candles - Array of candle objects.
+ * @param {number} currentPrice - Current market price.
+ * @returns {Array} Array of FVGs.
  */
 export function detectFVGs(candles, currentPrice) {
-  if (!candles || candles.length === 0) return []; // L6 null guard
+  if (!candles || candles.length === 0) return [];
   const fvgs = [];
   const recencyCutoff = Math.max(0, candles.length - 60);
-  const minGapPct = 0.001; // 0.1% minimum gap size
+  const minGapPct = 0.001;
 
-  for (let i = 1; i < candles.length - 1; i++) {
-    if (i < recencyCutoff) continue;
+  for (let i = Math.max(1, recencyCutoff); i < candles.length - 1; i++) {
     const c1 = candles[i - 1];
     const c3 = candles[i + 1];
     if (!c1 || !c3) continue;
 
-    // Bullish FVG: gap up
     if (c3.low > c1.high && (c3.low - c1.high) / c1.high > minGapPct) {
       const gapSize = c3.low - c1.high;
-      const fillThreshold = c3.low - gapSize * 0.5; // H4: 50% partial fill
+      const fillThreshold = c3.low - gapSize * 0.5;
       let filled = false;
       for (let k = i + 2; k < candles.length; k++) {
-        if (candles[k].low <= fillThreshold) {
-          filled = true;
-          break;
-        }
+        if (candles[k].low <= fillThreshold) { filled = true; break; }
       }
-      if (!filled) {
-        fvgs.push({ type: 'bullish', upper: c3.low, lower: c1.high, midpoint: (c3.low + c1.high) / 2, status: 'unfilled', candleIndex: i, time: candles[i].time });
-      }
+      if (!filled) fvgs.push({ type: 'bullish', upper: c3.low, lower: c1.high, midpoint: (c3.low + c1.high) / 2, status: 'unfilled', candleIndex: i, time: candles[i].time });
     }
 
-    // Bearish FVG: gap down
     if (c1.low > c3.high && (c1.low - c3.high) / c3.high > minGapPct) {
       const gapSize = c1.low - c3.high;
-      const fillThreshold = c3.high + gapSize * 0.5; // H4: 50% partial fill
+      const fillThreshold = c3.high + gapSize * 0.5;
       let filled = false;
       for (let k = i + 2; k < candles.length; k++) {
-        if (candles[k].high >= fillThreshold) {
-          filled = true;
-          break;
-        }
+        if (candles[k].high >= fillThreshold) { filled = true; break; }
       }
-      if (!filled) {
-        fvgs.push({ type: 'bearish', upper: c1.low, lower: c3.high, midpoint: (c1.low + c3.high) / 2, status: 'unfilled', candleIndex: i, time: candles[i].time });
-      }
+      if (!filled) fvgs.push({ type: 'bearish', upper: c1.low, lower: c3.high, midpoint: (c1.low + c3.high) / 2, status: 'unfilled', candleIndex: i, time: candles[i].time });
     }
   }
 
-  // Sort by proximity to current price
   return fvgs
     .sort((a, b) => Math.abs(a.midpoint - currentPrice) - Math.abs(b.midpoint - currentPrice))
     .slice(0, 5);
 }
 
 /**
- * Check if a candle qualifies as a displacement candle (strong directional body).
- * Used as confirmation after a liquidity sweep.
+ * Checks if a candle qualifies as a displacement candle.
+ * @param {Object} candle - Candle object.
+ * @param {string} direction - Expected direction ('bullish' or 'bearish').
+ * @returns {boolean} True if it is a displacement candle.
  */
 function isDisplacementCandle(candle, direction) {
   if (!candle) return false;
   const body = Math.abs(candle.close - candle.open);
   const range = candle.high - candle.low;
-  if (range === 0) return false;
-  const bodyRatio = body / range;
-  // Body must be at least 50% of candle range
-  if (bodyRatio < 0.50) return false;
-  // Must close in the expected direction
-  if (direction === 'bullish' && candle.close <= candle.open) return false;
-  if (direction === 'bearish' && candle.close >= candle.open) return false;
-  return true;
+  if (range === 0 || body / range < 0.50) return false;
+  return direction === 'bullish' ? candle.close > candle.open : candle.close < candle.open;
 }
 
 /**
- * Detect Liquidity Sweeps — wick extends beyond a prior swing, then closes back inside.
+ * Detects liquidity sweeps based on prior swings and displacement.
+ * @param {Array} candles - Array of candle objects.
+ * @param {number} sweepThreshold - Percentage breach threshold for sweeps.
+ * @param {number} scanCount - Number of recent candles to scan.
+ * @returns {Array} Array of detected sweeps.
  */
 export function detectSweeps(candles, sweepThreshold, scanCount = 15) {
-  if (!candles || candles.length === 0) return []; // L6 null guard
+  if (!candles || candles.length === 0) return [];
   const sweeps = [];
-  const swings = findSwingPoints(candles, 3); // L5: standardized lookback
+  const swings = findSwingPoints(candles, 3);
   const recentHighs = swings.filter(s => s.type === 'high').slice(-8);
   const recentLows  = swings.filter(s => s.type === 'low').slice(-8);
 
-  const MIN_SWEEP_PCT = sweepThreshold;
-
-  // Check last scanCount candles for sweep events. M8: i < candles.length - 2 to prevent OOB
   const scanLimit = Math.min(scanCount, candles.length - 3);
   for (let i = candles.length - scanLimit; i < candles.length - 2; i++) {
     const c = candles[i];
     if (!c) continue;
 
-    // Bearish sweep: wick above a prior high, then closes below it (bull trap)
     for (const swing of recentHighs) {
       if (swing.index >= i) continue;
-
       const breachPct = (c.high - swing.price) / swing.price;
-      if (breachPct < MIN_SWEEP_PCT) continue;
-
-      // Sweep candle close must be back below the swept level
-      if (c.close >= swing.price) continue;
-
-      // Displacement candle within next 1-3 candles
-      const next1 = candles[i + 1];
-      const next2 = candles[i + 2];
-      const next3 = candles[i + 3];
-      const hasDisplacement = isDisplacementCandle(next1, 'bearish') ||
-                              (next2 && isDisplacementCandle(next2, 'bearish')) ||
-                              (next3 && isDisplacementCandle(next3, 'bearish'));
-
+      if (breachPct < sweepThreshold || c.close >= swing.price) continue;
+      
+      const hasDisplacement = [1, 2, 3].some(offset => isDisplacementCandle(candles[i + offset], 'bearish'));
       sweeps.push({
-        type: 'bearish',
-        sweptLevel: swing.price,
-        wickExtreme: c.high,   // actual high wick of the sweep candle — SL anchor for shorts
-        breachPct: (breachPct * 100).toFixed(3) + '%',
-        candleIndex: i,
-        time: c.time,
-        direction: 'short',
-        strength: hasDisplacement ? 'strong' : 'weak',
+        type: 'bearish', sweptLevel: swing.price, wickExtreme: c.high,
+        breachPct: (breachPct * 100).toFixed(3) + '%', candleIndex: i, time: c.time,
+        direction: 'short', strength: hasDisplacement ? 'strong' : 'weak',
       });
       break;
     }
 
-    // Bullish sweep: wick below a prior low, then closes above it (bear trap)
     for (const swing of recentLows) {
       if (swing.index >= i) continue;
-
       const breachPct = (swing.price - c.low) / swing.price;
-      if (breachPct < MIN_SWEEP_PCT) continue;
+      if (breachPct < sweepThreshold || c.close <= swing.price) continue;
 
-      // Sweep candle close must be back above the swept level
-      if (c.close <= swing.price) continue;
-
-      // Displacement candle within next 1-3 candles
-      const next1 = candles[i + 1];
-      const next2 = candles[i + 2];
-      const next3 = candles[i + 3];
-      const hasDisplacement = isDisplacementCandle(next1, 'bullish') ||
-                              (next2 && isDisplacementCandle(next2, 'bullish')) ||
-                              (next3 && isDisplacementCandle(next3, 'bullish'));
-
+      const hasDisplacement = [1, 2, 3].some(offset => isDisplacementCandle(candles[i + offset], 'bullish'));
       sweeps.push({
-        type: 'bullish',
-        sweptLevel: swing.price,
-        wickExtreme: c.low,    // actual low wick of the sweep candle — SL anchor for longs
-        breachPct: (breachPct * 100).toFixed(3) + '%',
-        candleIndex: i,
-        time: c.time,
-        direction: 'long',
-        strength: hasDisplacement ? 'strong' : 'weak',
+        type: 'bullish', sweptLevel: swing.price, wickExtreme: c.low,
+        breachPct: (breachPct * 100).toFixed(3) + '%', candleIndex: i, time: c.time,
+        direction: 'long', strength: hasDisplacement ? 'strong' : 'weak',
       });
       break;
     }
@@ -308,111 +226,82 @@ export function detectSweeps(candles, sweepThreshold, scanCount = 15) {
 }
 
 /**
- * Detect BOS (Break of Structure) and CHOCH (Change of Character).
- * BOS = trend continuation. CHOCH = potential reversal.
+ * Detects Break of Structure (BOS) and Change of Character (CHOCH).
+ * @param {Array} candles - Array of candle objects.
+ * @param {number} minAge - Minimum age for a structure shift.
+ * @param {number} lookback - Lookback for swing point calculation.
+ * @returns {Array} Array of detected structure shifts.
  */
 export function detectStructureShifts(candles, minAge = 0, lookback = 3) {
-  if (!candles || candles.length === 0) return []; // L6 null guard
+  if (!candles || candles.length === 0) return [];
   const shifts = [];
-  const swings = findSwingPoints(candles, lookback); // L5: standardized lookback
+  const swings = findSwingPoints(candles, lookback);
   const highs = swings.filter(s => s.type === 'high').slice(-5);
   const lows  = swings.filter(s => s.type === 'low').slice(-5);
-  const last = candles[candles.length - 1];
-  if (!last) return [];
-
-  // H8: Scan last 20 candles backwards for structure breaks
   const scanCount = Math.min(20, candles.length);
 
   if (highs.length >= 2) {
-    const prevHigh = highs[highs.length - 2];
-    const lastHigh = highs[highs.length - 1];
-
-    // BOS Bullish: price closes above previous HH
+    const prevHigh = highs[highs.length - 2], lastHigh = highs[highs.length - 1];
     for (let s = candles.length - scanCount; s < candles.length; s++) {
-      const c = candles[s];
-      if (c && c.close > prevHigh.price) {
-        if (candles.length - 1 - s >= minAge) {
-          shifts.push({ type: 'BOS', direction: 'bullish', level: prevHigh.price, time: c.time, candleIndex: s });
-        }
+      if (candles[s] && candles[s].close > prevHigh.price && (candles.length - 1 - s >= minAge)) {
+        shifts.push({ type: 'BOS', direction: 'bullish', level: prevHigh.price, time: candles[s].time, candleIndex: s });
         break;
       }
     }
-    // CHOCH Bearish: price closes below a recent HL after uptrend
-    if (lows.length >= 2) {
+    if (lows.length >= 2 && lastHigh.price > prevHigh.price) {
       const lastLow = lows[lows.length - 1];
-      if (lastHigh.price > prevHigh.price) {
-        for (let s = candles.length - scanCount; s < candles.length; s++) {
-          const c = candles[s];
-          if (c && c.close < lastLow.price) {
-            if (candles.length - 1 - s >= minAge) {
-              shifts.push({ type: 'CHOCH', direction: 'bearish', level: lastLow.price, time: c.time, candleIndex: s });
-            }
-            break;
-          }
+      for (let s = candles.length - scanCount; s < candles.length; s++) {
+        if (candles[s] && candles[s].close < lastLow.price && (candles.length - 1 - s >= minAge)) {
+          shifts.push({ type: 'CHOCH', direction: 'bearish', level: lastLow.price, time: candles[s].time, candleIndex: s });
+          break;
         }
       }
     }
   }
 
   if (lows.length >= 2) {
-    const prevLow = lows[lows.length - 2];
-    const lastLow = lows[lows.length - 1];
-
-    // BOS Bearish: price closes below previous LL
+    const prevLow = lows[lows.length - 2], lastLow = lows[lows.length - 1];
     for (let s = candles.length - scanCount; s < candles.length; s++) {
-      const c = candles[s];
-      if (c && c.close < prevLow.price) {
-        if (candles.length - 1 - s >= minAge) {
-          shifts.push({ type: 'BOS', direction: 'bearish', level: prevLow.price, time: c.time, candleIndex: s });
-        }
+      if (candles[s] && candles[s].close < prevLow.price && (candles.length - 1 - s >= minAge)) {
+        shifts.push({ type: 'BOS', direction: 'bearish', level: prevLow.price, time: candles[s].time, candleIndex: s });
         break;
       }
     }
-    // CHOCH Bullish: price closes above a recent LH after downtrend
-    if (highs.length >= 2) {
+    if (highs.length >= 2 && lastLow.price < prevLow.price) {
       const lastHigh = highs[highs.length - 1];
-      if (lastLow.price < prevLow.price) {
-        for (let s = candles.length - scanCount; s < candles.length; s++) {
-          const c = candles[s];
-          if (c && c.close > lastHigh.price) {
-            if (candles.length - 1 - s >= minAge) {
-              shifts.push({ type: 'CHOCH', direction: 'bullish', level: lastHigh.price, time: c.time, candleIndex: s });
-            }
-            break;
-          }
+      for (let s = candles.length - scanCount; s < candles.length; s++) {
+        if (candles[s] && candles[s].close > lastHigh.price && (candles.length - 1 - s >= minAge)) {
+          shifts.push({ type: 'CHOCH', direction: 'bullish', level: lastHigh.price, time: candles[s].time, candleIndex: s });
+          break;
         }
       }
     }
   }
 
-  // M6: Priority and contradiction resolution:
-  // If we have both bullish and bearish shifts, prioritize CHOCH over BOS,
-  // and keep only the latest shift if contradictory.
   if (shifts.length > 1) {
     const chochs = shifts.filter(s => s.type === 'CHOCH');
     if (chochs.length > 0) {
-      const bullChoch = chochs.filter(s => s.direction === 'bullish');
-      const bearChoch = chochs.filter(s => s.direction === 'bearish');
-      if (bullChoch.length > 0 && bearChoch.length > 0) {
+      if (chochs.some(s => s.direction === 'bullish') && chochs.some(s => s.direction === 'bearish')) {
         return [chochs[chochs.length - 1]];
       }
       return chochs;
     }
     const bullBOS = shifts.filter(s => s.type === 'BOS' && s.direction === 'bullish');
     const bearBOS = shifts.filter(s => s.type === 'BOS' && s.direction === 'bearish');
-    if (bullBOS.length > 0 && bearBOS.length > 0) {
-      return [shifts[shifts.length - 1]];
-    }
+    if (bullBOS.length > 0 && bearBOS.length > 0) return [shifts[shifts.length - 1]];
   }
 
   return shifts;
 }
 
 /**
- * Calculate EMA (Exponential Moving Average).
+ * Calculates Exponential Moving Average.
+ * @param {Array} candles - Array of candle objects.
+ * @param {number} period - EMA period.
+ * @returns {Array} Array of EMA values.
  */
 export function calculateEMA(candles, period) {
-  if (!candles || candles.length < period) return []; // L6 null guard
+  if (!candles || candles.length < period) return [];
   const k = 2 / (period + 1);
   const closes = candles.map(c => c.close);
   const ema = [closes.slice(0, period).reduce((a, b) => a + b, 0) / period];
@@ -423,10 +312,31 @@ export function calculateEMA(candles, period) {
 }
 
 /**
- * Calculate RSI.
+ * Calculates Simple Moving Average.
+ * @param {Array} data - Array of numerical values.
+ * @param {number} period - SMA period.
+ * @returns {Array} Array of SMA values.
+ */
+export function calculateSMA(data, period) {
+  if (!data || data.length < period) return [];
+  const sma = Array(period - 1).fill(null);
+  let sum = data.slice(0, period).reduce((a, b) => a + b, 0);
+  sma.push(sum / period);
+  for (let i = period; i < data.length; i++) {
+    sum += data[i] - data[i - period];
+    sma.push(sum / period);
+  }
+  return sma;
+}
+
+/**
+ * Calculates Relative Strength Index (RSI).
+ * @param {Array} candles - Array of candle objects.
+ * @param {number} period - RSI period.
+ * @returns {Array} Array of RSI values.
  */
 export function calculateRSI(candles, period = 14) {
-  if (!candles || candles.length < period + 1) return []; // L6 null guard
+  if (!candles || candles.length < period + 1) return [];
   const closes = candles.map(c => c.close);
   const rsis = [];
   let gains = 0, losses = 0;
@@ -443,39 +353,29 @@ export function calculateRSI(candles, period = 14) {
       avgGain = (avgGain * (period - 1) + Math.max(diff, 0)) / period;
       avgLoss = (avgLoss * (period - 1) + Math.max(-diff, 0)) / period;
     }
-    if (avgLoss === 0) { // M9: Return 100 instead of 99.01
-      rsis.push(100);
-    } else {
-      const rs = avgGain / avgLoss;
-      rsis.push(100 - 100 / (1 + rs));
-    }
+    rsis.push(avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss)));
   }
   return rsis;
 }
 
-export function calculateSMA(data, period) {
-  if (!data || data.length < period) return [];
-  const sma = [];
-  for (let i = 0; i < period - 1; i++) sma.push(null);
-  let sum = 0;
-  for (let i = 0; i < period; i++) sum += data[i];
-  sma.push(sum / period);
-  for (let i = period; i < data.length; i++) {
-    sum += data[i] - data[i - period];
-    sma.push(sum / period);
-  }
-  return sma;
-}
-
+/**
+ * Detects RSI and SMA crossovers.
+ * @param {Array} candles - Array of candle objects.
+ * @param {number} rsiPeriod - Period for RSI.
+ * @param {number} smaPeriod - Period for SMA.
+ * @returns {Object} Crossover detection details.
+ */
 export function detectRSISmaCross(candles, rsiPeriod = 14, smaPeriod = 14) {
   const rsiValues = calculateRSI(candles, rsiPeriod);
   const smaValues = calculateSMA(rsiValues, smaPeriod);
   if (rsiValues.length < 2 || smaValues.length < 2) return { crossUp: false, crossDown: false, rsi: 50, sma: 50 };
-  const currentRsi = rsiValues[rsiValues.length - 1];
-  const currentSma = smaValues[smaValues.length - 1];
-  const prevRsi    = rsiValues[rsiValues.length - 2];
-  const prevSma    = smaValues[smaValues.length - 2];
-  if (currentRsi === null || currentSma === null || prevRsi === null || prevSma === null) return { crossUp: false, crossDown: false, rsi: currentRsi || 50, sma: currentSma || 50 };
+  
+  const currentRsi = rsiValues[rsiValues.length - 1], currentSma = smaValues[smaValues.length - 1];
+  const prevRsi = rsiValues[rsiValues.length - 2], prevSma = smaValues[smaValues.length - 2];
+  
+  if (currentRsi === null || currentSma === null || prevRsi === null || prevSma === null) {
+    return { crossUp: false, crossDown: false, rsi: currentRsi || 50, sma: currentSma || 50 };
+  }
   return {
     crossUp: prevRsi <= prevSma && currentRsi > currentSma,
     crossDown: prevRsi >= prevSma && currentRsi < currentSma,
@@ -485,833 +385,541 @@ export function detectRSISmaCross(candles, rsiPeriod = 14, smaPeriod = 14) {
 }
 
 /**
- * Detect RSI divergence by comparing price swings vs RSI swings.
+ * Detects RSI divergence against price action.
+ * @param {Array} candles - Array of candle objects.
+ * @param {string} direction - Direction to test ('long' or 'short').
+ * @param {number} period - RSI period.
+ * @returns {Object} Divergence detection details.
  */
 export function detectRSIDivergence(candles, direction, period = 14) {
-  if (!candles || candles.length === 0) return { rsiValue: 50, hasDivergence: false, detail: '', isOverbought: false, isOversold: false }; // L6 null guard
+  const defaultRes = { rsiValue: 50, hasDivergence: false, detail: '', isOverbought: false, isOversold: false };
+  if (!candles || candles.length === 0) return defaultRes;
   const rsiValues = calculateRSI(candles, period);
-  if (rsiValues.length === 0) return { rsiValue: 50, hasDivergence: false, detail: '', isOverbought: false, isOversold: false };
+  if (rsiValues.length === 0) return defaultRes;
+  
   const rsiValue = rsiValues[rsiValues.length - 1];
-  const isOverbought = rsiValue > 70;
-  const isOversold = rsiValue < 30;
-  let hasDivergence = false;
-  let detail = '';
-
   const startIndex = Math.max(0, candles.length - 50);
   const swings = findSwingPoints(candles.slice(-50), 3);
+  let hasDivergence = false, detail = '';
 
-  // Helper to get RSI value for a swing point relative to the slice
   const getRsiForSwing = (swing) => {
-    const originalIndex = startIndex + swing.index;
-    const rsiIndex = originalIndex - period;
-    if (rsiIndex < 0 || rsiIndex >= rsiValues.length) return null;
-    return rsiValues[rsiIndex];
+    const rsiIndex = startIndex + swing.index - period;
+    return (rsiIndex >= 0 && rsiIndex < rsiValues.length) ? rsiValues[rsiIndex] : null;
   };
 
   if (direction === 'short') {
     const priceHighs = swings.filter(s => s.type === 'high').slice(-3);
     if (priceHighs.length >= 2) {
-      const ph1 = priceHighs[priceHighs.length - 2];
-      const ph2 = priceHighs[priceHighs.length - 1];
-      const ri1 = getRsiForSwing(ph1);
-      const ri2 = getRsiForSwing(ph2);
+      const ph1 = priceHighs[priceHighs.length - 2], ph2 = priceHighs[priceHighs.length - 1];
+      const ri1 = getRsiForSwing(ph1), ri2 = getRsiForSwing(ph2);
       if (ri1 !== null && ri2 !== null && ph2.price > ph1.price && ri2 < ri1) {
-        hasDivergence = true;
-        detail = `Bearish divergence: price HH (${ph2.price.toFixed(0)}) but RSI LH (${ri2.toFixed(1)})`;
+        hasDivergence = true; detail = `Bearish divergence: price HH (${ph2.price.toFixed(0)}) but RSI LH (${ri2.toFixed(1)})`;
       }
     }
   } else if (direction === 'long') {
     const priceLows = swings.filter(s => s.type === 'low').slice(-3);
     if (priceLows.length >= 2) {
-      const pl1 = priceLows[priceLows.length - 2];
-      const pl2 = priceLows[priceLows.length - 1];
-      const ri1 = getRsiForSwing(pl1);
-      const ri2 = getRsiForSwing(pl2);
+      const pl1 = priceLows[priceLows.length - 2], pl2 = priceLows[priceLows.length - 1];
+      const ri1 = getRsiForSwing(pl1), ri2 = getRsiForSwing(pl2);
       if (ri1 !== null && ri2 !== null && pl2.price < pl1.price && ri2 > ri1) {
-        hasDivergence = true;
-        detail = `Bullish divergence: price LL (${pl2.price.toFixed(0)}) but RSI HL (${ri2.toFixed(1)})`;
+        hasDivergence = true; detail = `Bullish divergence: price LL (${pl2.price.toFixed(0)}) but RSI HL (${ri2.toFixed(1)})`;
       }
     }
   }
-
-  return { rsiValue, hasDivergence, detail, isOverbought, isOversold };
+  
+  return { rsiValue, hasDivergence, detail, isOverbought: rsiValue > 70, isOversold: rsiValue < 30 };
 }
 
 /**
- * Calculate VWAP (Volume-Weighted Average Price).
- * VWAP = Σ(typical_price × volume) / Σ(volume)
- * Used as an institutional reference level for premium/discount.
+ * Calculates Volume-Weighted Average Price (VWAP).
+ * @param {Array} candles - Array of candle objects.
+ * @returns {number|null} VWAP value.
  */
 export function calculateVWAP(candles) {
   if (!candles || candles.length === 0) return null;
-  let cumTypVolume = 0;
-  let cumVolume = 0;
+  let cumTypVolume = 0, cumVolume = 0;
   for (const c of candles) {
     const typicalPrice = (c.high + c.low + c.close) / 3;
-    const vol = c.volume || 0;
-    cumTypVolume += typicalPrice * vol;
-    cumVolume += vol;
+    cumTypVolume += typicalPrice * (c.volume || 0);
+    cumVolume += (c.volume || 0);
   }
-  if (cumVolume === 0) return null;
-  return cumTypVolume / cumVolume;
+  return cumVolume === 0 ? null : cumTypVolume / cumVolume;
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  MODULE 1 — CANDLESTICK PATTERN RECOGNITION
-//  Detects 18 high-probability reversal & continuation patterns.
-//  Call at key levels (OB/FVG/swing) for maximum confluence.
-// ═══════════════════════════════════════════════════════════════
+/**
+ * Detects common candlestick patterns.
+ * @param {Array} candles - Array of candle objects.
+ * @returns {Array} Array of detected patterns.
+ */
 export function detectCandlePatterns(candles) {
   if (!candles || candles.length < 3) return [];
-  const patterns = [];
-  const n = candles.length;
+  const patterns = [], n = candles.length;
 
   for (let i = 2; i < n; i++) {
-    const c0 = candles[i - 2]; // 3 candles ago
-    const c1 = candles[i - 1]; // previous candle
-    const c2 = candles[i];     // current / signal candle
+    const c0 = candles[i - 2], c1 = candles[i - 1], c2 = candles[i];
+    const body2 = Math.abs(c2.close - c2.open), range2 = c2.high - c2.low;
+    const body1 = Math.abs(c1.close - c1.open), range1 = c1.high - c1.low;
+    const body0 = Math.abs(c0.close - c0.open);
+    const isBull2 = c2.close > c2.open, isBear2 = c2.close < c2.open;
+    const isBull1 = c1.close > c1.open, isBear1 = c1.close < c1.open;
+    const isBear0 = c0.close < c0.open, isBull0 = c0.close > c0.open;
+    const upperWick2 = c2.high - Math.max(c2.open, c2.close), lowerWick2 = Math.min(c2.open, c2.close) - c2.low;
 
-    const body2    = Math.abs(c2.close - c2.open);
-    const range2   = c2.high - c2.low;
-    const body1    = Math.abs(c1.close - c1.open);
-    const range1   = c1.high - c1.low;
-    const body0    = Math.abs(c0.close - c0.open);
-    const isBull2  = c2.close > c2.open;
-    const isBear2  = c2.close < c2.open;
-    const isBull1  = c1.close > c1.open;
-    const isBear1  = c1.close < c1.open;
-    const upperWick2 = c2.high - Math.max(c2.open, c2.close);
-    const lowerWick2 = Math.min(c2.open, c2.close) - c2.low;
-    const upperWick1 = c1.high - Math.max(c1.open, c1.close);
-    const lowerWick1 = Math.min(c1.open, c1.close) - c1.low;
+    if (range2 > 0 && body2 / range2 < 0.1) patterns.push({ index: i, name: 'Doji', direction: 'neutral', strength: 0.5, time: c2.time });
+    if (range2 > 0 && lowerWick2 >= body2 * 2 && upperWick2 <= body2 * 0.3 && body2 / range2 < 0.4) patterns.push({ index: i, name: 'Hammer', direction: 'bullish', strength: 1.0, time: c2.time });
+    if (range2 > 0 && upperWick2 >= body2 * 2 && lowerWick2 <= body2 * 0.3 && body2 / range2 < 0.4) patterns.push({ index: i, name: 'Shooting Star', direction: 'bearish', strength: 1.0, time: c2.time });
+    if (range2 > 0 && body2 / range2 >= 0.85) patterns.push({ index: i, name: isBull2 ? 'Bullish Marubozu' : 'Bearish Marubozu', direction: isBull2 ? 'bullish' : 'bearish', strength: 1.5, time: c2.time });
 
-    // DOJI — body ≤ 10% of range, indecision
-    if (range2 > 0 && body2 / range2 < 0.1) {
-      patterns.push({ index: i, name: 'Doji', direction: 'neutral', strength: 0.5, time: c2.time });
-    }
+    if (isBear1 && isBull2 && c2.open <= c1.close && c2.close >= c1.open && body2 > body1) patterns.push({ index: i, name: 'Bullish Engulfing', direction: 'bullish', strength: 1.5, time: c2.time });
+    if (isBull1 && isBear2 && c2.open >= c1.close && c2.close <= c1.open && body2 > body1) patterns.push({ index: i, name: 'Bearish Engulfing', direction: 'bearish', strength: 1.5, time: c2.time });
+    
+    if (isBear1 && isBull2 && c2.open > c1.close && c2.close < c1.open && body2 < body1 * 0.5) patterns.push({ index: i, name: 'Bullish Harami', direction: 'bullish', strength: 0.75, time: c2.time });
+    if (isBull1 && isBear2 && c2.open < c1.close && c2.close > c1.open && body2 < body1 * 0.5) patterns.push({ index: i, name: 'Bearish Harami', direction: 'bearish', strength: 0.75, time: c2.time });
 
-    // HAMMER — bullish reversal: small body at top, long lower wick ≥ 2× body, tiny upper wick
-    if (range2 > 0 && lowerWick2 >= body2 * 2 && upperWick2 <= body2 * 0.3 && body2 / range2 < 0.4) {
-      patterns.push({ index: i, name: 'Hammer', direction: 'bullish', strength: 1.0, time: c2.time });
-    }
-
-    // SHOOTING STAR — bearish reversal: small body at bottom, long upper wick ≥ 2× body
-    if (range2 > 0 && upperWick2 >= body2 * 2 && lowerWick2 <= body2 * 0.3 && body2 / range2 < 0.4) {
-      patterns.push({ index: i, name: 'Shooting Star', direction: 'bearish', strength: 1.0, time: c2.time });
-    }
-
-    // MARUBOZU — full momentum candle, no wicks (body ≥ 85% of range)
-    if (range2 > 0 && body2 / range2 >= 0.85) {
-      patterns.push({ index: i, name: isBull2 ? 'Bullish Marubozu' : 'Bearish Marubozu',
-        direction: isBull2 ? 'bullish' : 'bearish', strength: 1.5, time: c2.time });
-    }
-
-    // BULLISH ENGULFING — bearish c1 engulfed by larger bullish c2
-    if (isBear1 && isBull2 && c2.open <= c1.close && c2.close >= c1.open && body2 > body1) {
-      patterns.push({ index: i, name: 'Bullish Engulfing', direction: 'bullish', strength: 1.5, time: c2.time });
-    }
-
-    // BEARISH ENGULFING — bullish c1 engulfed by larger bearish c2
-    if (isBull1 && isBear2 && c2.open >= c1.close && c2.close <= c1.open && body2 > body1) {
-      patterns.push({ index: i, name: 'Bearish Engulfing', direction: 'bearish', strength: 1.5, time: c2.time });
-    }
-
-    // BULLISH HARAMI — large bearish c1 contains small bullish c2 (indecision after sell-off)
-    if (isBear1 && isBull2 && c2.open > c1.close && c2.close < c1.open && body2 < body1 * 0.5) {
-      patterns.push({ index: i, name: 'Bullish Harami', direction: 'bullish', strength: 0.75, time: c2.time });
-    }
-
-    // BEARISH HARAMI — large bullish c1 contains small bearish c2
-    if (isBull1 && isBear2 && c2.open < c1.close && c2.close > c1.open && body2 < body1 * 0.5) {
-      patterns.push({ index: i, name: 'Bearish Harami', direction: 'bearish', strength: 0.75, time: c2.time });
-    }
-
-    // PIERCING LINE — bearish c1, bullish c2 opens below c1.low, closes above c1 midpoint
     const c1Mid = (c1.open + c1.close) / 2;
-    if (isBear1 && isBull2 && c2.open < c1.low && c2.close > c1Mid && c2.close < c1.open) {
-      patterns.push({ index: i, name: 'Piercing Line', direction: 'bullish', strength: 1.0, time: c2.time });
-    }
+    if (isBear1 && isBull2 && c2.open < c1.low && c2.close > c1Mid && c2.close < c1.open) patterns.push({ index: i, name: 'Piercing Line', direction: 'bullish', strength: 1.0, time: c2.time });
+    if (isBull1 && isBear2 && c2.open > c1.high && c2.close < c1Mid && c2.close > c1.close) patterns.push({ index: i, name: 'Dark Cloud Cover', direction: 'bearish', strength: 1.0, time: c2.time });
 
-    // DARK CLOUD COVER — bullish c1, bearish c2 opens above c1.high, closes below c1 midpoint
-    if (isBull1 && isBear2 && c2.open > c1.high && c2.close < c1Mid && c2.close > c1.close) {
-      patterns.push({ index: i, name: 'Dark Cloud Cover', direction: 'bearish', strength: 1.0, time: c2.time });
-    }
+    if (Math.abs(c1.low - c2.low) / c2.low < 0.001 && isBear1 && isBull2) patterns.push({ index: i, name: 'Tweezer Bottom', direction: 'bullish', strength: 1.0, time: c2.time });
+    if (Math.abs(c1.high - c2.high) / c2.high < 0.001 && isBull1 && isBear2) patterns.push({ index: i, name: 'Tweezer Top', direction: 'bearish', strength: 1.0, time: c2.time });
 
-    // TWEEZER BOTTOM — two candles with same/near-same low (within 0.1%) → bullish reversal
-    if (Math.abs(c1.low - c2.low) / c2.low < 0.001 && isBear1 && isBull2) {
-      patterns.push({ index: i, name: 'Tweezer Bottom', direction: 'bullish', strength: 1.0, time: c2.time });
-    }
-
-    // TWEEZER TOP — two candles with same/near-same high → bearish reversal
-    if (Math.abs(c1.high - c2.high) / c2.high < 0.001 && isBull1 && isBear2) {
-      patterns.push({ index: i, name: 'Tweezer Top', direction: 'bearish', strength: 1.0, time: c2.time });
-    }
-
-    // MORNING STAR - 3-candle bullish reversal: bearish c0, small/doji c1, bullish c2 above c0 midpoint
     const c0Mid = (c0.open + c0.close) / 2;
-    if (i >= 2) {
-      const isBear0 = c0.close < c0.open;
-      const isBull3 = c2.close > c2.open;
-      const smallBody1 = body1 < body0 * 0.5;
-      if (isBear0 && smallBody1 && isBull3 && c2.close > c0Mid) {
-        patterns.push({ index: i, name: 'Morning Star', direction: 'bullish', strength: 2.0, time: c2.time });
-      }
-    }
-
-    // EVENING STAR — 3-candle bearish reversal: bullish c0, small c1, bearish c2 below c0 midpoint
-    if (i >= 2) {
-      const isBull0 = c0.close > c0.open;
-      const isBear3 = c2.close < c2.open;
-      const smallBody1 = body1 < body0 * 0.5;
-      if (isBull0 && smallBody1 && isBear3 && c2.close < c0Mid) {
-        patterns.push({ index: i, name: 'Evening Star', direction: 'bearish', strength: 2.0, time: c2.time });
-      }
-    }
+    if (isBear0 && body1 < body0 * 0.5 && isBull2 && c2.close > c0Mid) patterns.push({ index: i, name: 'Morning Star', direction: 'bullish', strength: 2.0, time: c2.time });
+    if (isBull0 && body1 < body0 * 0.5 && isBear2 && c2.close < c0Mid) patterns.push({ index: i, name: 'Evening Star', direction: 'bearish', strength: 2.0, time: c2.time });
   }
 
-  // THREE WHITE SOLDIERS — 3 consecutive strong bullish candles
-  if (n >= 3) {
-    const last3 = candles.slice(-3);
-    const allBull = last3.every(c => c.close > c.open);
-    const consecutive = last3[1].close > last3[0].close && last3[2].close > last3[1].close;
-    const strongBodies = last3.every(c => Math.abs(c.close - c.open) / (c.high - c.low) > 0.6);
-    if (allBull && consecutive && strongBodies) {
+  const last3 = candles.slice(-3);
+  if (last3.length === 3) {
+    if (last3.every(c => c.close > c.open) && last3[1].close > last3[0].close && last3[2].close > last3[1].close && last3.every(c => Math.abs(c.close - c.open) / (c.high - c.low) > 0.6)) {
       patterns.push({ index: n - 1, name: 'Three White Soldiers', direction: 'bullish', strength: 2.0, time: candles[n-1].time });
     }
-  }
-
-  // THREE BLACK CROWS — 3 consecutive strong bearish candles
-  if (n >= 3) {
-    const last3 = candles.slice(-3);
-    const allBear = last3.every(c => c.close < c.open);
-    const consecutive = last3[1].close < last3[0].close && last3[2].close < last3[1].close;
-    const strongBodies = last3.every(c => Math.abs(c.close - c.open) / (c.high - c.low) > 0.6);
-    if (allBear && consecutive && strongBodies) {
+    if (last3.every(c => c.close < c.open) && last3[1].close < last3[0].close && last3[2].close < last3[1].close && last3.every(c => Math.abs(c.close - c.open) / (c.high - c.low) > 0.6)) {
       patterns.push({ index: n - 1, name: 'Three Black Crows', direction: 'bearish', strength: 2.0, time: candles[n-1].time });
     }
   }
 
-  // Return only the last 5 recent patterns (most relevant)
   return patterns.slice(-5);
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  MODULE 2 — FIBONACCI RETRACEMENT & GOLDEN POCKET
-//  Computes key fib levels from the most recent significant swing.
-//  Golden Pocket (0.618–0.705) is the highest-probability reversal zone.
-// ═══════════════════════════════════════════════════════════════
+/**
+ * Calculates Fibonacci retracement and extension levels.
+ * @param {number} swingHigh - Highest point of the swing.
+ * @param {number} swingLow - Lowest point of the swing.
+ * @param {string} direction - Direction of the trade.
+ * @returns {Object|null} Fibonacci levels and golden pocket coordinates.
+ */
 export function calculateFibonacci(swingHigh, swingLow, direction) {
   if (!swingHigh || !swingLow || swingHigh <= swingLow) return null;
-  const range = swingHigh - swingLow;
-  const levels = {};
+  const range = swingHigh - swingLow, levels = {};
   
   if (direction === 'long') {
-    // For longs: retrace DOWN from high to low, then bounce
-    levels['0.0']   = swingHigh;
-    levels['0.236'] = swingHigh - range * 0.236;
-    levels['0.382'] = swingHigh - range * 0.382;
-    levels['0.5']   = swingHigh - range * 0.5;
-    levels['0.618'] = swingHigh - range * 0.618; // Golden ratio
-    levels['0.705'] = swingHigh - range * 0.705; // OTE zone top
-    levels['0.786'] = swingHigh - range * 0.786;
-    levels['1.0']   = swingLow;
-    // Extensions (TP targets)
-    levels['1.272'] = swingLow - range * 0.272;
-    levels['1.618'] = swingLow - range * 0.618;
-    levels['2.0']   = swingLow - range;
-    levels['2.618'] = swingLow - range * 1.618;
+    levels['0.0'] = swingHigh; levels['0.236'] = swingHigh - range * 0.236;
+    levels['0.382'] = swingHigh - range * 0.382; levels['0.5'] = swingHigh - range * 0.5;
+    levels['0.618'] = swingHigh - range * 0.618; levels['0.705'] = swingHigh - range * 0.705;
+    levels['0.786'] = swingHigh - range * 0.786; levels['1.0'] = swingLow;
+    levels['1.272'] = swingLow - range * 0.272; levels['1.618'] = swingLow - range * 0.618;
+    levels['2.0'] = swingLow - range; levels['2.618'] = swingLow - range * 1.618;
   } else {
-    // For shorts: retrace UP from low to high, then fall
-    levels['0.0']   = swingLow;
-    levels['0.236'] = swingLow + range * 0.236;
-    levels['0.382'] = swingLow + range * 0.382;
-    levels['0.5']   = swingLow + range * 0.5;
-    levels['0.618'] = swingLow + range * 0.618;
-    levels['0.705'] = swingLow + range * 0.705;
-    levels['0.786'] = swingLow + range * 0.786;
-    levels['1.0']   = swingHigh;
-    levels['1.272'] = swingHigh + range * 0.272;
-    levels['1.618'] = swingHigh + range * 0.618;
-    levels['2.0']   = swingHigh + range;
-    levels['2.618'] = swingHigh + range * 1.618;
+    levels['0.0'] = swingLow; levels['0.236'] = swingLow + range * 0.236;
+    levels['0.382'] = swingLow + range * 0.382; levels['0.5'] = swingLow + range * 0.5;
+    levels['0.618'] = swingLow + range * 0.618; levels['0.705'] = swingLow + range * 0.705;
+    levels['0.786'] = swingLow + range * 0.786; levels['1.0'] = swingHigh;
+    levels['1.272'] = swingHigh + range * 0.272; levels['1.618'] = swingHigh + range * 0.618;
+    levels['2.0'] = swingHigh + range; levels['2.618'] = swingHigh + range * 1.618;
   }
-
-  // Golden Pocket = 0.618 to 0.705
-  const gpHigh = Math.max(levels['0.618'], levels['0.705']);
-  const gpLow  = Math.min(levels['0.618'], levels['0.705']);
 
   return {
     levels,
-    goldenPocket: { high: gpHigh, low: gpLow },
-    swingHigh, swingLow, direction,
-    range,
+    goldenPocket: { high: Math.max(levels['0.618'], levels['0.705']), low: Math.min(levels['0.618'], levels['0.705']) },
+    swingHigh, swingLow, direction, range,
   };
 }
 
+/**
+ * Checks if a given price falls within the Golden Pocket.
+ * @param {number} price - The price to check.
+ * @param {Object} fibData - Fibonacci data object.
+ * @returns {boolean} True if price is inside the golden pocket.
+ */
 export function isInGoldenPocket(price, fibData) {
-  if (!fibData || !fibData.goldenPocket) return false;
-  return price >= fibData.goldenPocket.low && price <= fibData.goldenPocket.high;
+  return fibData?.goldenPocket ? (price >= fibData.goldenPocket.low && price <= fibData.goldenPocket.high) : false;
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  MODULE 3 — BOLLINGER BANDS + KELTNER SQUEEZE DETECTION
-//  Squeeze = explosive move imminent; Band walk = strong trend
-// ═══════════════════════════════════════════════════════════════
+/**
+ * Calculates Bollinger Bands and Keltner Channels for squeeze detection.
+ * @param {Array} candles - Array of candle objects.
+ * @param {number} period - Calculation period.
+ * @param {number} stdDevMult - Standard deviation multiplier.
+ * @returns {Object|null} Bands and squeeze metrics.
+ */
 export function calculateBollingerBands(candles, period = 20, stdDevMult = 2.0) {
   if (!candles || candles.length < period) return null;
-  const closes = candles.map(c => c.close);
-  const results = [];
+  const closes = candles.map(c => c.close), results = [];
 
   for (let i = period - 1; i < closes.length; i++) {
     const slice = closes.slice(i - period + 1, i + 1);
     const mean = slice.reduce((a, b) => a + b, 0) / period;
-    const variance = slice.reduce((s, v) => s + (v - mean) ** 2, 0) / period;
-    const std = Math.sqrt(variance);
-    results.push({
-      middle: mean,
-      upper: mean + std * stdDevMult,
-      lower: mean - std * stdDevMult,
-      bandwidth: (std * stdDevMult * 2) / mean, // normalized bandwidth
-      std,
-    });
+    const std = Math.sqrt(slice.reduce((s, v) => s + (v - mean) ** 2, 0) / period);
+    results.push({ middle: mean, upper: mean + std * stdDevMult, lower: mean - std * stdDevMult, bandwidth: (std * stdDevMult * 2) / mean, std });
   }
 
-  if (results.length === 0) return null;
+  if (!results.length) return null;
 
-  // Keltner Channel for squeeze detection
-  const lastIdx = candles.length - 1;
   const ema20 = calculateEMA(candles.slice(-period * 2), period);
   const lastEma = ema20[ema20.length - 1];
-  let atrSum = 0;
   const atrPeriod = Math.min(period, candles.length - 1);
-  for (let i = lastIdx - atrPeriod + 1; i <= lastIdx; i++) {
-    if (i <= 0) continue;
-    atrSum += Math.max(
-      candles[i].high - candles[i].low,
-      Math.abs(candles[i].high - candles[i-1].close),
-      Math.abs(candles[i].low  - candles[i-1].close)
-    );
-  }
-  const atr = atrSum / atrPeriod;
-  const kcUpper = lastEma + atr * 1.5;
-  const kcLower = lastEma - atr * 1.5;
+  const atr = candles.slice(-atrPeriod).reduce((s, c, i, arr) => {
+    if (i === 0) return s;
+    return s + Math.max(c.high - c.low, Math.abs(c.high - arr[i-1].close), Math.abs(c.low - arr[i-1].close));
+  }, 0) / (atrPeriod - 1);
 
-  const last = results[results.length - 1];
-  const prev = results[results.length - 2];
-
-  // Squeeze: BB inside Keltner Channel = compressed volatility, explosive move coming
+  const kcUpper = lastEma + atr * 1.5, kcLower = lastEma - atr * 1.5;
+  const last = results[results.length - 1], prev = results[results.length - 2];
   const isSqueeze = last.upper < kcUpper && last.lower > kcLower;
-  // Squeeze release: was squeezing, now expanding
-  const wasSqueezing = prev && prev.upper < kcUpper && prev.lower > kcLower;
-  const isSqueezeRelease = wasSqueezing && !isSqueeze;
-  
-  const currentPrice = candles[lastIdx].close;
-  // BB walk = price touching/outside the band on successive candles
-  const isBullWalk = currentPrice >= last.upper;
-  const isBearWalk = currentPrice <= last.lower;
-  // Bandwidth expanding vs contracting
-  const bandwidthExpanding = prev && last.bandwidth > prev.bandwidth * 1.05;
+  const currentPrice = candles[candles.length - 1].close;
 
   return {
-    current: last,
-    previous: prev,
-    isSqueeze,
-    isSqueezeRelease,
-    isBullWalk,
-    isBearWalk,
-    bandwidthExpanding,
+    current: last, previous: prev,
+    isSqueeze, isSqueezeRelease: (prev && prev.upper < kcUpper && prev.lower > kcLower) && !isSqueeze,
+    isBullWalk: currentPrice >= last.upper, isBearWalk: currentPrice <= last.lower,
+    bandwidthExpanding: prev && last.bandwidth > prev.bandwidth * 1.05,
     keltner: { upper: kcUpper, lower: kcLower, mid: lastEma },
     allBands: results,
   };
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  MODULE 4 — MACD (Moving Average Convergence Divergence)
-//  Standard (12, 26, 9). Most powerful momentum indicator.
-// ═══════════════════════════════════════════════════════════════
+/**
+ * Calculates MACD (Moving Average Convergence Divergence).
+ * @param {Array} candles - Array of candle objects.
+ * @param {number} fastPeriod - Fast EMA period.
+ * @param {number} slowPeriod - Slow EMA period.
+ * @param {number} signalPeriod - Signal line EMA period.
+ * @returns {Object|null} MACD line, signal, and histogram indicators.
+ */
 export function calculateMACD(candles, fastPeriod = 12, slowPeriod = 26, signalPeriod = 9) {
   if (!candles || candles.length < slowPeriod + signalPeriod) return null;
 
-  const fastEMA  = calculateEMA(candles, fastPeriod);
-  const slowEMA  = calculateEMA(candles, slowPeriod);
-
-  // MACD line = fast EMA - slow EMA (aligned to slow length)
-  const diff = slowPeriod - fastPeriod;
+  const fastEMA = calculateEMA(candles, fastPeriod);
+  const slowEMA = calculateEMA(candles, slowPeriod);
   const macdLine = [];
+  const diff = slowPeriod - fastPeriod;
+
   for (let i = 0; i < slowEMA.length; i++) {
-    const fastVal = fastEMA[i + diff];
-    if (fastVal == null || slowEMA[i] == null) continue;
-    macdLine.push(fastVal - slowEMA[i]);
+    if (fastEMA[i + diff] != null && slowEMA[i] != null) macdLine.push(fastEMA[i + diff] - slowEMA[i]);
   }
 
   if (macdLine.length < signalPeriod) return null;
 
-  // Signal line = EMA of MACD line
-  const macdCandles = macdLine.map((v, i) => ({ close: v, time: i, open: v, high: v, low: v, volume: 1 }));
-  const signalArr = calculateEMA(macdCandles, signalPeriod);
-
-  const last     = macdLine.length - 1;
-  const macdNow  = macdLine[last];
-  const macdPrev = macdLine[last - 1];
-  const sigNow   = signalArr[signalArr.length - 1];
-  const sigPrev  = signalArr[signalArr.length - 2];
-  const histNow  = macdNow  - sigNow;
-  const histPrev = macdPrev - (sigPrev ?? 0);
-
-  // Crossovers
-  const bullCross = macdPrev <= sigPrev && macdNow > sigNow;  // MACD crossed above signal
-  const bearCross = macdPrev >= sigPrev && macdNow < sigNow;  // MACD crossed below signal
-  // Zero-line crossovers (stronger signal)
-  const zeroLineBull = macdPrev <= 0 && macdNow > 0;
-  const zeroLineBear = macdPrev >= 0 && macdNow < 0;
-  // Histogram momentum
-  const histGrowing   = histNow > histPrev;   // momentum accelerating
-  const histShrinking = histNow < histPrev;   // momentum waning (early warning)
+  const signalArr = calculateEMA(macdLine.map(v => ({ close: v })), signalPeriod);
+  const macdNow = macdLine[macdLine.length - 1], macdPrev = macdLine[macdLine.length - 2];
+  const sigNow = signalArr[signalArr.length - 1], sigPrev = signalArr[signalArr.length - 2];
+  const histNow = macdNow - sigNow, histPrev = macdPrev - (sigPrev ?? 0);
 
   return {
-    macd: macdNow,
-    signal: sigNow,
-    histogram: histNow,
-    bullCross,
-    bearCross,
-    zeroLineBull,
-    zeroLineBear,
-    histGrowing,
-    histShrinking,
-    isAboveZero: macdNow > 0,
-    isBelowZero: macdNow < 0,
+    macd: macdNow, signal: sigNow, histogram: histNow,
+    bullCross: macdPrev <= sigPrev && macdNow > sigNow, bearCross: macdPrev >= sigPrev && macdNow < sigNow,
+    zeroLineBull: macdPrev <= 0 && macdNow > 0, zeroLineBear: macdPrev >= 0 && macdNow < 0,
+    histGrowing: histNow > histPrev, histShrinking: histNow < histPrev,
+    isAboveZero: macdNow > 0, isBelowZero: macdNow < 0,
   };
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  MODULE 5 — STOCHASTIC RSI (14, 3, 3)
-//  More sensitive than RSI alone. Great for timing precise entries.
-// ═══════════════════════════════════════════════════════════════
+/**
+ * Calculates Stochastic RSI for precise momentum timing.
+ * @param {Array} candles - Array of candle objects.
+ * @param {number} rsiPeriod - RSI period.
+ * @param {number} stochPeriod - Stochastic period.
+ * @param {number} smoothK - K line smoothing period.
+ * @param {number} smoothD - D line smoothing period.
+ * @returns {Object|null} StochRSI values and signals.
+ */
 export function calculateStochRSI(candles, rsiPeriod = 14, stochPeriod = 14, smoothK = 3, smoothD = 3) {
   if (!candles || candles.length < rsiPeriod + stochPeriod + smoothK + smoothD) return null;
-
-  // Step 1: RSI values series (using Wilder's smoothing from calculateRSI)
   const rsiValues = calculateRSI(candles, rsiPeriod);
-
   if (rsiValues.length < stochPeriod) return null;
 
-  // Step 2: Stochastic of RSI
   const stochK = [];
   for (let i = stochPeriod - 1; i < rsiValues.length; i++) {
     const slice = rsiValues.slice(i - stochPeriod + 1, i + 1);
-    const minRsi = Math.min(...slice);
-    const maxRsi = Math.max(...slice);
-    if (maxRsi === minRsi) { stochK.push(50); continue; }
-    stochK.push(((rsiValues[i] - minRsi) / (maxRsi - minRsi)) * 100);
+    const minRsi = Math.min(...slice), maxRsi = Math.max(...slice);
+    stochK.push(maxRsi === minRsi ? 50 : ((rsiValues[i] - minRsi) / (maxRsi - minRsi)) * 100);
   }
 
-  // Step 3: Smooth K and D
-  const smoothKline = [];
-  for (let i = smoothK - 1; i < stochK.length; i++) {
-    smoothKline.push(stochK.slice(i - smoothK + 1, i + 1).reduce((a, b) => a + b, 0) / smoothK);
-  }
-  const smoothDline = [];
-  for (let i = smoothD - 1; i < smoothKline.length; i++) {
-    smoothDline.push(smoothKline.slice(i - smoothD + 1, i + 1).reduce((a, b) => a + b, 0) / smoothD);
-  }
+  const smoothKline = stochK.slice(smoothK - 1).map((_, i) => stochK.slice(i, i + smoothK).reduce((a, b) => a + b) / smoothK);
+  const smoothDline = smoothKline.slice(smoothD - 1).map((_, i) => smoothKline.slice(i, i + smoothD).reduce((a, b) => a + b) / smoothD);
 
-  if (smoothKline.length === 0 || smoothDline.length === 0) return null;
+  if (!smoothKline.length || !smoothDline.length) return null;
 
-  const kNow  = smoothKline[smoothKline.length - 1];
-  const dNow  = smoothDline[smoothDline.length - 1];
-  const kPrev = smoothKline[smoothKline.length - 2] ?? kNow;
-  const dPrev = smoothDline[smoothDline.length - 2] ?? dNow;
+  const kNow = smoothKline[smoothKline.length - 1], dNow = smoothDline[smoothDline.length - 1];
+  const kPrev = smoothKline[smoothKline.length - 2] ?? kNow, dPrev = smoothDline[smoothDline.length - 2] ?? dNow;
 
   return {
     k: kNow, d: dNow,
-    isOversold:  kNow < 20,
-    isOverbought: kNow > 80,
-    // Bullish: K crosses above D from oversold
-    bullCrossOversold:  kPrev <= dPrev && kNow > dNow && kNow < 40,
-    // Bearish: K crosses below D from overbought
+    isOversold: kNow < 20, isOverbought: kNow > 80,
+    bullCrossOversold: kPrev <= dPrev && kNow > dNow && kNow < 40,
     bearCrossOverbought: kPrev >= dPrev && kNow < dNow && kNow > 60,
-    bullCross: kPrev <= dPrev && kNow > dNow,
-    bearCross: kPrev >= dPrev && kNow < dNow,
+    bullCross: kPrev <= dPrev && kNow > dNow, bearCross: kPrev >= dPrev && kNow < dNow,
   };
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  MODULE 6 — VOLUME PROFILE / POINT OF CONTROL (POC)
-//  Identifies price level with the highest traded volume (POC)
-//  and Value Area High/Low (VAH/VAL = 70% of volume).
-// ═══════════════════════════════════════════════════════════════
+/**
+ * Calculates Volume Profile to identify Point of Control (POC) and Value Areas.
+ * @param {Array} candles - Array of candle objects.
+ * @param {number} numBins - Number of price bins.
+ * @returns {Object|null} Volume profile metrics.
+ */
 export function calculateVolumeProfile(candles, numBins = 30) {
   if (!candles || candles.length < 10) return null;
-
-  const highs  = candles.map(c => c.high);
-  const lows   = candles.map(c => c.low);
-  const priceHigh = Math.max(...highs);
-  const priceLow  = Math.min(...lows);
+  const highs = candles.map(c => c.high), lows = candles.map(c => c.low);
+  const priceHigh = Math.max(...highs), priceLow = Math.min(...lows);
   const range = priceHigh - priceLow;
   if (range === 0) return null;
 
   const binSize = range / numBins;
   const bins = Array.from({ length: numBins }, (_, i) => ({
-    low:    priceLow + i * binSize,
-    high:   priceLow + (i + 1) * binSize,
-    mid:    priceLow + (i + 0.5) * binSize,
-    volume: 0,
+    low: priceLow + i * binSize, high: priceLow + (i + 1) * binSize,
+    mid: priceLow + (i + 0.5) * binSize, volume: 0,
   }));
 
-  // Distribute volume across price bins proportionally by overlap
   for (const c of candles) {
-    const vol = c.volume || 0;
-    if (vol === 0) continue;
+    if (!c.volume) continue;
     const candleRange = c.high - c.low;
     if (candleRange === 0) continue;
     for (const bin of bins) {
       const overlap = Math.max(0, Math.min(c.high, bin.high) - Math.max(c.low, bin.low));
-      bin.volume += vol * (overlap / candleRange);
+      bin.volume += c.volume * (overlap / candleRange);
     }
   }
 
-  // POC = highest volume bin
   const poc = bins.reduce((a, b) => (b.volume > a.volume ? b : a), bins[0]);
-
-  // Value Area: 70% of total volume centered around POC
-  const totalVol = bins.reduce((s, b) => s + b.volume, 0);
-  const targetVol = totalVol * 0.70;
-  let accumulated = poc.volume;
-  let vaLow = poc.low, vaHigh = poc.high;
+  const targetVol = bins.reduce((s, b) => s + b.volume, 0) * 0.70;
+  let accumulated = poc.volume, vaLow = poc.low, vaHigh = poc.high;
   let lo = bins.indexOf(poc) - 1, hi = bins.indexOf(poc) + 1;
+
   while (accumulated < targetVol && (lo >= 0 || hi < bins.length)) {
-    const addLow  = lo >= 0 ? bins[lo].volume : 0;
-    const addHigh = hi < bins.length ? bins[hi].volume : 0;
-    if (addLow >= addHigh && lo >= 0) {
-      accumulated += addLow;
-      vaLow = bins[lo].low;
-      lo--;
-    } else if (hi < bins.length) {
-      accumulated += addHigh;
-      vaHigh = bins[hi].high;
-      hi++;
-    } else { break; }
+    const addLow = lo >= 0 ? bins[lo].volume : 0, addHigh = hi < bins.length ? bins[hi].volume : 0;
+    if (addLow >= addHigh && lo >= 0) { accumulated += addLow; vaLow = bins[lo].low; lo--; }
+    else if (hi < bins.length) { accumulated += addHigh; vaHigh = bins[hi].high; hi++; }
+    else break;
   }
 
   return {
-    poc: poc.mid,
-    valueAreaHigh: vaHigh,
-    valueAreaLow:  vaLow,
-    priceHigh, priceLow,
-    bins,
-    // Price at POC = institutions actively traded here = strong support/resistance
-    isAtPOC: (price) => Math.abs(price - poc.mid) / poc.mid < 0.003, // within 0.3%
+    poc: poc.mid, valueAreaHigh: vaHigh, valueAreaLow: vaLow, priceHigh, priceLow, bins,
+    isAtPOC: (price) => Math.abs(price - poc.mid) / poc.mid < 0.003,
     isInValueArea: (price) => price >= vaLow && price <= vaHigh,
   };
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  MODULE 7 — WYCKOFF MARKET PHASE DETECTION
-//  Detects Accumulation (Spring) and Distribution (Upthrust)
-//  phases — the highest-quality institutional reversal signals.
-// ═══════════════════════════════════════════════════════════════
+/**
+ * Detects Wyckoff Accumulation/Distribution phases (Springs and Upthrusts).
+ * @param {Array} candles - Array of candle objects.
+ * @param {number} lookback - Lookback window size.
+ * @returns {Object|null} Phase analysis details.
+ */
 export function detectWyckoffPhase(candles, lookback = 50) {
   if (!candles || candles.length < lookback) return null;
-  const slice = candles.slice(-lookback);
-  const n = slice.length;
+  const slice = candles.slice(-lookback), n = slice.length;
+  const rangeHigh = Math.max(...slice.map(c => c.high)), rangeLow = Math.min(...slice.map(c => c.low));
+  const rangeSize = rangeHigh - rangeLow, midPrice = (rangeHigh + rangeLow) / 2;
 
-  // Step 1: Find trading range (compression zone)
-  const rangeHigh = Math.max(...slice.map(c => c.high));
-  const rangeLow  = Math.min(...slice.map(c => c.low));
-  const rangeSize = rangeHigh - rangeLow;
-  const midPrice  = (rangeHigh + rangeLow) / 2;
+  const firstRange = Math.max(...slice.slice(0, Math.floor(n/2)).map(c => c.high)) - Math.min(...slice.slice(0, Math.floor(n/2)).map(c => c.low));
+  const secondRange = Math.max(...slice.slice(Math.floor(n/2)).map(c => c.high)) - Math.min(...slice.slice(Math.floor(n/2)).map(c => c.low));
+  const isConsolidating = secondRange < firstRange * 0.65;
+  const currentPrice = slice[n - 1].close;
 
-  // Step 2: Measure how "compressed" we are (BB bandwidth proxy)
-  const firstHalf  = slice.slice(0, Math.floor(n / 2));
-  const secondHalf = slice.slice(Math.floor(n / 2));
-  const firstRange  = Math.max(...firstHalf.map(c => c.high)) - Math.min(...firstHalf.map(c => c.low));
-  const secondRange = Math.max(...secondHalf.map(c => c.high)) - Math.min(...secondHalf.map(c => c.low));
-  const isConsolidating = secondRange < firstRange * 0.65; // Range contracting
-
-  const last = slice[n - 1];
-  const currentPrice = last.close;
-
-  // Step 3: Detect Spring (false breakdown → bullish reversal)
-  // Price dips below the range low but closes back above it
-  const recentLow  = slice.slice(-5).reduce((min, c) => Math.min(min, c.low), Infinity);
+  const recentLow = slice.slice(-5).reduce((min, c) => Math.min(min, c.low), Infinity);
   const springDetected = recentLow < rangeLow && currentPrice > rangeLow + rangeSize * 0.05;
-
-  // Step 4: Detect Upthrust (false breakout → bearish reversal)
   const recentHigh = slice.slice(-5).reduce((max, c) => Math.max(max, c.high), -Infinity);
   const upthrustDetected = recentHigh > rangeHigh && currentPrice < rangeHigh - rangeSize * 0.05;
 
-  // Step 5: Assess volume on the spring/upthrust (high volume spring = institutional buying)
   const avgVol = slice.reduce((s, c) => s + (c.volume || 0), 0) / n;
   const recentVol = slice.slice(-3).reduce((s, c) => s + (c.volume || 0), 0) / 3;
   const highVolumeEvent = recentVol > avgVol * 1.3;
 
-  // Phase determination
-  let phase = 'RANGING';
-  let signal = null;
-  let description = '';
-
+  let phase = 'RANGING', signal = null, description = 'Consolidating inside range \u2014 no clear Wyckoff signal yet';
   if (springDetected && isConsolidating) {
-    phase  = 'ACCUMULATION';
-    signal = 'long';
-    description = highVolumeEvent
-      ? '🔥 High-Volume Spring: Institutional Accumulation — Strong Bullish Signal'
-      : 'Spring Detected: False breakdown below range — Potential accumulation';
+    phase = 'ACCUMULATION'; signal = 'long';
+    description = highVolumeEvent ? '\uD83D\uDD25 High-Volume Spring: Institutional Accumulation \u2014 Strong Bullish Signal' : 'Spring Detected: False breakdown below range \u2014 Potential accumulation';
   } else if (upthrustDetected && isConsolidating) {
-    phase  = 'DISTRIBUTION';
-    signal = 'short';
-    description = highVolumeEvent
-      ? '🔥 High-Volume Upthrust: Institutional Distribution — Strong Bearish Signal'
-      : 'Upthrust Detected: False breakout above range — Potential distribution';
-  } else if (currentPrice > rangeHigh * 1.005) {
-    phase = 'MARKUP';
-    signal = 'long';
-    description = 'Markup Phase: Price escaping range to the upside';
-  } else if (currentPrice < rangeLow * 0.995) {
-    phase = 'MARKDOWN';
-    signal = 'short';
-    description = 'Markdown Phase: Price escaping range to the downside';
-  } else {
-    description = 'Consolidating inside range — no clear Wyckoff signal yet';
-  }
+    phase = 'DISTRIBUTION'; signal = 'short';
+    description = highVolumeEvent ? '\uD83D\uDD25 High-Volume Upthrust: Institutional Distribution \u2014 Strong Bearish Signal' : 'Upthrust Detected: False breakout above range \u2014 Potential distribution';
+  } else if (currentPrice > rangeHigh * 1.005) { phase = 'MARKUP'; signal = 'long'; description = 'Markup Phase: Price escaping range to the upside';
+  } else if (currentPrice < rangeLow * 0.995) { phase = 'MARKDOWN'; signal = 'short'; description = 'Markdown Phase: Price escaping range to the downside'; }
 
-  return {
-    phase, signal, description,
-    springDetected, upthrustDetected,
-    rangeHigh, rangeLow, midPrice,
-    isConsolidating, highVolumeEvent,
-    strength: (springDetected || upthrustDetected) && highVolumeEvent ? 2.0 : 1.0,
-  };
+  return { phase, signal, description, springDetected, upthrustDetected, rangeHigh, rangeLow, midPrice, isConsolidating, highVolumeEvent, strength: (springDetected || upthrustDetected) && highVolumeEvent ? 2.0 : 1.0 };
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  MODULE 8 — OBV DIVERGENCE (On-Balance Volume)
-//  OBV rising while price falls = smart money accumulating.
-//  OBV falling while price rises = distribution, reversal near.
-// ═══════════════════════════════════════════════════════════════
+/**
+ * Calculates On-Balance Volume (OBV) divergence against price.
+ * @param {Array} candles - Array of candle objects.
+ * @param {number} lookback - Lookback window size.
+ * @returns {Object|null} OBV divergence information.
+ */
 export function calculateOBVDivergence(candles, lookback = 30) {
   if (!candles || candles.length < lookback + 5) return null;
-  const slice = candles.slice(-lookback);
-
-  // Calculate OBV
-  const obv = [0];
+  const slice = candles.slice(-lookback), obv = [0];
   for (let i = 1; i < slice.length; i++) {
-    const prev = obv[i - 1];
-    const vol  = slice[i].volume || 0;
-    if      (slice[i].close > slice[i-1].close) obv.push(prev + vol);
-    else if (slice[i].close < slice[i-1].close) obv.push(prev - vol);
-    else                                          obv.push(prev);
+    const prev = obv[i - 1], vol = slice[i].volume || 0;
+    obv.push(slice[i].close > slice[i-1].close ? prev + vol : (slice[i].close < slice[i-1].close ? prev - vol : prev));
   }
-
-  const firstPrice = slice[0].close;
-  const lastPrice  = slice[slice.length - 1].close;
-  const firstOBV   = obv[0];
-  const lastOBV    = obv[obv.length - 1];
-
-  const priceRising = lastPrice > firstPrice;
-  const priceFalling = lastPrice < firstPrice;
-  const obvRising  = lastOBV > firstOBV;
-  const obvFalling = lastOBV < firstOBV;
-
-  // Bearish divergence: price makes new high but OBV doesn't confirm (distribution)
-  const bearishDiv = priceRising && obvFalling;
-  // Bullish divergence: price makes new low but OBV doesn't confirm (accumulation)
-  const bullishDiv = priceFalling && obvRising;
-
-  const obvTrend = obvRising ? 'rising' : obvFalling ? 'falling' : 'flat';
+  
+  const priceRising = slice[slice.length - 1].close > slice[0].close, priceFalling = slice[slice.length - 1].close < slice[0].close;
+  const obvRising = obv[obv.length - 1] > obv[0], obvFalling = obv[obv.length - 1] < obv[0];
+  const bearishDivergence = priceRising && obvFalling, bullishDivergence = priceFalling && obvRising;
 
   return {
-    obv: lastOBV,
-    obvTrend,
-    bullishDivergence: bullishDiv,
-    bearishDivergence: bearishDiv,
-    hasDivergence: bullishDiv || bearishDiv,
-    divergenceType: bullishDiv ? 'bullish' : bearishDiv ? 'bearish' : null,
-    description: bullishDiv
-      ? '📈 OBV Bullish Divergence: Smart money accumulating while price falls'
-      : bearishDiv
-      ? '📉 OBV Bearish Divergence: Distribution detected while price rises'
-      : 'OBV confirming price trend',
+    obv: obv[obv.length - 1], obvTrend: obvRising ? 'rising' : (obvFalling ? 'falling' : 'flat'),
+    bullishDivergence, bearishDivergence, hasDivergence: bullishDivergence || bearishDivergence,
+    divergenceType: bullishDivergence ? 'bullish' : (bearishDivergence ? 'bearish' : null),
+    description: bullishDivergence ? '\uD83D\uDCC8 OBV Bullish Divergence: Smart money accumulating' : (bearishDivergence ? '\uD83D\uDCC9 OBV Bearish Divergence: Distribution detected' : 'OBV confirming price trend'),
   };
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  MODULE 9 — HIDDEN DIVERGENCE DETECTOR
-//  Hidden Bull: Price HL, RSI LL → trend continuation UP
-//  Hidden Bear: Price LH, RSI HH → trend continuation DOWN
-//  More reliable than regular divergence in trending markets.
-// ═══════════════════════════════════════════════════════════════
+/**
+ * Detects hidden divergence for trend continuation.
+ * @param {Array} candles - Array of candle objects.
+ * @param {string} direction - Target direction.
+ * @param {number} period - RSI period.
+ * @returns {Object} Hidden divergence detection results.
+ */
 export function detectHiddenDivergence(candles, direction, period = 14) {
   if (!candles || candles.length < period * 3) return { hasHiddenDiv: false };
-  
   const rsiValues = calculateRSI(candles, period);
   if (!rsiValues || rsiValues.length < 10) return { hasHiddenDiv: false };
 
-  // Find swing lows in price and RSI (for bullish hidden div)
-  const slice = candles.slice(-40);
-  const rsiSlice = rsiValues.slice(-40);
+  const slice = candles.slice(-40), rsiSlice = rsiValues.slice(-40);
   const n = Math.min(slice.length, rsiSlice.length);
-
-  let hasHiddenDiv = false;
-  let divType = null;
-  let description = '';
+  let hasHiddenDiv = false, divType = null, description = '';
 
   if (direction === 'long') {
-    // Hidden Bullish: price makes higher low (HL) but RSI makes lower low (LL)
-    // Find two recent swing lows
-    let swingLow1Idx = -1, swingLow2Idx = -1;
+    let s1 = -1, s2 = -1;
     for (let i = n - 2; i >= 2; i--) {
       if (slice[i].low < slice[i-1].low && slice[i].low < slice[i+1].low) {
-        if (swingLow2Idx === -1) swingLow2Idx = i;
-        else if (swingLow1Idx === -1) { swingLow1Idx = i; break; }
+        if (s2 === -1) s2 = i; else if (s1 === -1) { s1 = i; break; }
       }
     }
-    if (swingLow1Idx >= 0 && swingLow2Idx >= 0) {
-      const priceHL = slice[swingLow2Idx].low > slice[swingLow1Idx].low; // Higher low in price
-      const rsiLL   = rsiSlice[swingLow2Idx] < rsiSlice[swingLow1Idx];   // Lower low in RSI
-      if (priceHL && rsiLL) {
-        hasHiddenDiv = true;
-        divType = 'bullish';
-        description = '🔮 Hidden Bullish Divergence: Price HL + RSI LL → Trend continuation UP';
-      }
+    if (s1 >= 0 && s2 >= 0 && slice[s2].low > slice[s1].low && rsiSlice[s2] < rsiSlice[s1]) {
+      hasHiddenDiv = true; divType = 'bullish'; description = '\uD83D\uDD2E Hidden Bullish Divergence: Price HL + RSI LL \u2192 Trend continuation UP';
     }
   } else if (direction === 'short') {
-    // Hidden Bearish: price makes lower high (LH) but RSI makes higher high (HH)
-    let swingHigh1Idx = -1, swingHigh2Idx = -1;
+    let s1 = -1, s2 = -1;
     for (let i = n - 2; i >= 2; i--) {
       if (slice[i].high > slice[i-1].high && slice[i].high > slice[i+1].high) {
-        if (swingHigh2Idx === -1) swingHigh2Idx = i;
-        else if (swingHigh1Idx === -1) { swingHigh1Idx = i; break; }
+        if (s2 === -1) s2 = i; else if (s1 === -1) { s1 = i; break; }
       }
     }
-    if (swingHigh1Idx >= 0 && swingHigh2Idx >= 0) {
-      const priceLH = slice[swingHigh2Idx].high < slice[swingHigh1Idx].high; // Lower high in price
-      const rsiHH   = rsiSlice[swingHigh2Idx] > rsiSlice[swingHigh1Idx];     // Higher high in RSI
-      if (priceLH && rsiHH) {
-        hasHiddenDiv = true;
-        divType = 'bearish';
-        description = '🔮 Hidden Bearish Divergence: Price LH + RSI HH → Trend continuation DOWN';
-      }
+    if (s1 >= 0 && s2 >= 0 && slice[s2].high < slice[s1].high && rsiSlice[s2] > rsiSlice[s1]) {
+      hasHiddenDiv = true; divType = 'bearish'; description = '\uD83D\uDD2E Hidden Bearish Divergence: Price LH + RSI HH \u2192 Trend continuation DOWN';
     }
   }
 
   return { hasHiddenDiv, divType, description };
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  MODULE 10 — WEEKLY OPEN & SESSION RANGE TRACKER
-//  Price above/below weekly open = strong directional bias.
-//  Asian range breakout = key entry signal for London session.
-// ═══════════════════════════════════════════════════════════════
+/**
+ * Computes weekly open bias based on recent Monday price levels.
+ * @param {Array} candles - Array of candle objects.
+ * @param {number} currentPrice - Current market price.
+ * @returns {Object|null} Bias assessment.
+ */
 export function getWeeklyOpenBias(candles, currentPrice) {
   if (!candles || candles.length < 7) return null;
-  // Find the most recent Monday candle (day of week from timestamp)
-  // Timestamps are Unix seconds; Monday = 1
   for (let i = candles.length - 1; i >= Math.max(0, candles.length - 2500); i--) {
-    const date = new Date(candles[i].time * 1000);
-    if (date.getUTCDay() === 1) { // Monday
+    if (new Date(candles[i].time * 1000).getUTCDay() === 1) {
       const weeklyOpen = candles[i].open;
       return {
-        weeklyOpen,
-        bias: currentPrice > weeklyOpen ? 'bullish' : 'bearish',
+        weeklyOpen, bias: currentPrice > weeklyOpen ? 'bullish' : 'bearish',
         distancePct: ((currentPrice - weeklyOpen) / weeklyOpen) * 100,
-        description: currentPrice > weeklyOpen
-          ? `↑ Price above Weekly Open ($${weeklyOpen.toFixed(2)}) — Bullish week bias`
-          : `↓ Price below Weekly Open ($${weeklyOpen.toFixed(2)}) — Bearish week bias`,
+        description: currentPrice > weeklyOpen ? `\u2191 Price above Weekly Open ($${weeklyOpen.toFixed(2)}) \u2014 Bullish week bias` : `\u2193 Price below Weekly Open ($${weeklyOpen.toFixed(2)}) \u2014 Bearish week bias`,
       };
     }
   }
   return null;
 }
 
-// ---------------------------------------------------------------
-//  MODULE 11 � DISPLACEMENT QUALITY VALIDATOR
-// ---------------------------------------------------------------
+/**
+ * Validates the quality of displacement around a specified breakout candle.
+ * @param {Array} candles - Array of candle objects.
+ * @param {number} breakCandleIndex - Index of the candidate breakout candle.
+ * @returns {Object} Displacement quality score and validity.
+ */
 export function validateDisplacement(candles, breakCandleIndex) {
-  if (!candles || breakCandleIndex < 0 || breakCandleIndex >= candles.length)
-    return { valid: false, score: 0, reason: 'No break candle' };
+  if (!candles || breakCandleIndex < 0 || breakCandleIndex >= candles.length) return { valid: false, score: 0, reason: 'Invalid arguments' };
   const c = candles[breakCandleIndex];
-  if (!c) return { valid: false, score: 0, reason: 'No candle at index' };
-  const body = Math.abs(c.close - c.open);
   const range = c.high - c.low;
   if (range === 0) return { valid: false, score: 0, reason: 'Doji' };
-  const bodyRatio = body / range;
+
+  const bodyRatio = Math.abs(c.close - c.open) / range;
   const isBull = c.close > c.open;
-  const upperWick = c.high - Math.max(c.open, c.close);
-  const lowerWick = Math.min(c.open, c.close) - c.low;
-  const wickRatio = isBull ? (lowerWick / range) : (upperWick / range);
+  const wickRatio = isBull ? ((Math.min(c.open, c.close) - c.low) / range) : ((c.high - Math.max(c.open, c.close)) / range);
+  
   const lookbackStart = Math.max(0, breakCandleIndex - 20);
-  const avgVol = candles.slice(lookbackStart, breakCandleIndex)
-    .reduce((s, x) => s + (x.volume || 0), 0) / Math.max(1, breakCandleIndex - lookbackStart);
+  const avgVol = candles.slice(lookbackStart, breakCandleIndex).reduce((s, x) => s + (x.volume || 0), 0) / Math.max(1, breakCandleIndex - lookbackStart);
   const volMult = avgVol > 0 ? (c.volume || 0) / avgVol : 1;
+
   let score = 0; const reasons = [];
-  if (bodyRatio >= 0.60)      { score += 35; reasons.push(`Body ${(bodyRatio*100).toFixed(0)}%`); }
-  else if (bodyRatio >= 0.45) { score += 20; reasons.push('Moderate body'); }
-  if (wickRatio <= 0.20)      { score += 25; reasons.push('Closes at extreme'); }
-  else if (wickRatio <= 0.35) { score += 12; }
-  if (volMult >= 1.5)         { score += 25; reasons.push(`Vol ${volMult.toFixed(1)}x`); }
-  else if (volMult >= 1.0)    { score += 12; }
+  if (bodyRatio >= 0.60) { score += 35; reasons.push(`Body ${(bodyRatio*100).toFixed(0)}%`); } else if (bodyRatio >= 0.45) { score += 20; reasons.push('Moderate body'); }
+  if (wickRatio <= 0.20) { score += 25; reasons.push('Closes at extreme'); } else if (wickRatio <= 0.35) score += 12;
+  if (volMult >= 1.5) { score += 25; reasons.push(`Vol ${volMult.toFixed(1)}x`); } else if (volMult >= 1.0) score += 12;
+  
   if (breakCandleIndex > 0) {
     const prev = candles[breakCandleIndex - 1];
-    if (prev && isBull && c.close > prev.high) { score += 15; reasons.push('Engulfs'); }
-    if (prev && !isBull && c.close < prev.low) { score += 15; reasons.push('Engulfs'); }
+    if (prev && ((isBull && c.close > prev.high) || (!isBull && c.close < prev.low))) { score += 15; reasons.push('Engulfs'); }
   }
+
   score = Math.min(100, score);
-  return { valid: score >= 50, score, bodyRatio, volMultiplier: volMult, reason: reasons.join(' � ') || 'Weak' };
+  return { valid: score >= 50, score, bodyRatio, volMultiplier: volMult, reason: reasons.join(' | ') || 'Weak' };
 }
 
-// ---------------------------------------------------------------
-//  MODULE 12 � ERL / IRL LIQUIDITY CLASSIFICATION
-// ---------------------------------------------------------------
+/**
+ * Classifies liquidity pools as External (ERL) or Internal Range Liquidity (IRL).
+ * @param {Array} candles - Array of candle objects.
+ * @param {Array} fvgs - Array of detected FVGs.
+ * @param {Array} orderBlocks - Array of detected Order Blocks.
+ * @param {number} currentPrice - Current market price.
+ * @returns {Object} ERL and IRL classification objects.
+ */
 export function classifyLiquidityLevels(candles, fvgs, orderBlocks, currentPrice) {
   if (!candles || candles.length < 10) return { erl: [], irl: [] };
   const erl = [], irl = [];
   const swings = findSwingPoints(candles, 5);
-  const highs = swings.filter(s => s.type === 'high').slice(-10);
-  const lows  = swings.filter(s => s.type === 'low').slice(-10);
-  highs.forEach((h, i) => {
-    const isEq = highs.some((h2, j) => j !== i && Math.abs(h2.price - h.price) / h.price < 0.0005);
-    erl.push({ level: h.price, type: 'high', subtype: isEq ? 'EQH' : 'swing_high',
-      label: isEq ? 'Equal High (EQH)' : 'Swing High', priority: isEq ? 'HIGH' : 'MEDIUM',
-      distPct: ((h.price - currentPrice) / currentPrice) * 100 });
+  
+  swings.filter(s => s.type === 'high').slice(-10).forEach((h, i, arr) => {
+    const isEq = arr.some((h2, j) => j !== i && Math.abs(h2.price - h.price) / h.price < 0.0005);
+    erl.push({ level: h.price, type: 'high', subtype: isEq ? 'EQH' : 'swing_high', label: isEq ? 'Equal High (EQH)' : 'Swing High', priority: isEq ? 'HIGH' : 'MEDIUM', distPct: ((h.price - currentPrice) / currentPrice) * 100 });
   });
-  lows.forEach((l, i) => {
-    const isEq = lows.some((l2, j) => j !== i && Math.abs(l2.price - l.price) / l.price < 0.0005);
-    erl.push({ level: l.price, type: 'low', subtype: isEq ? 'EQL' : 'swing_low',
-      label: isEq ? 'Equal Low (EQL)' : 'Swing Low', priority: isEq ? 'HIGH' : 'MEDIUM',
-      distPct: ((l.price - currentPrice) / currentPrice) * 100 });
+
+  swings.filter(s => s.type === 'low').slice(-10).forEach((l, i, arr) => {
+    const isEq = arr.some((l2, j) => j !== i && Math.abs(l2.price - l.price) / l.price < 0.0005);
+    erl.push({ level: l.price, type: 'low', subtype: isEq ? 'EQL' : 'swing_low', label: isEq ? 'Equal Low (EQL)' : 'Swing Low', priority: isEq ? 'HIGH' : 'MEDIUM', distPct: ((l.price - currentPrice) / currentPrice) * 100 });
   });
-  (fvgs || []).forEach(f => irl.push({ level: f.midpoint, type: f.type === 'bullish' ? 'low' : 'high',
-    subtype: 'fvg', label: `${f.type === 'bullish' ? 'Bull' : 'Bear'} FVG`, priority: 'MEDIUM',
-    distPct: ((f.midpoint - currentPrice) / currentPrice) * 100 }));
+
+  (fvgs || []).forEach(f => irl.push({ level: f.midpoint, type: f.type === 'bullish' ? 'low' : 'high', subtype: 'fvg', label: `${f.type === 'bullish' ? 'Bull' : 'Bear'} FVG`, priority: 'MEDIUM', distPct: ((f.midpoint - currentPrice) / currentPrice) * 100 }));
   (orderBlocks || []).filter(ob => ob.status === 'active').forEach(ob => {
     const mid = (ob.upperBound + ob.lowerBound) / 2;
-    irl.push({ level: mid, type: ob.type === 'demand' ? 'low' : 'high', subtype: 'ob',
-      label: `${ob.type === 'demand' ? 'Demand' : 'Supply'} OB`, priority: ob.strength > 3 ? 'HIGH' : 'MEDIUM',
-      distPct: ((mid - currentPrice) / currentPrice) * 100 });
+    irl.push({ level: mid, type: ob.type === 'demand' ? 'low' : 'high', subtype: 'ob', label: `${ob.type === 'demand' ? 'Demand' : 'Supply'} OB`, priority: ob.strength > 3 ? 'HIGH' : 'MEDIUM', distPct: ((mid - currentPrice) / currentPrice) * 100 });
   });
+
   return { erl, irl };
 }
 
-// ---------------------------------------------------------------
-//  MODULE 13 � INDUCEMENT DETECTION
-// ---------------------------------------------------------------
-function _dispCheck(c, dir) {
-  if (!c) return false;
-  const body = Math.abs(c.close - c.open), range = c.high - c.low;
-  if (range === 0 || body / range < 0.50) return false;
-  return dir === 'bullish' ? c.close > c.open : c.close < c.open;
-}
+/**
+ * Detects liquidity inducement events.
+ * @param {Array} candles - Array of candle objects.
+ * @param {string} direction - Analysis direction.
+ * @returns {Object} Inducement details.
+ */
 export function detectInducement(candles, direction) {
   if (!candles || candles.length < 20) return { hasInducement: false };
   const recent = candles.slice(-Math.min(30, candles.length - 2));
   const swings = findSwingPoints(recent, 2);
+
   if (direction === 'long') {
     const minorHighs = swings.filter(s => s.type === 'high').slice(-4);
     for (let i = 1; i < minorHighs.length; i++) {
       const mh = minorHighs[i];
       for (let k = mh.index + 1; k < recent.length - 2; k++) {
-        if (recent[k] && recent[k].high > mh.price && recent[k].close < mh.price && _dispCheck(recent[k+1],'bullish'))
-          return { hasInducement: true, inducementLevel: mh.price, description: `Bull inducement swept $${mh.price.toFixed(2)}` };
+        if (recent[k] && recent[k].high > mh.price && recent[k].close < mh.price && isDisplacementCandle(recent[k+1], 'bullish')) return { hasInducement: true, inducementLevel: mh.price, description: `Bull inducement swept $${mh.price.toFixed(2)}` };
       }
     }
   } else {
@@ -1319,148 +927,171 @@ export function detectInducement(candles, direction) {
     for (let i = 1; i < minorLows.length; i++) {
       const ml = minorLows[i];
       for (let k = ml.index + 1; k < recent.length - 2; k++) {
-        if (recent[k] && recent[k].low < ml.price && recent[k].close > ml.price && _dispCheck(recent[k+1],'bearish'))
-          return { hasInducement: true, inducementLevel: ml.price, description: `Bear inducement swept $${ml.price.toFixed(2)}` };
+        if (recent[k] && recent[k].low < ml.price && recent[k].close > ml.price && isDisplacementCandle(recent[k+1], 'bearish')) return { hasInducement: true, inducementLevel: ml.price, description: `Bear inducement swept $${ml.price.toFixed(2)}` };
       }
     }
   }
   return { hasInducement: false };
 }
 
-// ---------------------------------------------------------------
-//  MODULE 14 � CHOCH QUALITY FILTER
-// ---------------------------------------------------------------
+/**
+ * Assesses the quality of a Change of Character (CHOCH) setup.
+ * @param {Array} candles - Array of candle objects.
+ * @param {Array} sweeps - Detected sweep events.
+ * @param {string} direction - Market direction.
+ * @param {number} lastShiftIdx - Candle index of the shift.
+ * @returns {Object} CHOCH quality metrics.
+ */
 export function assessChochQuality(candles, sweeps, direction, lastShiftIdx = -1) {
   if (!candles || candles.length < 10) return { quality: 'LOW', score: 0, reasons: [] };
   let score = 0; const reasons = [];
-  const recentSweep = (sweeps||[]).some(s => {
-    const age = candles.length - 1 - (s.candleIndex||0);
-    const isStrong = s.strength !== 'weak';
-    return age <= 10 && isStrong && ((direction==='long' && (s.type==='bullish'||s.direction==='long')) ||
-                         (direction==='short'&& (s.type==='bearish'||s.direction==='short')));
+  
+  const recentSweep = (sweeps || []).some(s => {
+    const age = candles.length - 1 - (s.candleIndex || 0);
+    return age <= 10 && s.strength !== 'weak' && ((direction === 'long' && (s.type === 'bullish' || s.direction === 'long')) || (direction === 'short' && (s.type === 'bearish' || s.direction === 'short')));
   });
+
   if (recentSweep) { score += 40; reasons.push('ERL swept before CHOCH'); }
   const checkIdx = lastShiftIdx >= 0 ? lastShiftIdx : candles.length - 2;
   const disp = validateDisplacement(candles, checkIdx);
   if (disp.valid) { score += Math.round(disp.score * 0.4); reasons.push(`Disp: ${disp.reason}`); }
-  const sw = findSwingPoints(candles.slice(-20), 3);
-  const rel = direction==='long' ? sw.filter(s=>s.type==='high') : sw.filter(s=>s.type==='low');
+
+  const rel = findSwingPoints(candles.slice(-20), 3).filter(s => s.type === (direction === 'long' ? 'high' : 'low'));
   if (rel.length >= 2) { score += 20; reasons.push('Multi-swing'); }
+
   score = Math.min(100, score);
-  const quality = score>=70?'ELITE':score>=45?'HIGH':score>=25?'MEDIUM':'LOW';
-  return { quality, score, reasons };
+  return { quality: score >= 70 ? 'ELITE' : score >= 45 ? 'HIGH' : score >= 25 ? 'MEDIUM' : 'LOW', score, reasons };
 }
 
-// ---------------------------------------------------------------
-//  MODULE 15 � ATR VOLATILITY REGIME CLASSIFIER
-// ---------------------------------------------------------------
+/**
+ * Classifies current volatility regime using ATR.
+ * @param {Array} candles - Array of candle objects.
+ * @param {number} period - ATR period.
+ * @returns {Object} Volatility classification data.
+ */
 export function classifyVolatilityRegime(candles, period = 14) {
-  if (!candles || candles.length < period * 2) return { regime:'UNKNOWN', atr:0, atrPct:0, trend:'flat', sizingMultiplier:1.0, description:'Insufficient data' };
+  if (!candles || candles.length < period * 2) return { regime: 'UNKNOWN', atr: 0, atrPct: 0, trend: 'flat', sizingMultiplier: 1.0, description: 'Insufficient data' };
+  
   const atrs = [];
   for (let i = 1; i < candles.length; i++) {
-    const c=candles[i], p=candles[i-1];
-    atrs.push(Math.max(c.high-c.low, Math.abs(c.high-p.close), Math.abs(c.low-p.close)));
+    atrs.push(Math.max(candles[i].high - candles[i].low, Math.abs(candles[i].high - candles[i-1].close), Math.abs(candles[i].low - candles[i-1].close)));
   }
-  const k = 2/(period+1);
-  let atr = atrs.slice(0,period).reduce((a,b)=>a+b,0)/period;
-  const sm=[atr];
-  for (let i=period;i<atrs.length;i++){atr=atrs[i]*k+sm[sm.length-1]*(1-k);sm.push(atr);}
-  const cur=sm[sm.length-1],p5=sm[sm.length-6]||cur,p14=sm[Math.max(0,sm.length-15)]||cur;
-  const price=candles[candles.length-1].close, atrPct=(cur/price)*100;
-  const c5=(cur-p5)/p5, c14=(cur-p14)/p14;
-  let regime='NORMAL',trend='flat';
-  if(c5>0.10&&c14>0.05){regime='EXPANDING';trend='rising';}
-  else if(c5<-0.10&&c14<-0.05){regime='CONTRACTING';trend='falling';}
-  else if(Math.abs(c14)<0.03&&atrPct<0.5){regime='CONTRACTING';trend='compressed';}
-  else if(c5>0.05&&c14<0){regime='TRANSITIONING';trend='inflecting';}
-  return { regime, atr:parseFloat(cur.toFixed(4)), atrPct:parseFloat(atrPct.toFixed(3)), trend,
-    description:`${regime} | ATR ${atrPct.toFixed(2)}% | ${trend}`,
-    sizingMultiplier: regime==='EXPANDING'?0.75:regime==='CONTRACTING'?1.25:regime==='TRANSITIONING'?1.1:1.0 };
-}
 
-// ---------------------------------------------------------------
-//  MODULE 16 � DRAW ON LIQUIDITY
-// ---------------------------------------------------------------
-export function identifyDrawOnLiquidity(candles, direction, currentPrice, fvgs, orderBlocks) {
-  if (!candles||candles.length<20) return null;
-  const { erl } = classifyLiquidityLevels(candles, fvgs, orderBlocks, currentPrice);
-  const targets = direction==='long'
-    ? erl.filter(l=>l.level>currentPrice&&l.type==='high').sort((a,b)=>a.level-b.level)
-    : erl.filter(l=>l.level<currentPrice&&l.type==='low').sort((a,b)=>b.level-a.level);
-  if (!targets.length) return null;
+  const k = 2 / (period + 1);
+  let atr = atrs.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  const sm = [atr];
+  for (let i = period; i < atrs.length; i++) { atr = atrs[i] * k + sm[sm.length - 1] * (1 - k); sm.push(atr); }
+
+  const cur = sm[sm.length - 1], p5 = sm[sm.length - 6] || cur, p14 = sm[Math.max(0, sm.length - 15)] || cur;
+  const atrPct = (cur / candles[candles.length - 1].close) * 100;
+  const c5 = (cur - p5) / p5, c14 = (cur - p14) / p14;
+
+  let regime = 'NORMAL', trend = 'flat';
+  if (c5 > 0.10 && c14 > 0.05) { regime = 'EXPANDING'; trend = 'rising'; }
+  else if (c5 < -0.10 && c14 < -0.05) { regime = 'CONTRACTING'; trend = 'falling'; }
+  else if (Math.abs(c14) < 0.03 && atrPct < 0.5) { regime = 'CONTRACTING'; trend = 'compressed'; }
+  else if (c5 > 0.05 && c14 < 0) { regime = 'TRANSITIONING'; trend = 'inflecting'; }
+
   return {
-    primary:   targets[0]?{...targets[0],distPct:Math.abs(targets[0].distPct)}:null,
-    secondary: targets[1]?{...targets[1],distPct:Math.abs(targets[1].distPct)}:null,
-    tertiary:  targets[2]?{...targets[2],distPct:Math.abs(targets[2].distPct)}:null,
-    description: targets[0]?`Draw ? ${targets[0].label} @ $${targets[0].level.toFixed(2)}`:'No draw',
+    regime, atr: parseFloat(cur.toFixed(4)), atrPct: parseFloat(atrPct.toFixed(3)), trend,
+    description: `${regime} | ATR ${atrPct.toFixed(2)}% | ${trend}`,
+    sizingMultiplier: regime === 'EXPANDING' ? 0.75 : (regime === 'CONTRACTING' ? 1.25 : (regime === 'TRANSITIONING' ? 1.1 : 1.0)),
   };
 }
 
-// ---------------------------------------------------------------
-//  MODULE 17 � EQUAL HIGHS / LOWS
-// ---------------------------------------------------------------
-export function detectEqualHighsLows(candles, currentPrice, tolerance=0.0005) {
-  if (!candles||candles.length<10) return { eqh:[], eql:[] };
-  let adjustedTolerance = tolerance;
-  if (currentPrice < 1)        adjustedTolerance = 0.003;  // 0.3% for cents-level coins (DOGE, XRP)
-  else if (currentPrice < 100)  adjustedTolerance = 0.0015; // 0.15% for mid-range (SOL, BNB)
-  else                          adjustedTolerance = 0.0005; // 0.05% for high-priced (BTC, ETH)
-  const eqh=[],eql=[];
-  const recent=candles.slice(-Math.min(60,candles.length));
-  const procH=new Set();
-  for(let i=0;i<recent.length-1;i++){
-    if(procH.has(i)) continue;
-    const grp=[i];
-    for(let j=i+1;j<recent.length;j++){
-      if(Math.abs(recent[j].high-recent[i].high)/recent[i].high<=adjustedTolerance){grp.push(j);procH.add(j);}
-    }
-    if(grp.length>=2){
-      const lvl=grp.reduce((s,idx)=>s+recent[idx].high,0)/grp.length;
-      if(lvl>currentPrice) eqh.push({level:lvl,count:grp.length,label:`EQH (${grp.length}x)`,priority:grp.length>=3?'HIGH':'MEDIUM',distPct:((lvl-currentPrice)/currentPrice)*100});
-    }
-  }
-  const procL=new Set();
-  for(let i=0;i<recent.length-1;i++){
-    if(procL.has(i)) continue;
-    const grp=[i];
-    for(let j=i+1;j<recent.length;j++){
-      if(Math.abs(recent[j].low-recent[i].low)/recent[i].low<=adjustedTolerance){grp.push(j);procL.add(j);}
-    }
-    if(grp.length>=2){
-      const lvl=grp.reduce((s,idx)=>s+recent[idx].low,0)/grp.length;
-      if(lvl<currentPrice) eql.push({level:lvl,count:grp.length,label:`EQL (${grp.length}x)`,priority:grp.length>=3?'HIGH':'MEDIUM',distPct:((lvl-currentPrice)/currentPrice)*100});
-    }
-  }
-  eqh.sort((a,b)=>a.distPct-b.distPct);
-  eql.sort((a,b)=>Math.abs(a.distPct)-Math.abs(b.distPct));
-  return { eqh, eql };
+/**
+ * Identifies the primary liquidity draw target for a given direction.
+ * @param {Array} candles - Array of candle objects.
+ * @param {string} direction - Direction of the target hunt.
+ * @param {number} currentPrice - Current market price.
+ * @param {Array} fvgs - Detected FVGs.
+ * @param {Array} orderBlocks - Detected Order Blocks.
+ * @returns {Object|null} Liquidity draw targets.
+ */
+export function identifyDrawOnLiquidity(candles, direction, currentPrice, fvgs, orderBlocks) {
+  if (!candles || candles.length < 20) return null;
+  const { erl } = classifyLiquidityLevels(candles, fvgs, orderBlocks, currentPrice);
+  const targets = direction === 'long'
+    ? erl.filter(l => l.level > currentPrice && l.type === 'high').sort((a, b) => a.level - b.level)
+    : erl.filter(l => l.level < currentPrice && l.type === 'low').sort((a, b) => b.level - a.level);
+
+  if (!targets.length) return null;
+  return {
+    primary: targets[0] ? { ...targets[0], distPct: Math.abs(targets[0].distPct) } : null,
+    secondary: targets[1] ? { ...targets[1], distPct: Math.abs(targets[1].distPct) } : null,
+    tertiary: targets[2] ? { ...targets[2], distPct: Math.abs(targets[2].distPct) } : null,
+    description: targets[0] ? `Draw \u2192 ${targets[0].label} @ $${targets[0].level.toFixed(2)}` : 'No draw',
+  };
 }
 
-// ---------------------------------------------------------------
-//  MODULE 18 � SIGNAL GRADE (A+ / A / B / C / D)
-// ---------------------------------------------------------------
-export function calculateSignalGrade({ chochQuality, displacementScore, hasSweep, hasInducement,
-  mtfAligned, mtfPartial, drawAligned, volatilityRegime, rrrMet, inOTE, atPOC, rsiCrossAligned }) {
-  let s=0;
-  if(hasSweep)                                  s+=15;
-  if(hasInducement)                             s+=10;
-  if(chochQuality?.quality==='ELITE')           s+=15;
-  else if(chochQuality?.quality==='HIGH')       s+=10;
-  else if(chochQuality?.quality==='MEDIUM')     s+=5;
-  if((displacementScore||0)>=70)                s+=10;
-  else if((displacementScore||0)>=50)           s+=5;
-  if(mtfAligned)        s+=15;
-  else if(mtfPartial)   s+=8;
-  if(drawAligned) s+=10;
-  if(inOTE)       s+=5;
-  if(rrrMet)      s+=8;
-  if(atPOC)       s+=5;
-  if(rsiCrossAligned) s+=5;
-  if(volatilityRegime==='TRANSITIONING')        s+=7;
-  else if(volatilityRegime==='CONTRACTING')     s+=5;
-  else if(volatilityRegime==='EXPANDING')       s+=2;
-  s=Math.min(100,s);
-  const grade=s>=80?'A+':s>=70?'A':s>=55?'B':s>=40?'C':'D';
-  const label=s>=80?'ELITE SETUP':s>=70?'HIGH CONVICTION':s>=55?'MODERATE':s>=40?'LOW CONVICTION':'AVOID';
-  return { grade, score:s, label };
+/**
+ * Detects equal highs and equal lows based on dynamic tolerances.
+ * @param {Array} candles - Array of candle objects.
+ * @param {number} currentPrice - Current market price.
+ * @param {number} tolerance - Allowed deviation tolerance.
+ * @returns {Object} Arrays of EQH and EQL objects.
+ */
+export function detectEqualHighsLows(candles, currentPrice, tolerance = 0.0005) {
+  if (!candles || candles.length < 10) return { eqh: [], eql: [] };
+  const adjTol = currentPrice < 1 ? 0.003 : (currentPrice < 100 ? 0.0015 : tolerance);
+  const eqh = [], eql = [], recent = candles.slice(-Math.min(60, candles.length));
+
+  const procH = new Set();
+  for (let i = 0; i < recent.length - 1; i++) {
+    if (procH.has(i)) continue;
+    const grp = [i];
+    for (let j = i + 1; j < recent.length; j++) {
+      if (Math.abs(recent[j].high - recent[i].high) / recent[i].high <= adjTol) { grp.push(j); procH.add(j); }
+    }
+    if (grp.length >= 2) {
+      const lvl = grp.reduce((s, idx) => s + recent[idx].high, 0) / grp.length;
+      if (lvl > currentPrice) eqh.push({ level: lvl, count: grp.length, label: `EQH (${grp.length}x)`, priority: grp.length >= 3 ? 'HIGH' : 'MEDIUM', distPct: ((lvl - currentPrice) / currentPrice) * 100 });
+    }
+  }
+
+  const procL = new Set();
+  for (let i = 0; i < recent.length - 1; i++) {
+    if (procL.has(i)) continue;
+    const grp = [i];
+    for (let j = i + 1; j < recent.length; j++) {
+      if (Math.abs(recent[j].low - recent[i].low) / recent[i].low <= adjTol) { grp.push(j); procL.add(j); }
+    }
+    if (grp.length >= 2) {
+      const lvl = grp.reduce((s, idx) => s + recent[idx].low, 0) / grp.length;
+      if (lvl < currentPrice) eql.push({ level: lvl, count: grp.length, label: `EQL (${grp.length}x)`, priority: grp.length >= 3 ? 'HIGH' : 'MEDIUM', distPct: ((lvl - currentPrice) / currentPrice) * 100 });
+    }
+  }
+
+  return { eqh: eqh.sort((a, b) => a.distPct - b.distPct), eql: eql.sort((a, b) => Math.abs(a.distPct) - Math.abs(b.distPct)) };
+}
+
+/**
+ * Calculates a comprehensive setup score and assigns a letter grade.
+ * @param {Object} params - Metrics for signal grade computation.
+ * @returns {Object} Score, grade, and label.
+ */
+export function calculateSignalGrade({ chochQuality, displacementScore, hasSweep, hasInducement, mtfAligned, mtfPartial, drawAligned, volatilityRegime, rrrMet, inOTE, atPOC, rsiCrossAligned }) {
+  let s = 0;
+  if (hasSweep) s += 15;
+  if (hasInducement) s += 10;
+  if (chochQuality?.quality === 'ELITE') s += 15; else if (chochQuality?.quality === 'HIGH') s += 10; else if (chochQuality?.quality === 'MEDIUM') s += 5;
+  if ((displacementScore || 0) >= 70) s += 10; else if ((displacementScore || 0) >= 50) s += 5;
+  
+  if (mtfAligned) s += 15; else if (mtfPartial) s += 8;
+  if (drawAligned) s += 10;
+  if (inOTE) s += 5;
+  if (rrrMet) s += 8;
+  if (atPOC) s += 5;
+  if (rsiCrossAligned) s += 5;
+  
+  if (volatilityRegime === 'TRANSITIONING') s += 7;
+  else if (volatilityRegime === 'CONTRACTING') s += 5;
+  else if (volatilityRegime === 'EXPANDING') s += 2;
+
+  s = Math.min(100, s);
+  return {
+    grade: s >= 80 ? 'A+' : (s >= 70 ? 'A' : (s >= 55 ? 'B' : (s >= 40 ? 'C' : 'D'))),
+    score: s,
+    label: s >= 80 ? 'ELITE SETUP' : (s >= 70 ? 'HIGH CONVICTION' : (s >= 55 ? 'MODERATE' : (s >= 40 ? 'LOW CONVICTION' : 'AVOID')))
+  };
 }

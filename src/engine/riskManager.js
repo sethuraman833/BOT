@@ -1,62 +1,70 @@
-// ─────────────────────────────────────────────────────────
-//  Risk Manager v11.0 — Risk-Scaled Progressive Engine
-// ─────────────────────────────────────────────────────────
-
 import { RISK_AMOUNT, ASSETS } from '../utils/constants.js';
 
-// ── 🎯 Tunable Constants ──────────────────────────────────
-const MIN_TP_SPACING_RRR = 1.0;   // Minimum 1R between TPs
-const MAX_TP_RISK_MULT   = 7.0;   // Hard cap on TP distance (L8)
-const STRUCT_DEDUP_PCT   = 0.003; // Collapse structural levels within 0.3%
-const DEDUP_THRESHOLD_R  = 0.2;   // Drop TPs within 0.2R of each other
-
 /**
- * Calculate Risk-to-Reward Ratio (direction-aware - H10).
- * @returns {number} RRR rounded to 2 decimals
+ * Calculates the Risk-to-Reward Ratio (RRR) for a given trade.
+ * @param {number} entry - The entry price.
+ * @param {number} stopLoss - The stop loss price.
+ * @param {number} takeProfit - The take profit price.
+ * @param {string} [direction='long'] - Trade direction ('long' or 'short').
+ * @returns {number} The calculated RRR, rounded to 2 decimal places.
  */
 export function calculateRRR(entry, stopLoss, takeProfit, direction = 'long') {
-  const risk   = Math.abs(entry - stopLoss);
+  const risk = Math.abs(entry - stopLoss);
   if (risk === 0) return 0;
-  const reward = direction === 'long' ? (takeProfit - entry) : (entry - takeProfit);
+  const reward = direction === 'long' ? takeProfit - entry : entry - takeProfit;
   return parseFloat((reward / risk).toFixed(2));
 }
 
 /**
- * Calculate position size based on fixed RISK_AMOUNT (C6: step size rounding).
+ * Calculates the appropriate position size based on a fixed risk amount.
+ * @param {number} entry - The entry price.
+ * @param {number} stopLoss - The stop loss price.
+ * @param {number} [customRiskAmount] - Optional custom risk amount, defaults to RISK_AMOUNT.
+ * @param {string} symbol - The trading pair symbol for precision adjusting.
+ * @returns {number} The calculated position size.
  */
 export function calculatePositionSize(entry, stopLoss, customRiskAmount, symbol) {
-  const riskAmount = customRiskAmount !== undefined ? customRiskAmount : RISK_AMOUNT;
-  const slDistance = Math.abs(entry - stopLoss);
-  if (slDistance === 0) return 0;
-  const rawQty = riskAmount / slDistance;
-  
+  const risk = customRiskAmount !== undefined ? customRiskAmount : RISK_AMOUNT;
+  const riskDistance = Math.abs(entry - stopLoss);
+  if (riskDistance === 0) return 0;
+
+  const rawQty = risk / riskDistance;
+
   if (symbol && ASSETS[symbol]) {
-    const minQty = ASSETS[symbol].minQty;
-    const stepSize = minQty; // standard stepSize is the minQty for these futures contracts
-    const qty = Math.max(minQty, Math.floor(rawQty / stepSize) * stepSize);
+    const { minQty } = ASSETS[symbol];
+    const qty = Math.max(minQty, Math.floor(rawQty / minQty) * minQty);
     
-    // Calculate decimal places from minQty
-    const minQtyString = minQty.toString();
-    const dotIdx = minQtyString.indexOf('.');
-    const stepDecimals = dotIdx === -1 ? 0 : minQtyString.length - dotIdx - 1;
-    return parseFloat(qty.toFixed(stepDecimals));
+    const minQtyStr = minQty.toString();
+    const dotIndex = minQtyStr.indexOf('.');
+    const decimals = dotIndex === -1 ? 0 : minQtyStr.length - dotIndex - 1;
+    
+    return parseFloat(qty.toFixed(decimals));
   }
-  
+
   return parseFloat(rawQty.toFixed(6));
 }
 
 /**
- * Calculate leverage based on position size, entry price, and account balance (C7).
+ * Calculates the required leverage for a trade based on position size and balance.
+ * @param {number} positionSize - The calculated position size.
+ * @param {number} entryPrice - The entry price.
+ * @param {number} balance - The account balance.
+ * @returns {number} The calculated leverage.
  */
 export function calculateLeverage(positionSize, entryPrice, balance) {
   if (!balance || balance <= 0) return 1;
-  const notionalValue = positionSize * entryPrice;
-  const leverage = notionalValue / balance;
+  const notional = positionSize * entryPrice;
+  const leverage = notional / balance;
   return parseFloat(Math.min(125, Math.max(1, leverage)).toFixed(1));
 }
 
 /**
- * Estimate liquidation price for a futures position (C7).
+ * Estimates the liquidation price of a trade given its leverage.
+ * @param {number} entry - The entry price.
+ * @param {string} direction - Trade direction ('long' or 'short').
+ * @param {number} leverage - The applied leverage.
+ * @param {number} [mmr=0.005] - Maintenance Margin Rate (default is 0.5%).
+ * @returns {number} The estimated liquidation price.
  */
 export function estimateLiquidationPrice(entry, direction, leverage, mmr = 0.005) {
   if (!leverage || leverage <= 0) return 0;
@@ -68,123 +76,99 @@ export function estimateLiquidationPrice(entry, direction, leverage, mmr = 0.005
 }
 
 /**
- * Check if a level is too close to already selected TPs (Risk-based).
- */
-function isDuplicate(level, existingTPs, risk) {
-  return existingTPs.some(tp => {
-    const distanceInRisk = Math.abs(tp.level - level) / risk;
-    return distanceInRisk < DEDUP_THRESHOLD_R;
-  });
-}
-
-/**
- * Calculate smart stop loss — v12 Institutional-Grade 4-Layer Defense.
- *
- * Improvements over v11:
- *  1. ATR-capped FVG displacement (replaces fragile 1.5× distance math)
- *  2. Wick-Variance Stop-Hunt Buffer (caller passes avgWickSize)
- *  3. All adjustment reasons surfaced in the return object
- *
- * @param {number}  invalidationLevel  - Raw structural level (OB floor / swing / sweep wick)
- * @param {string}  direction          - 'long' | 'short'
- * @param {Array}   fvgs               - Array of FVG objects from smcDetector
- * @param {string}  symbol             - Asset symbol (for decimals / buffers)
- * @param {object}  [fibData]          - Fibonacci data for Golden Pocket defense
- * @param {object}  [volumeProfile]    - Volume Profile object for VA Shield
- * @param {number}  [atr]              - 14-period ATR for capping FVG displacement
- * @param {number}  [avgWickSize]      - Average wick size for stop-hunt buffer
+ * Calculates a Smart Stop Loss with multiple defensive layers.
+ * Layers: Liquidity Buffer -> Wick Variance -> FVG Shield -> Volume/Fib Shield.
+ * 
+ * @param {number} invalidationLevel - Base structural level to defend.
+ * @param {string} direction - Trade direction ('long' or 'short').
+ * @param {Array} fvgs - Array of Fair Value Gap objects.
+ * @param {string} symbol - Trading pair symbol.
+ * @param {Object} [fibData] - Fibonacci retracement data.
+ * @param {Object} [volumeProfile] - Volume profile data.
+ * @param {number} [atr] - Average True Range for capping SL distance.
+ * @param {number} [avgWickSize=0] - Average wick size for the stop-hunt buffer.
+ * @returns {Object} Smart Stop Loss data structure.
  */
 export function calculateSmartSL(
-  invalidationLevel, direction, fvgs, symbol,
-  fibData = null, volumeProfile = null,
-  atr = null, avgWickSize = 0
+  invalidationLevel,
+  direction,
+  fvgs,
+  symbol,
+  fibData = null,
+  volumeProfile = null,
+  atr = null,
+  avgWickSize = 0
 ) {
+  const isLong = direction === 'long';
+  const priceDecimals = symbol && ASSETS[symbol] ? ASSETS[symbol].decimals : 4;
+
+  // Layer 1: Base invalidation
   const layer1 = invalidationLevel;
-  const priceDecimals = (symbol && ASSETS[symbol]) ? ASSETS[symbol].decimals : 4;
 
-  // ── Layer 2: Liquidity Buffer ──────────────────────────────────
-  // Tight for major precision assets (BTC/ETH/XAU), wider for alts
-  let bufferPct = 0.0025; // default 0.25% for alts
-  if (symbol && ASSETS[symbol]) {
-    const decimals = ASSETS[symbol].decimals;
-    if (decimals === 2) bufferPct = 0.0015; // 0.15% for BTC/ETH/XAU
+  // Layer 2: Liquidity Buffer (Percentage based)
+  let bufferPct = 0.0025; // 0.25% default
+  if (symbol && ASSETS[symbol] && ASSETS[symbol].decimals === 2) {
+    bufferPct = 0.0015; // tighter for major assets
   }
+  const layer2 = isLong ? layer1 * (1 - bufferPct) : layer1 * (1 + bufferPct);
 
-  const layer2 = direction === 'long'
-    ? layer1 * (1 - bufferPct)
-    : layer1 * (1 + bufferPct);
-
-  // ── Layer 3: Wick-Variance Stop-Hunt Buffer ────────────────────
-  // Adds 50% of the average wick size beyond Layer 2 to absorb
-  // typical market-maker spike beyond structure before true reversal.
+  // Layer 3: Wick-Variance Stop-Hunt Buffer
   const wickBuffer = avgWickSize > 0 ? avgWickSize * 0.5 : 0;
-  let layer3 = direction === 'long'
-    ? layer2 - wickBuffer
-    : layer2 + wickBuffer;
+  let layer3 = isLong ? layer2 - wickBuffer : layer2 + wickBuffer;
 
-  // ── Layer 4: FVG Imbalance Avoidance ─────────────────────────
-  // Push SL outside any FVG that straddles Layer 3 so the fill
-  // doesn't clip the stop. Capped at 3× ATR from entry to prevent
-  // runaway SL when FVGs are far away.
-  const maxFvgExtension = atr ? atr * 3 : Math.abs(layer1 - layer3) * 2;
+  // Layer 4: FVG Shield (Avoid placing SL inside an FVG void)
+  const maxExtension = atr ? atr * 3 : Math.abs(layer1 - layer3) * 2;
   let fvgReason = null;
 
   if (fvgs && fvgs.length > 0) {
-    if (direction === 'long') {
-      const nearbyFvgs = fvgs.filter(f =>
-        f.type === 'bullish' && f.upper > layer3 && f.lower < layer3
-      );
-      if (nearbyFvgs.length > 0) {
-        const bestFvg = nearbyFvgs.reduce((best, f) => f.lower < best.lower ? f : best);
-        const candidate = bestFvg.lower;
-        // Only accept if within ATR cap
-        if (layer2 - candidate <= maxFvgExtension) {
-          layer3 = candidate;
+    if (isLong) {
+      const bullishFvgs = fvgs.filter(f => f.type === 'bullish' && f.upper > layer3 && f.lower < layer3);
+      if (bullishFvgs.length > 0) {
+        const bestFvg = bullishFvgs.reduce((best, f) => (f.lower < best.lower ? f : best));
+        if (layer2 - bestFvg.lower <= maxExtension) {
+          layer3 = bestFvg.lower;
           fvgReason = `FVG Void avoided (SL below FVG @ $${bestFvg.lower.toFixed(priceDecimals)})`;
         }
       }
     } else {
-      const nearbyFvgs = fvgs.filter(f =>
-        f.type === 'bearish' && f.lower < layer3 && f.upper > layer3
-      );
-      if (nearbyFvgs.length > 0) {
-        const bestFvg = nearbyFvgs.reduce((best, f) => f.upper > best.upper ? f : best);
-        const candidate = bestFvg.upper;
-        if (candidate - layer2 <= maxFvgExtension) {
-          layer3 = candidate;
+      const bearishFvgs = fvgs.filter(f => f.type === 'bearish' && f.lower < layer3 && f.upper > layer3);
+      if (bearishFvgs.length > 0) {
+        const bestFvg = bearishFvgs.reduce((best, f) => (f.upper > best.upper ? f : best));
+        if (bestFvg.upper - layer2 <= maxExtension) {
+          layer3 = bestFvg.upper;
           fvgReason = `FVG Void avoided (SL above FVG @ $${bestFvg.upper.toFixed(priceDecimals)})`;
         }
       }
     }
   }
 
-  // ── AI Anchoring (Volume Profile / Fibonacci) ────────────────
+  // Layer 5: Volume Profile & Fibonacci AI Shield
   let aiBufferReason = fvgReason;
 
-  if (direction === 'long') {
+  if (isLong) {
     if (volumeProfile && layer3 < volumeProfile.valueAreaLow && layer2 >= volumeProfile.valueAreaLow) {
       layer3 = volumeProfile.valueAreaLow * 0.9985;
-      aiBufferReason = `Volume Shield — SL anchored outside VA Low ($${volumeProfile.valueAreaLow.toFixed(2)})`;
+      aiBufferReason = `Volume Shield — SL outside VA Low ($${volumeProfile.valueAreaLow.toFixed(2)})`;
     }
     if (fibData && fibData.goldenPocket && layer3 < fibData.levels['0.786'] && layer2 >= fibData.goldenPocket.low) {
       layer3 = fibData.levels['0.786'] * 0.9985;
-      aiBufferReason = `Fib Defense — SL anchored outside 0.786 ($${fibData.levels['0.786'].toFixed(2)})`;
+      aiBufferReason = `Fib Defense — SL outside 0.786 ($${fibData.levels['0.786'].toFixed(2)})`;
     }
   } else {
     if (volumeProfile && layer3 > volumeProfile.valueAreaHigh && layer2 <= volumeProfile.valueAreaHigh) {
       layer3 = volumeProfile.valueAreaHigh * 1.0015;
-      aiBufferReason = `Volume Shield — SL anchored outside VA High ($${volumeProfile.valueAreaHigh.toFixed(2)})`;
+      aiBufferReason = `Volume Shield — SL outside VA High ($${volumeProfile.valueAreaHigh.toFixed(2)})`;
     }
     if (fibData && fibData.goldenPocket && layer3 > fibData.levels['0.786'] && layer2 <= fibData.goldenPocket.high) {
       layer3 = fibData.levels['0.786'] * 1.0015;
-      aiBufferReason = `Fib Defense — SL anchored outside 0.786 ($${fibData.levels['0.786'].toFixed(2)})`;
+      aiBufferReason = `Fib Defense — SL outside 0.786 ($${fibData.levels['0.786'].toFixed(2)})`;
     }
   }
 
   return {
     value: parseFloat(layer3.toFixed(priceDecimals)),
-    rawInvalidation: invalidationLevel,
-    buffer: aiBufferReason || `±${(bufferPct * 100).toFixed(2)}% liquidity buffer${wickBuffer > 0 ? ` + wick-hunt buffer $${wickBuffer.toFixed(priceDecimals)}` : ''}`,
+    rawInvalidation: layer1,
+    buffer: aiBufferReason || `±${(bufferPct * 100).toFixed(2)}% liquidity + $${wickBuffer.toFixed(priceDecimals)} wick buffer`,
     layer1,
     layer2,
     layer3,
@@ -194,7 +178,7 @@ export function calculateSmartSL(
 }
 
 /**
- * Calculate dynamic position scaling percentages.
+ * Helper to get scaling percentages for multi-TP exits.
  */
 export function getDynamicScaling(tier, sessionName, tpCount) {
   const isPower = sessionName?.includes('London') || sessionName?.includes('NY');
@@ -205,11 +189,11 @@ export function getDynamicScaling(tier, sessionName, tpCount) {
     HIGH:        [30, 40, 30],
     MEDIUM:      [45, 35, 20],
     REJECT:      [70, 20, 10],
-  }[tier] || [35, 35, 30];
+  }[tier] || [40, 30, 30];
 
   let [p1, p2, p3] = base;
   if (isPower) { p1 -= 5; p3 += 5; }
-  if (isAsian)  { p1 += 10; p3 -= 10; }
+  if (isAsian) { p1 += 10; p3 -= 10; }
 
   if (tpCount === 1) return [100, 0, 0];
   if (tpCount === 2) return [isPower ? 45 : 55, isPower ? 55 : 45, 0];
@@ -217,289 +201,171 @@ export function getDynamicScaling(tier, sessionName, tpCount) {
 }
 
 /**
- * Primary TP engine combining progressive RRR, risk scaling, and structural logic.
+ * Calculates progressive Take Profits at 1:3, 1:5, 1:7 aligned with market structure.
+ * 
+ * @param {number} entry - Trade entry price.
+ * @param {number} stopLoss - Calculated stop loss.
+ * @param {Array} swingPool - Array of structural swing highs/lows.
+ * @param {Array} fvgs - Fair value gaps data.
+ * @param {string} direction - 'long' or 'short'.
+ * @param {string} tier - Trade conviction tier.
+ * @param {string} session - Active trading session.
+ * @param {number} maxTpPct - Maximum allowed TP percentage from entry.
+ * @param {string} primaryTF - Primary timeframe label.
+ * @param {string} structureTF - Structure timeframe label.
+ * @param {string} biasTF - Bias timeframe label.
+ * @param {number} minRrr - Minimum RRR (usually 3).
+ * @param {string} symbol - Asset symbol.
+ * @param {Object} fibData - Fibonacci data.
+ * @param {Object} volumeProfile - Volume profile data.
+ * @returns {Object} TPs array and structure label.
  */
 export function calculateTPs(
-  entry, stopLoss, allSwings, fvgs,
-  direction, tier = 'HIGH', sessionName = '', maxTpPct = 0.06,
-  primaryTf = '15M', structureTf = '1H', biasTf = '4H',
-  minRrr = 3.0, symbol, fibData = null, volumeProfile = null
+  entry,
+  stopLoss,
+  swingPool,
+  fvgs,
+  direction,
+  tier = 'HIGH',
+  session = '',
+  maxTpPct = 0.06,
+  primaryTF = '15M',
+  structureTF = '1H',
+  biasTF = '4H',
+  minRrr = 3.0,
+  symbol,
+  fibData = null,
+  volumeProfile = null
 ) {
   const risk = Math.abs(entry - stopLoss);
-  if (risk === 0) return { tps: [], tpStructure: 'single' };
+  if (risk === 0) return { tps: [], tpStructure: 'none' };
 
   const isLong = direction === 'long';
-  const priceDecimals = (symbol && ASSETS[symbol]) ? ASSETS[symbol].decimals : 4;
-
-  // Compute absolute maximum allowed price based on profile maxTpPct
-  let maxTpPrice;
-  if (isLong) {
-    maxTpPrice = entry * (1 + maxTpPct);
-  } else {
-    maxTpPrice = entry * (1 - maxTpPct);
-  }
-
-  const highs = allSwings.filter(s => s.type === 'high');
-  const lows  = allSwings.filter(s => s.type === 'low');
-
   const candidates = [];
 
-  // 1. Equal Highs / Equal Lows (EQH/EQL) Pools
-  if (isLong) {
-    const validHighs = highs.filter(h => h.price > entry);
-    let eqhPrices = new Set();
-    for (let i = 0; i < validHighs.length; i++) {
-      for (let j = i + 1; j < validHighs.length; j++) {
-        const diff = Math.abs(validHighs[i].price - validHighs[j].price) / validHighs[i].price;
-        if (diff <= 0.0015) {
-          const eqhPrice = Math.max(validHighs[i].price, validHighs[j].price);
-          eqhPrices.add(eqhPrice);
-        }
-      }
-    }
-    for (const eqhPrice of eqhPrices) {
-      candidates.push({
-        level: eqhPrice * (1 - 0.0012),
-        reason: 'Equal Highs (EQH) Liquidity Pool',
-        isStructural: true,
-      });
-    }
-  } else {
-    const validLows = lows.filter(l => l.price < entry);
-    let eqlPrices = new Set();
-    for (let i = 0; i < validLows.length; i++) {
-      for (let j = i + 1; j < validLows.length; j++) {
-        const diff = Math.abs(validLows[i].price - validLows[j].price) / validLows[i].price;
-        if (diff <= 0.0015) {
-          const eqlPrice = Math.min(validLows[i].price, validLows[j].price);
-          eqlPrices.add(eqlPrice);
-        }
-      }
-    }
-    for (const eqlPrice of eqlPrices) {
-      candidates.push({
-        level: eqlPrice * (1 + 0.0012),
-        reason: 'Equal Lows (EQL) Liquidity Pool',
-        isStructural: true,
-      });
-    }
-  }
-
-  // 2. Individual Swing Highs / Lows
-  if (isLong) {
-    highs.forEach(s => {
-      if (s.price > entry) {
-        candidates.push({
-          level: s.price * (1 - 0.0012),
-          reason: `Swing High (${s.tfLabel || 'Swing'})`,
-          isStructural: true,
-        });
-      }
-    });
-  } else {
-    lows.forEach(s => {
-      if (s.price < entry) {
-        candidates.push({
-          level: s.price * (1 + 0.0012),
-          reason: `Swing Low (${s.tfLabel || 'Swing'})`,
-          isStructural: true,
-        });
+  // Generate structural candidates from swing pools, EQH/EQL, etc.
+  if (swingPool && swingPool.length > 0) {
+    swingPool.forEach(s => {
+      if (isLong && s.type === 'high' && s.price > entry) {
+        candidates.push({ level: s.price * 0.9988, reason: `Swing High (${s.tfLabel || 'HTF'})` });
+      } else if (!isLong && s.type === 'low' && s.price < entry) {
+        candidates.push({ level: s.price * 1.0012, reason: `Swing Low (${s.tfLabel || 'HTF'})` });
       }
     });
   }
 
-  // 3. HTF FVGs
-  const htfFvgs = fvgs || [];
-  htfFvgs.forEach(f => {
-    if (isLong && f.type === 'bearish' && f.upper > entry) {
-      candidates.push({
-        level: f.midpoint,
-        reason: `${biasTf} Bearish FVG Midpoint`,
-        isStructural: true,
-      });
-      candidates.push({
-        level: f.upper * (1 - 0.0012),
-        reason: `${biasTf} Bearish FVG Far Boundary`,
-        isStructural: true,
-      });
-    } else if (!isLong && f.type === 'bullish' && f.lower < entry) {
-      candidates.push({
-        level: f.midpoint,
-        reason: `${biasTf} Bullish FVG Midpoint`,
-        isStructural: true,
-      });
-      candidates.push({
-        level: f.lower * (1 + 0.0012),
-        reason: `${biasTf} Bullish FVG Far Boundary`,
-        isStructural: true,
-      });
-    }
-  });
-
-  // 4. Fibonacci Extensions of the Primary Range
-  let primHigh = highs.filter(h => h.tfLabel === primaryTf && h.price > entry).sort((a, b) => a.price - b.price)[0]?.price;
-  let primLow = lows.filter(l => l.tfLabel === primaryTf && l.price < entry).sort((a, b) => b.price - a.price)[0]?.price;
-
-  // Fallback: nearest swing from ANY timeframe
-  if (!primHigh) {
-    primHigh = highs.filter(h => h.price > entry).sort((a, b) => a.price - b.price)[0]?.price;
-  }
-  if (!primLow) {
-    primLow = lows.filter(l => l.price < entry).sort((a, b) => b.price - a.price)[0]?.price;
+  if (fvgs && fvgs.length > 0) {
+    fvgs.forEach(f => {
+      if (isLong && f.type === 'bearish' && f.upper > entry) {
+        candidates.push({ level: f.midpoint, reason: `Bearish FVG Midpoint` });
+      } else if (!isLong && f.type === 'bullish' && f.lower < entry) {
+        candidates.push({ level: f.midpoint, reason: `Bullish FVG Midpoint` });
+      }
+    });
   }
 
-  if (primHigh && primLow && primHigh > primLow) {
-    const range = primHigh - primLow;
-    if (isLong) {
-      candidates.push({ level: (primLow + range * 1.272) * (1 - 0.0012), reason: '1.272 Fib Extension', isStructural: true });
-      candidates.push({ level: (primLow + range * 1.618) * (1 - 0.0012), reason: '1.618 Fib Extension', isStructural: true });
-      candidates.push({ level: (primLow + range * 2.0) * (1 - 0.0012), reason: '2.0 Fib Extension', isStructural: true });
-      candidates.push({ level: (primLow + range * 2.618) * (1 - 0.0012), reason: '2.618 Fib Extension', isStructural: true });
-    } else {
-      candidates.push({ level: Math.max(0, primHigh - range * 1.272) * (1 + 0.0012), reason: '1.272 Fib Extension', isStructural: true });
-      candidates.push({ level: Math.max(0, primHigh - range * 1.618) * (1 + 0.0012), reason: '1.618 Fib Extension', isStructural: true });
-      candidates.push({ level: Math.max(0, primHigh - range * 2.0) * (1 + 0.0012), reason: '2.0 Fib Extension', isStructural: true });
-      candidates.push({ level: Math.max(0, primHigh - range * 2.618) * (1 + 0.0012), reason: '2.618 Fib Extension', isStructural: true });
-    }
-  }
-
-  // 5. Volume Profile POC Target
   if (volumeProfile && volumeProfile.poc) {
-    if (isLong && volumeProfile.poc > entry) {
-      candidates.push({ level: volumeProfile.poc, reason: 'Volume POC (Point of Control)', isStructural: true });
-    } else if (!isLong && volumeProfile.poc < entry) {
-      candidates.push({ level: volumeProfile.poc, reason: 'Volume POC (Point of Control)', isStructural: true });
+    if ((isLong && volumeProfile.poc > entry) || (!isLong && volumeProfile.poc < entry)) {
+      candidates.push({ level: volumeProfile.poc, reason: `Volume POC` });
     }
   }
 
-  // Filter candidates: must be in trade direction, positive price (M12), and within maxTpPrice
-  const filteredCandidates = candidates.filter(c => {
-    if (isNaN(c.level) || !isFinite(c.level) || c.level <= 0) return false;
-    const candRrr = calculateRRR(entry, stopLoss, c.level, direction);
-    if (candRrr > MAX_TP_RISK_MULT) return false; // Enforce max risk-reward cap (L8)
-    if (isLong) {
-      return c.level > entry && c.level <= maxTpPrice;
-    } else {
-      return c.level < entry && c.level >= maxTpPrice;
-    }
-  });
+  // Desired RRR Targets: 1:3, 1:5, 1:7
+  const targetRrrs = [Math.max(3.0, minRrr), 5.0, 7.0];
+  const tps = [];
+  const scaling = getDynamicScaling(tier, session, 3);
 
-  // Sort candidates from closest to furthest from entry
-  filteredCandidates.sort((a, b) => isLong ? a.level - b.level : b.level - a.level);
+  for (let i = 0; i < targetRrrs.length; i++) {
+    const targetRrr = targetRrrs[i];
+    const exactTarget = isLong ? entry + risk * targetRrr : entry - risk * targetRrr;
 
-  // Deduplicate candidates that are too close (within STRUCT_DEDUP_PCT)
-  const dedupedCandidates = [];
-  for (const cand of filteredCandidates) {
-    const isDup = dedupedCandidates.some(dc => Math.abs(dc.level - cand.level) / dc.level < STRUCT_DEDUP_PCT);
-    if (!isDup) {
-      dedupedCandidates.push(cand);
-    }
-  }
+    let foundCand = null;
+    let minDiff = Infinity;
 
-  // Systematic fallback ONLY when no structural candidate exists at all
-  if (dedupedCandidates.length === 0) {
-    const fallbackRrr = Math.max(3.0, minRrr || 3.0);
-    if (isLong) {
-      dedupedCandidates.push({
-        level: entry + risk * fallbackRrr,
-        reason: `${fallbackRrr.toFixed(1)}R Target (No structures)`,
-        isStructural: false,
-      });
-    } else {
-      dedupedCandidates.push({
-        level: entry - risk * fallbackRrr,
-        reason: `${fallbackRrr.toFixed(1)}R Target (No structures)`,
-        isStructural: false,
-      });
-    }
-  }
-
-  // ── SINGLE 1:3 TARGET — Structurally Validated ────────────────────
-  // Standard RRR: One target at exactly 3R (1:3).
-  // Searches for a structural level near 3R (±0.5R tolerance).
-  // If a structural level exists at 3R, it's used (more reliable).
-  // If none, exact 3R is used. 100% position close at TP.
-
-  const targetRrr = Math.max(3.0, minRrr || 3.0);
-  const exact3R = isLong ? entry + risk * targetRrr : entry - risk * targetRrr;
-
-  // Search for structural level within tolerance of target RRR
-  let structuralTp = null;
-  for (const cand of dedupedCandidates) {
-    const rr = calculateRRR(entry, stopLoss, cand.level, direction);
-    // Accept structural levels between 3.0R and 3.5R (must meet minRrr)
-    if (rr >= targetRrr && rr <= targetRrr + 0.5) {
-      structuralTp = { ...cand, rrr: rr };
-      break;
-    }
-  }
-
-  // Build the single TP
-  const singleTp = structuralTp
-    ? {
-        level: structuralTp.level,
-        rrr: structuralTp.rrr,
-        reason: `1:${targetRrr.toFixed(0)} Structural — ${structuralTp.reason}`,
-        isStructural: true,
-        closePercent: 100,
+    // Find the closest valid structural candidate near the target RRR
+    for (const cand of candidates) {
+      const rrr = calculateRRR(entry, stopLoss, cand.level, direction);
+      // Allow candidates slightly before or after the exact RRR (e.g. 2.8 to 4.2 for 3.0 target)
+      if (rrr >= targetRrr - 0.2 && rrr <= targetRrr + 1.2) {
+        const diff = Math.abs(rrr - targetRrr);
+        // Ensure no duplicate TPs too close together
+        const isTooClose = tps.some(t => Math.abs(t.level - cand.level) / cand.level < 0.003);
+        if (!isTooClose && diff < minDiff) {
+          minDiff = diff;
+          foundCand = { ...cand, rrr };
+        }
       }
-    : {
-        level: exact3R,
+    }
+
+    if (foundCand) {
+      tps.push({
+        level: foundCand.level,
+        rrr: foundCand.rrr,
+        reason: `1:${targetRrr} Structural — ${foundCand.reason}`,
+        isStructural: true,
+        closePercent: scaling[i],
+      });
+    } else {
+      tps.push({
+        level: exactTarget,
         rrr: targetRrr,
-        reason: `1:${targetRrr.toFixed(0)} Target (${targetRrr.toFixed(0)}R)`,
+        reason: `1:${targetRrr} Exact Target`,
         isStructural: false,
-        closePercent: 100,
-      };
+        closePercent: scaling[i],
+      });
+    }
+  }
 
   return {
-    tps: [singleTp],
-    tpStructure: 'single_1to3',
+    tps,
+    tpStructure: 'progressive_3_5_7',
   };
 }
 
 /**
- * Breakeven price calculation (move SL to entry when 2.0R reached).
+ * Calculates the price level to move the stop loss to breakeven.
+ * Generally triggered when trade reaches 2R.
+ * 
+ * @param {number} entry - Trade entry price.
+ * @param {number} stopLoss - Initial stop loss.
+ * @param {string} symbol - Trading pair symbol.
+ * @returns {number} The trigger price to move SL to breakeven.
  */
 export function calculateBreakevenMove(entry, stopLoss, symbol) {
   const risk = Math.abs(entry - stopLoss);
-  const dir = entry > stopLoss ? 1 : -1;
-  const decimals = (symbol && ASSETS[symbol]) ? ASSETS[symbol].decimals : 2;
-  return parseFloat((entry + dir * risk * 2.0).toFixed(decimals));
+  const isLong = entry > stopLoss;
+  const decimals = symbol && ASSETS[symbol] ? ASSETS[symbol].decimals : 2;
+  return parseFloat((entry + (isLong ? risk * 2.0 : -risk * 2.0)).toFixed(decimals));
 }
 
-// ─── TRAILING STOP LOGIC ───────────────────────────────────────
-// Dynamic SL movement based on TP hits and ATR-based trailing.
-
 /**
- * Calculate trailing stop levels as price hits each TP.
- * Returns a trail schedule: what to set SL to at each milestone.
+ * Calculates trailing stop levels as price hits each TP.
  * 
  * @param {number} entry - Entry price
  * @param {number} stopLoss - Initial SL
- * @param {Array} tpLevels - Array of TP price levels [tp1, tp2, tp3]
+ * @param {Array} tpLevels - Array of TP price levels
  * @param {string} direction - 'long' or 'short'
  * @param {string} symbol - Trading pair symbol
- * @returns {Array} Trail schedule: [{ trigger, newSL, label }]
+ * @returns {Array} Trail schedule
  */
 export function calculateTrailingSchedule(entry, stopLoss, tpLevels, direction, symbol) {
   if (!tpLevels || tpLevels.length === 0) return [];
-  const decimals = (symbol && ASSETS[symbol]) ? ASSETS[symbol].decimals : 2;
+  const decimals = symbol && ASSETS[symbol] ? ASSETS[symbol].decimals : 2;
   const fmt = v => parseFloat(v.toFixed(decimals));
 
   const schedule = [];
-
-  // Milestone 1: At 2.0R profit → move SL to breakeven (entry)
   const risk = Math.abs(entry - stopLoss);
-  const beTrigger = direction === 'long' ? entry + risk * 2.0 : entry - risk * 2.0;
+  const isLong = direction === 'long';
+
+  const beTrigger = isLong ? entry + risk * 2.0 : entry - risk * 2.0;
   schedule.push({
     trigger: fmt(beTrigger),
     newSL: fmt(entry),
     label: 'Move SL to Breakeven (2.0R)',
   });
 
-  // Milestone 2: TP1 hit → trail SL to entry + 0.5R (lock in small profit)
   if (tpLevels[0]) {
-    const lockProfit = direction === 'long' ? entry + risk * 0.5 : entry - risk * 0.5;
+    const lockProfit = isLong ? entry + risk * 0.5 : entry - risk * 0.5;
     schedule.push({
       trigger: fmt(tpLevels[0]),
       newSL: fmt(lockProfit),
@@ -507,7 +373,6 @@ export function calculateTrailingSchedule(entry, stopLoss, tpLevels, direction, 
     });
   }
 
-  // Milestone 3: TP2 hit → trail SL to TP1
   if (tpLevels[1] && tpLevels[0]) {
     schedule.push({
       trigger: fmt(tpLevels[1]),
@@ -516,7 +381,6 @@ export function calculateTrailingSchedule(entry, stopLoss, tpLevels, direction, 
     });
   }
 
-  // Milestone 4: TP3 (terminal exit — close all)
   if (tpLevels[2]) {
     schedule.push({
       trigger: fmt(tpLevels[2]),
@@ -529,20 +393,16 @@ export function calculateTrailingSchedule(entry, stopLoss, tpLevels, direction, 
 }
 
 /**
- * Calculate ATR-based trailing stop.
- * Trails the SL at a distance of `atrMultiplier × ATR` behind the price.
+ * Calculates ATR-based trailing stop.
  * 
- * @param {number} currentPrice - Current market price
- * @param {number} atrValue - Current ATR value
- * @param {string} direction - 'long' or 'short'
- * @param {number} atrMultiplier - Multiple of ATR for trail distance (default 2.0)
- * @returns {number} Trailing stop level
+ * @param {number} currentPrice - Current market price.
+ * @param {number} atrValue - Current ATR value.
+ * @param {string} direction - 'long' or 'short'.
+ * @param {number} [atrMultiplier=2.0] - ATR multiplier.
+ * @returns {number} Trailing stop level.
  */
 export function calculateATRTrailingStop(currentPrice, atrValue, direction, atrMultiplier = 2.0) {
   if (!atrValue || atrValue <= 0) return 0;
   const trailDist = atrValue * atrMultiplier;
-  if (direction === 'long') {
-    return currentPrice - trailDist;
-  }
-  return currentPrice + trailDist;
+  return direction === 'long' ? currentPrice - trailDist : currentPrice + trailDist;
 }

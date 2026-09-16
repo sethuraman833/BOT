@@ -253,3 +253,77 @@
   .mode-indicator   { display: none; }
   .last-run { font-size: 0.6rem; color: var(--text-dim); }
 }
+
+/* ── Engine Mode Toggle ──────────────────────────────────── */
+.engine-mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.engine-btn {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 3px 10px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim, #5a6a7a);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.engine-btn:hover {
+  background: rgba(255,255,255,0.06);
+  color: var(--text-primary, #c8d8e8);
+}
+
+.engine-btn.active {
+  background: rgba(59, 142, 240, 0.18);
+  color: #3b8ef0;
+  box-shadow: 0 0 8px rgba(59,142,240,0.25);
+}
+
+.engine-btn.active[title*="Hybrid"],
+.engine-btn.active:not([title*="SMC Engine"]) {
+  background: rgba(157, 111, 255, 0.18);
+  color: #9d6fff;
+  box-shadow: 0 0 8px rgba(157,111,255,0.25);
+}
+
+/* ── Engine Badge (top-right) ────────────────────────────── */
+.engine-badge {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid;
+  white-space: nowrap;
+}
+
+.engine-badge--smc {
+  color: #3b8ef0;
+  border-color: rgba(59,142,240,0.3);
+  background: rgba(59,142,240,0.08);
+}
+
+.engine-badge--hybrid {
+  color: #9d6fff;
+  border-color: rgba(157,111,255,0.3);
+  background: rgba(157,111,255,0.08);
+  animation: hybrid-pulse 3s ease-in-out infinite;
+}
+
+@keyframes hybrid-pulse {
+  0%, 100% { box-shadow: 0 0 4px rgba(157,111,255,0.2); }
+  50%       { box-shadow: 0 0 10px rgba(157,111,255,0.5); }
+}

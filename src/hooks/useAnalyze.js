@@ -5,6 +5,7 @@
 import { useCallback } from 'react';
 import { useMarket, useMarketDispatch } from '../context/MarketContext.jsx';
 import { runAnalysis } from '../engine/tradeAnalyzer.js';
+import { runHybridAnalysis } from '../engine/regimeEngine.js';
 import { useCandles } from './useCandles.js';
 import { formatUTCTime } from '../utils/formatters.js';
 import { checkNewsVeto } from '../engine/newsService.js';
@@ -13,7 +14,7 @@ import { getFrontendAiOpinion } from '../engine/aiAgent.js';
 import { playSignalSound, playAnalysisComplete, playRejectSound } from '../utils/sounds.js';
 
 export function useAnalyze() {
-  const { asset, timeframe, isAnalyzing, backtestMode, backtestTime } = useMarket();
+  const { asset, timeframe, isAnalyzing, backtestMode, backtestTime, engineMode } = useMarket();
   const dispatch = useMarketDispatch();
   const { loadAllTimeframes } = useCandles();
 
@@ -41,12 +42,17 @@ export function useAnalyze() {
         checkNewsVeto(asset),
       ]);
 
-      const result = await runAnalysis(activeData, {
+      const analysisConfig = {
         symbol: asset,
         balance: balance,
         newsStatus: newsStatus,
-        activeTimeframe: timeframe,   // Adaptive engine per TF
-      });
+        activeTimeframe: timeframe,
+      };
+
+      // Run the selected engine
+      const result = engineMode === 'HYBRID'
+        ? await runHybridAnalysis(activeData, analysisConfig)
+        : await runAnalysis(activeData, analysisConfig);
 
       // News caution propagation
       if (newsStatus.caution) {

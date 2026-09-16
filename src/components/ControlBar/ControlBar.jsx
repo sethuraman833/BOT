@@ -5,6 +5,7 @@ import './ControlBar.css';
 
 // Timeframe mode colors for indicator dot
 const TF_COLORS = {
+  '1m':  '#00ffaa',
   '5m':  '#00d4ff',
   '15m': '#3b8ef0',
   '1h':  '#f7c948',
@@ -12,6 +13,7 @@ const TF_COLORS = {
   '1d':  '#ff3f5e',
 };
 const TF_LABELS = {
+  '1m':  '1m MICRO',
   '5m':  '5m SCALP',
   '15m': '15m INTRADAY',
   '1h':  '1H SWING',
@@ -20,7 +22,7 @@ const TF_LABELS = {
 };
 
 export default function ControlBar() {
-  const { timeframe, isAnalyzing, backtestMode, backtestTime, lastAnalysisTime } = useMarket();
+  const { timeframe, isAnalyzing, backtestMode, backtestTime, lastAnalysisTime, engineMode } = useMarket();
   const dispatch = useMarketDispatch();
   const { handleAnalyze } = useAnalyze();
 
@@ -65,6 +67,26 @@ export default function ControlBar() {
         >
           {backtestMode ? '🔴 BACKTEST' : '◎ BACKTEST'}
         </button>
+
+        <div className="control-divider" />
+
+        {/* Engine mode toggle */}
+        <div className="engine-mode-toggle" title="Switch analysis engine">
+          <button
+            className={`engine-btn ${engineMode === 'SMC' ? 'active' : ''}`}
+            onClick={() => dispatch({ type: 'SET_ENGINE_MODE', payload: 'SMC' })}
+            title="SMC Engine: Order Blocks, FVGs, BOS/CHoCH, PAKA rules"
+          >
+            SMC
+          </button>
+          <button
+            className={`engine-btn ${engineMode === 'HYBRID' ? 'active' : ''}`}
+            onClick={() => dispatch({ type: 'SET_ENGINE_MODE', payload: 'HYBRID' })}
+            title="Hybrid Engine: Regime classification → Strategy → SMC execution"
+          >
+            ⚡ HYBRID
+          </button>
+        </div>
       </div>
 
       <button
@@ -81,6 +103,10 @@ export default function ControlBar() {
       </button>
 
       <div className="control-right">
+        {/* Engine mode badge */}
+        <div className={`engine-badge engine-badge--${engineMode.toLowerCase()}`}>
+          {engineMode === 'HYBRID' ? '⚡ HYBRID' : '◈ SMC'}
+        </div>
         {/* Mode indicator pill */}
         <div className="mode-indicator">
           <div className="mode-dot" style={{ background: modeColor, boxShadow: `0 0 6px ${modeColor}` }} />

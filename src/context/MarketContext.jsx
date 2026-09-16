@@ -19,6 +19,11 @@ const getSavedTimeframe = () => {
   return saved && VALID_TFS.includes(saved) ? saved : DEFAULT_TIMEFRAME;
 };
 
+const getSavedEngineMode = () => {
+  const saved = localStorage.getItem('terminus_engine_mode');
+  return ['SMC', 'HYBRID'].includes(saved) ? saved : 'SMC';
+};
+
 const initialState = {
   asset: getSavedAsset(),
   timeframe: getSavedTimeframe(),
@@ -32,6 +37,7 @@ const initialState = {
   backtestMode: false,
   backtestTime: null, // Selected time for historical analysis
   lastAnalysisTime: null,
+  engineMode: getSavedEngineMode(), // 'SMC' | 'HYBRID'
 };
 
 function reducer(state, action) {
@@ -48,6 +54,9 @@ function reducer(state, action) {
       return { ...state, backtestMode: !state.backtestMode, backtestTime: null, analysis: null };
     case 'SET_BACKTEST_TIME':
       return { ...state, backtestTime: action.payload };
+    case 'SET_ENGINE_MODE':
+      localStorage.setItem('terminus_engine_mode', action.payload);
+      return { ...state, engineMode: action.payload, analysis: null };
     case 'SET_CANDLES':
       return { ...state, candles: { ...state.candles, [action.key]: action.payload } };
     case 'SET_LIVE_PRICE':
