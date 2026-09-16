@@ -455,17 +455,25 @@ export async function runAnalysis(allData, config = {}, regimeContext = null) {
   }
 
   checks.push({ label: 'RRR >= 1:3 Structural', met: tp1Rrr >= profile.minRrr, weight: 1.5 });
-  
+
   // 23. PAKA Rules
   const smcPillars = [
-    { met: !!structureShift }, { met: !!liquidityEvent }, { met: !!nearestOB }, { met: dispValidation.valid }, { met: !!(drawOnLiquidity && drawOnLiquidity.primary) }
+    { label: 'BOS / CHoCH Confirmed',     met: !!structureShift },
+    { label: 'Liquidity Sweep',            met: !!liquidityEvent },
+    { label: 'Valid Order Block',          met: !!nearestOB },
+    { label: 'Displacement Confirmed',     met: dispValidation.valid },
+    { label: 'Draw on Liquidity',          met: !!(drawOnLiquidity && drawOnLiquidity.primary) },
   ];
   const smcPillarsMet = smcPillars.filter(p => p.met).length;
-  
+
   const confluenceQualityChecks = [
-    { met: !!trend4HAligned }, { met: inGoldenPocket || inOTEZone }, { met: !!(macd.bullCross || macd.bearCross || stochRSI.isOversold || stochRSI.isOverbought) }, { met: !!(dailyAligned || (calculateVWAP(candlesPrimary) && true)) }
+    { label: 'HTF Trend Aligned',          met: !!trend4HAligned },
+    { label: 'Golden Pocket / OTE',        met: inGoldenPocket || inOTEZone },
+    { label: 'Momentum (MACD / StochRSI)', met: !!(macd.bullCross || macd.bearCross || stochRSI.isOversold || stochRSI.isOverbought) },
+    { label: 'VWAP / Daily Bias',          met: !!(dailyAligned || (calculateVWAP(candlesPrimary) && true)) },
   ];
   const confluenceQualityMet = confluenceQualityChecks.filter(c => c.met).length;
+
 
   // 26. Signal Grade
   const signalGrade = calculateSignalGrade({
