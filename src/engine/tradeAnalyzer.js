@@ -502,7 +502,22 @@ export async function runAnalysis(allData, config = {}, regimeContext = null) {
   else if (volatilityRegime && (primaryATR ? Math.abs(candlesPrimary[candlesPrimary.length-1].close - candlesPrimary[candlesPrimary.length-1].open) / primaryATR > 4.5 : false)) rejectionReason = 'Volatility spike';
   else if (slPct > 0.05) rejectionReason = 'SL% too wide';
   else if (leverage > 75) rejectionReason = 'Leverage > 75x';
-  else if (tp1Rrr < profile.minRrr) rejectionReason = 'TP1 RRR < minimum';
+  else if (tp1Rrr < profile.minRrr) {
+    const veto = tpData?.rrrVeto;
+    if (veto && veto.vetoed) {
+      const nearest = veto.nearestTarget;
+      const best    = veto.bestAvailable;
+      const f = v => v != null ? Number(v).toFixed(ASSETS[symbol]?.decimals ?? 2) : '—';
+      let msg = `✗ TP1 RRR insufficient\n`;
+      msg += `  Entry: $${f(veto.entry)}  │  SL: $${f(veto.stopLoss)}  │  Risk: $${f(veto.risk)}\n`;
+      if (nearest) msg += `  Nearest target: $${f(nearest.level)} (${nearest.reason}) → ${nearest.rrr}R  [need ${profile.minRrr}R]\n`;
+      if (best && best !== nearest) msg += `  Best available: $${f(best.level)} (${best.reason}) → ${best.rrr}R\n`;
+      msg += `  Required: ${profile.minRrr}R minimum`;
+      rejectionReason = msg;
+    } else {
+      rejectionReason = `TP1 RRR ${tp1Rrr.toFixed(2)} < ${profile.minRrr} minimum`;
+    }
+  }
   else if (checksPct < 0.35 && signalGrade.grade !== 'A+' && signalGrade.grade !== 'A') rejectionReason = 'Confluence count < 35%';
   else if (aiConfidence < 40 && signalGrade.grade !== 'A+' && signalGrade.grade !== 'A') rejectionReason = 'AI confidence too low';
   else if (signalGrade.score < 55) rejectionReason = 'Signal grade score < 55';

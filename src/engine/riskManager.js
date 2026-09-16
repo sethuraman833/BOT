@@ -238,89 +238,159 @@ export function calculateTPs(
   volumeProfile = null
 ) {
   const risk = Math.abs(entry - stopLoss);
-  if (risk === 0) return { tps: [], tpStructure: 'none' };
+  if (risk === 0) return { tps: [], tpStructure: 'none', rrrVeto: null };
 
   const isLong = direction === 'long';
-  const candidates = [];
+  const decimals = symbol && ASSETS[symbol] ? ASSETS[symbol].decimals : 2;
+  const fmt = v => parseFloat(v.toFixed(decimals));
 
-  // Generate structural candidates from swing pools, EQH/EQL, etc.
+  // ── Build ALL structural candidates ──────────────────────────────────────
+  const allCandidates = [];
+
   if (swingPool && swingPool.length > 0) {
     swingPool.forEach(s => {
       if (isLong && s.type === 'high' && s.price > entry) {
-        candidates.push({ level: s.price * 0.9988, reason: `Swing High (${s.tfLabel || 'HTF'})` });
+        allCandidates.push({ level: fmt(s.price * 0.9988), reason: `Swing High (${s.tfLabel || 'HTF'})` });
       } else if (!isLong && s.type === 'low' && s.price < entry) {
-        candidates.push({ level: s.price * 1.0012, reason: `Swing Low (${s.tfLabel || 'HTF'})` });
+        allCandidates.push({ level: fmt(s.price * 1.0012), reason: `Swing Low (${s.tfLabel || 'HTF'})` });
       }
     });
   }
 
   if (fvgs && fvgs.length > 0) {
     fvgs.forEach(f => {
-      if (isLong && f.type === 'bearish' && f.upper > entry) {
-        candidates.push({ level: f.midpoint, reason: `Bearish FVG Midpoint` });
-      } else if (!isLong && f.type === 'bullish' && f.lower < entry) {
-        candidates.push({ level: f.midpoint, reason: `Bullish FVG Midpoint` });
+      const mid = f.midpoint || (f.upper + f.lower) / 2;
+      if (isLong && f.type === 'bearish' && mid > entry) {
+        allCandidates.push({ level: fmt(mid), reason: 'Bearish FVG Midpoint' });
+      } else if (!isLong && f.type === 'bullish' && mid < entry) {
+        allCandidates.push({ level: fmt(mid), reason: 'Bullish FVG Midpoint' });
       }
     });
   }
 
   if (volumeProfile && volumeProfile.poc) {
     if ((isLong && volumeProfile.poc > entry) || (!isLong && volumeProfile.poc < entry)) {
-      candidates.push({ level: volumeProfile.poc, reason: `Volume POC` });
+      allCandidates.push({ level: fmt(volumeProfile.poc), reason: 'Volume POC' });
     }
   }
 
-  // Desired RRR Targets: 1:3, 1:5, 1:7
-  const targetRrrs = [Math.max(3.0, minRrr), 5.0, 7.0];
-  const tps = [];
-  const scaling = getDynamicScaling(tier, session, 3);
-
-  for (let i = 0; i < targetRrrs.length; i++) {
-    const targetRrr = targetRrrs[i];
-    const exactTarget = isLong ? entry + risk * targetRrr : entry - risk * targetRrr;
-
-    let foundCand = null;
-    let minDiff = Infinity;
-
-    // Find the closest valid structural candidate near the target RRR
-    for (const cand of candidates) {
-      const rrr = calculateRRR(entry, stopLoss, cand.level, direction);
-      // Allow candidates slightly before or after the exact RRR (e.g. 2.8 to 4.2 for 3.0 target)
-      if (rrr >= targetRrr - 0.2 && rrr <= targetRrr + 1.2) {
-        const diff = Math.abs(rrr - targetRrr);
-        // Ensure no duplicate TPs too close together
-        const isTooClose = tps.some(t => Math.abs(t.level - cand.level) / cand.level < 0.003);
-        if (!isTooClose && diff < minDiff) {
-          minDiff = diff;
-          foundCand = { ...cand, rrr };
-        }
+  if (fibData && fibData.levels) {
+    const fibLvls = ['0.618', '0.705', '0.786', '1.0', '1.272', '1.618'];
+    fibLvls.forEach(key => {
+      const lvl = fibData.levels[key];
+      if (!lvl) return;
+      if ((isLong && lvl > entry) || (!isLong && lvl < entry)) {
+        allCandidates.push({ level: fmt(lvl), reason: `Fibonacci ${key}` });
       }
-    }
-
-    if (foundCand) {
-      tps.push({
-        level: foundCand.level,
-        rrr: foundCand.rrr,
-        reason: `1:${targetRrr} Structural — ${foundCand.reason}`,
-        isStructural: true,
-        closePercent: scaling[i],
-      });
-    } else {
-      tps.push({
-        level: exactTarget,
-        rrr: targetRrr,
-        reason: `1:${targetRrr} Exact Target`,
-        isStructural: false,
-        closePercent: scaling[i],
-      });
-    }
+    });
   }
+
+  // Annotate each candidate with its real RRR
+  const scoredCandidates = allCandidates
+    .map(c => ({ ...c, rrr: parseFloat((Math.abs(c.level - entry) / risk).toFixed(2)) }))
+    .filter(c => c.rrr > 0)
+    .sort((a, b) => a.rrr - b.rrr); // nearest first
+
+  // ── TP1: MUST be first structural target with RRR ≥ minRrr ───────────────
+  // Do NOT manufacture a level — it must be an independently identified structure.
+  const validForTp1 = scoredCandidates.filter(c => c.rrr >= minRrr);
+  const nearestBelow = scoredCandidates.filter(c => c.rrr < minRrr);
+
+  if (validForTp1.length === 0) {
+    // No structural target reaches minRrr — build detailed veto object
+    const bestAvailable = scoredCandidates.length > 0
+      ? scoredCandidates[scoredCandidates.length - 1]
+      : null;
+
+    return {
+      tps: [],
+      tpStructure: 'none',
+      rrrVeto: {
+        vetoed: true,
+        entry: fmt(entry),
+        stopLoss: fmt(stopLoss),
+        risk: fmt(risk),
+        requiredRrr: minRrr,
+        nearestTarget: nearestBelow.length > 0 ? nearestBelow[nearestBelow.length - 1] : null,
+        bestAvailable,
+        allCandidates: scoredCandidates,
+        message: bestAvailable
+          ? `No structural target reaches ${minRrr}R. Best available: ${bestAvailable.reason} @ ${bestAvailable.level} (${bestAvailable.rrr}R)`
+          : `No structural targets found in direction of trade`,
+      },
+    };
+  }
+
+  // TP1 = first (nearest) structural candidate ≥ minRrr
+  const tp1Candidate = validForTp1[0];
+
+  // TP2 + TP3: next candidates beyond TP1, at progressively larger RRR
+  // Target approximately 1.5× and 2× the TP1 RRR
+  const tp2Target = tp1Candidate.rrr * 1.5;
+  const tp3Target = tp1Candidate.rrr * 2.0;
+
+  const findNext = (afterRrr, targetRrr, usedLevels) => {
+    // Prefer structural candidate near targetRrr; fall back to next available beyond afterRrr
+    const unused = scoredCandidates.filter(c =>
+      c.rrr > afterRrr &&
+      !usedLevels.includes(c.level)
+    );
+    if (unused.length === 0) return null;
+
+    // Find closest to targetRrr
+    const near = unused.reduce((best, c) =>
+      Math.abs(c.rrr - targetRrr) < Math.abs(best.rrr - targetRrr) ? c : best
+    );
+    return near;
+  };
+
+  const usedLevels = [tp1Candidate.level];
+
+  const tp2Candidate = findNext(tp1Candidate.rrr, tp2Target, usedLevels);
+  if (tp2Candidate) usedLevels.push(tp2Candidate.level);
+
+  const tp3Candidate = findNext(
+    tp2Candidate ? tp2Candidate.rrr : tp1Candidate.rrr,
+    tp3Target,
+    usedLevels
+  );
+
+  // ── Build final TP array ──────────────────────────────────────────────────
+  const scaling = getDynamicScaling(tier, session, tp2Candidate ? (tp3Candidate ? 3 : 2) : 1);
+
+  const makeTP = (cand, idx, label) => ({
+    level: cand.level,
+    rrr: cand.rrr,
+    reason: `${label} Structural — ${cand.reason}`,
+    isStructural: true,
+    closePercent: scaling[idx] || 0,
+  });
+
+  // Fallback exact RRR targets for TP2/TP3 when no structural candidate found
+  const tp2Exact = fmt(isLong ? entry + risk * tp2Target : entry - risk * tp2Target);
+  const tp3Exact = fmt(isLong ? entry + risk * tp3Target : entry - risk * tp3Target);
+
+  const tps = [
+    makeTP(tp1Candidate, 0, '1:3+'),
+    tp2Candidate
+      ? makeTP(tp2Candidate, 1, '1:5+')
+      : { level: tp2Exact, rrr: parseFloat(tp2Target.toFixed(1)), reason: '1:5 Exact Target', isStructural: false, closePercent: scaling[1] || 0 },
+    tp3Candidate
+      ? makeTP(tp3Candidate, 2, '1:7+')
+      : { level: tp3Exact, rrr: parseFloat(tp3Target.toFixed(1)), reason: '1:7 Exact Target', isStructural: false, closePercent: scaling[2] || 0 },
+  ];
 
   return {
     tps,
-    tpStructure: 'progressive_3_5_7',
+    tpStructure: 'progressive_structural',
+    rrrVeto: null,
+    tp1Info: {
+      nearestBelow: nearestBelow.length > 0 ? nearestBelow[nearestBelow.length - 1] : null,
+      skippedCount: nearestBelow.length,
+    },
   };
 }
+
 
 /**
  * Calculates the price level to move the stop loss to breakeven.
