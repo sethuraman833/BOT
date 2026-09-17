@@ -424,8 +424,10 @@ export default function ChartPanel() {
           <div className="ribbon-sec">
             <span className="ribbon-label">STOP LOSS</span>
             <span className="ribbon-val mono text-red">
-              {formatPrice(analysis.stopLoss?.value, asset)} 
-              <small style={{ marginLeft: '4px', opacity: 0.8 }}>(-${analysis.projectedLoss ?? '—'})</small>
+              {formatPrice(analysis.stopLoss?.value, asset)}
+              <small style={{ marginLeft: '4px', opacity: 0.8 }}>
+                {analysis.projectedLoss != null ? `(-$${Number(analysis.projectedLoss).toFixed(2)})` : ''}
+              </small>
             </span>
           </div>
           {analysis.tpDetails?.map((tp, i) => (
@@ -433,7 +435,9 @@ export default function ChartPanel() {
               <span className="ribbon-label">{analysis.tpDetails.length === 1 ? 'TP' : `TP${i + 1}`} ({tp.closePercent}%)</span>
               <span className="ribbon-val mono text-green">
                 {formatPrice(tp.level, asset)}
-                <small style={{ marginLeft: '4px', opacity: 0.8 }}>(+${tp.projectedProfit ?? '—'})</small>
+                <small style={{ marginLeft: '4px', opacity: 0.8 }}>
+                  {tp.projectedProfit != null ? `(+$${Number(tp.projectedProfit).toFixed(2)})` : ''}
+                </small>
               </span>
             </div>
           ))}

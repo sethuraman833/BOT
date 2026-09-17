@@ -534,7 +534,19 @@ export async function runAnalysis(allData, config = {}, regimeContext = null) {
   else if (direction && Math.abs(currentPrice - entry)/currentPrice > 0.01) { decision = 'WAIT'; waitCondition = 'Entry too far from price'; }
   else decision = 'TAKE_NOW';
 
-  // 30. Return Object
+  // ── Projected P&L (rounded to 2 dp) ─────────────────────────────────────
+  const rawRisk = slData && entry && positionSize ? Math.abs(entry - slData.value) * positionSize : 0;
+  const projectedLoss = parseFloat(rawRisk.toFixed(2));
+
+  // Annotate each TP with its projected profit (positionSize × closePercent% × price move)
+  const tpDetailsWithProfit = (tpData?.tps || []).map(tp => {
+    if (!tp || !tp.level || !entry || !positionSize) return tp;
+    const priceMove   = Math.abs(tp.level - entry);
+    const closeFrac   = (tp.closePercent || 0) / 100;
+    const profit      = parseFloat((positionSize * closeFrac * priceMove).toFixed(2));
+    return { ...tp, projectedProfit: profit };
+  });
+
   return {
     decision,
     strategyMode,
@@ -542,10 +554,10 @@ export async function runAnalysis(allData, config = {}, regimeContext = null) {
     direction,
     entry,
     stopLoss: slData,
-    tpDetails: tpData?.tps || [],
+    tpDetails: tpDetailsWithProfit,
     trailingTP,
     positionSize,
-    projectedLoss: slData && entry && positionSize ? Math.abs(entry - slData.value) * positionSize : 0,
+    projectedLoss,
     leverage,
     liquidationPrice: estimateLiquidationPrice(entry, direction, leverage),
     breakevenMove: slData ? calculateBreakevenMove(entry, slData.value, symbol) : 0,
