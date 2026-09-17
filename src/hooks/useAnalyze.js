@@ -77,7 +77,7 @@ export function useAnalyze() {
       }
 
       // AI second opinion for high-quality signals
-      if (result.decision === 'TAKE_NOW' || (result.decision === 'WAIT' && result.confluenceScore?.total >= 5)) {
+      if (result.decision === 'TAKE_NOW' || (result.decision === 'WAIT' && (result.confluenceScore?.aiConfidence ?? 0) >= 60)) {
         const aiResponse = await getFrontendAiOpinion(result);
         if (aiResponse) {
           dispatch({ type: 'UPDATE_ANALYSIS_AI', payload: aiResponse });

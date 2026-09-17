@@ -541,11 +541,19 @@ export async function runAnalysis(allData, config = {}, regimeContext = null) {
   // Annotate each TP with its projected profit (positionSize × closePercent% × price move)
   const tpDetailsWithProfit = (tpData?.tps || []).map(tp => {
     if (!tp || !tp.level || !entry || !positionSize) return tp;
-    const priceMove   = Math.abs(tp.level - entry);
-    const closeFrac   = (tp.closePercent || 0) / 100;
-    const profit      = parseFloat((positionSize * closeFrac * priceMove).toFixed(2));
-    return { ...tp, projectedProfit: profit };
+    const priceMove = Math.abs(tp.level - entry);
+    const closeFrac = (tp.closePercent || 0) / 100;
+    return { ...tp, projectedProfit: parseFloat((positionSize * closeFrac * priceMove).toFixed(2)) };
   });
+
+  // ── SMC Analysis objects (used by sidebar) ─────────────────────────────
+  const bosShift   = allShifts.find(s => s.type !== 'CHOCH' && s.direction === (direction === 'long' ? 'bullish' : 'bearish'));
+  const chochShift = allShifts.find(s => s.type === 'CHOCH'  && s.direction === (direction === 'long' ? 'bullish' : 'bearish'));
+  const lastSweep  = allSweeps.length > 0 ? allSweeps[allSweeps.length - 1] : null;
+  const bestFVG    = allFVGs.find(f => direction === 'long' ? f.type === 'bullish' : f.type === 'bearish') || null;
+  const structTarget = drawOnLiquidity?.primary
+    ? { level: drawOnLiquidity.primary.level, description: drawOnLiquidity.primary.reason || 'Liquidity Draw' }
+    : (tpData?.tps?.[0] ? { level: tpData.tps[0].level, description: 'Structural TP1' } : null);
 
   return {
     decision,
@@ -597,7 +605,19 @@ export async function runAnalysis(allData, config = {}, regimeContext = null) {
     premiumDiscountZones: (htfHigh && htfLow) ? calculatePremiumDiscount(htfHigh.price, htfLow.price) : null,
     killZone,
     cmeGapData,
-    smcAnalysis: { bos: !!allShifts.find(s => !s.isChoch), choch: !!allShifts.find(s => s.isChoch), liquiditySweep: !!allSweeps.length, orderBlock: !!nearestOB, fvg: !!allFVGs.length, structuralTarget: null, tp3R: tpData?.tps?.[0]?.level || 0, tpAchievable: obstacles.length === 0, tp4R: tpData?.tps?.[0]?.level || 0, tp4RAchievable: obstacles.length === 0, obstacles, slLevel: slData?.value },
+    smcAnalysis: {
+      bos:             bosShift   ? { confirmed: true,  level: bosShift.level,   type: bosShift.direction,   tf: profile.structureKey } : { confirmed: false },
+      choch:           chochShift ? { confirmed: true,  level: chochShift.level, type: chochShift.direction, tf: profile.primaryKey  } : { confirmed: false },
+      liquiditySweep:  lastSweep  ? { confirmed: true,  level: lastSweep.level,  direction: lastSweep.direction || (direction === 'long' ? 'low' : 'high') } : { confirmed: false },
+      orderBlock:      nearestOB  ? { confirmed: true,  low: nearestOB.low,      high: nearestOB.high,  type: nearestOB.type || (direction === 'long' ? 'demand' : 'supply') } : { confirmed: false },
+      fvg:             bestFVG    ? { confirmed: true,  lower: bestFVG.lower,    upper: bestFVG.upper,   type: bestFVG.type } : { confirmed: false },
+      structuralTarget: structTarget,
+      tp3R:            tpData?.tps?.[0]?.level || 0,
+      tpAchievable:    obstacles.length === 0,
+      tp4RAchievable:  obstacles.length === 0,
+      obstacles,
+      slLevel:         slData?.value,
+    },
     marketRegime,
     indicators,
     smcPillars,

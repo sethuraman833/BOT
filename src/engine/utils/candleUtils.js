@@ -34,13 +34,14 @@ export function filterValid(candles) {
  * @param {number} thresholdMs
  * @returns {number[]}
  */
-export function detectTimeGaps(candles, thresholdMs = 12 * 3600 * 1000) {
+// NOTE: lightweight-charts candle times are Unix timestamps in SECONDS, not milliseconds.
+export function detectTimeGaps(candles, thresholdSeconds = 12 * 3600) {
   if (!candles || candles.length < 2) return [];
   const gaps = [];
   for (let i = 1; i < candles.length; i++) {
     const prevTime = candles[i - 1].time;
     const currTime = candles[i].time;
-    if (prevTime && currTime && (currTime - prevTime > thresholdMs)) {
+    if (prevTime && currTime && (currTime - prevTime > thresholdSeconds)) {
       gaps.push(i);
     }
   }

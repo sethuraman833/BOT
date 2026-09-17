@@ -71,7 +71,8 @@ export function estimateLiquidationPrice(entry, direction, leverage, mmr = 0.005
   if (direction === 'long') {
     return parseFloat((entry * (1 - 1 / leverage + mmr)).toFixed(4));
   } else {
-    return parseFloat((entry * (1 + 1 / leverage + mmr)).toFixed(4));
+    // For shorts: liq price is above entry. MMR reduces the distance → subtract it.
+    return parseFloat((entry * (1 + 1 / leverage - mmr)).toFixed(4));
   }
 }
 

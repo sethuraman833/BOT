@@ -54,10 +54,13 @@ export async function runBacktest(fullCandleData, config, options = {}) {
   const trades = [];
   
   for (let n = startIndex; n < primaryCandles.length - SWING_CONFIRMATION_DELAY; n++) {
-    // Slice ALL timeframes up to candle N (no future data)
+    // Slice ALL timeframes up to the timestamp of candle N on the primary TF.
+    // Using timestamp (not index) prevents look-ahead bias on higher TFs:
+    // e.g. index 100 on 15m ≠ index 100 on 1h — they cover different time ranges.
+    const cutoffTime = primaryCandles[n].time;
     const slicedData = {};
     for (const [tf, candles] of Object.entries(fullCandleData)) {
-      slicedData[tf] = candlesUpTo(candles, n);
+      slicedData[tf] = candles.filter(c => c.time <= cutoffTime);
     }
     
     if (slicedData[primaryTF].length < minCandlesNeeded) continue;
