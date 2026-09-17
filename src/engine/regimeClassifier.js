@@ -11,7 +11,7 @@ export function classifyRegime(inds, priceHistory) {
   const atrData = inds.atrData || { atrPercentile: 0, isExtreme: false };
   const chop = inds.chop || { chopPercentile: 0 };
   const adx = inds.adx || { adxPercentile: 0 };
-  const bb = inds.bb || { bandwidthPercentile: 0 };
+  const bb = inds.bb || inds.bbData || { bandwidthPercentile: 0 };  // regimeEngine passes as 'bbData'
   const rangeWidth = inds.rangeWidth || { rangeWidthPercentile: 0 };
   const relVol = inds.relVol || { relVolPercentile: 0 };
   const emaSlope = inds.emaSlope || { slope: 0, slopePercentile: 0, isPositive: false };
@@ -153,50 +153,84 @@ export function applyRegimePersistence(currentRegime, history, activationThresho
 export function computeMomentumScore(inds, regime, direction, session) {
   let total = 0;
   const breakdown = {
-    trend: { score: 0, max: 20 },
+    trend:      { score: 0, max: 20 },
     volatility: { score: 0, max: 20 },
-    volume: { score: 0, max: 20 },
-    location: { score: 0, max: 15 },
-    momentum: { score: 0, max: 15 },
-    session: { score: 0, max: 10 },
+    volume:     { score: 0, max: 20 },
+    location:   { score: 0, max: 15 },
+    momentum:   { score: 0, max: 15 },
+    session:    { score: 0, max: 10 },
   };
-  
-  if (inds.adx && inds.adx.adxPercentile > 60) breakdown.trend.score += 8;
-  if (inds.emaSlope && ((direction === 'long' && inds.emaSlope.isPositive) || (direction === 'short' && !inds.emaSlope.isPositive))) breakdown.trend.score += 7;
-  breakdown.trend.score += 5; // HTF mock
-  
-  if (inds.atrData && inds.atrData.atrPercentile > 50) breakdown.volatility.score += 10;
-  breakdown.volatility.score += 5; // BB mock
-  breakdown.volatility.score += 5; // Spike mock
-  
+
+  // ── TREND (20) ─────────────────────────────────────────────────────
+  if (inds.adx && inds.adx.adxPercentile > 60)  breakdown.trend.score += 8;
+  if (inds.adx && inds.adx.adxPercentile > 80)  breakdown.trend.score += 4; // bonus for strong trend
+  if (inds.emaSlope && ((direction === 'long' && inds.emaSlope.isPositive) || (direction === 'short' && !inds.emaSlope.isPositive))) {
+    breakdown.trend.score += 8;
+  }
+
+  // ── VOLATILITY (20) ────────────────────────────────────────────────
+  const atrPct = inds.atrData?.atrPercentile ?? 50;
+  // Optimal volatility: 40–75th percentile — not too quiet, not chaotic
+  if (atrPct >= 40 && atrPct <= 75) breakdown.volatility.score += 12;
+  else if (atrPct > 25 && atrPct < 90) breakdown.volatility.score += 6;
+  const bb = inds.bbData || inds.bb;
+  if (bb && bb.bandwidthPercentile > 30 && bb.bandwidthPercentile < 80) breakdown.volatility.score += 8;
+  else if (bb && bb.bandwidthPercentile > 15) breakdown.volatility.score += 4;
+
+  // ── VOLUME (20) ────────────────────────────────────────────────────
   if (inds.relVol && inds.relVol.relVolPercentile > 60) breakdown.volume.score += 8;
-  if (inds.estimatedCVD && ((direction === 'long' && inds.estimatedCVD.slope > 0) || (direction === 'short' && inds.estimatedCVD.slope < 0))) breakdown.volume.score += 7;
-  if (inds.estimatedCVD && inds.estimatedCVD.divergence.type === 'NONE') breakdown.volume.score += 5;
-  
-  breakdown.location.score += 5; // VWAP mock
-  breakdown.location.score += 5; // VAH/VAL mock
-  breakdown.location.score += 5; // clearance mock
-  
-  breakdown.momentum.score += 5; // RSI mock
-  breakdown.momentum.score += 5; // MACD mock
-  breakdown.momentum.score += 5; // no div mock
-  
-  breakdown.session.score += 5; // kill zone mock
-  breakdown.session.score += 3; // overlap mock
-  breakdown.session.score += 2; // valid mock
-  
-  total = breakdown.trend.score + breakdown.volatility.score + breakdown.volume.score + breakdown.location.score + breakdown.momentum.score + breakdown.session.score;
+  if (inds.relVol && inds.relVol.relVolPercentile > 80) breakdown.volume.score += 4; // bonus
+  const cvd = inds.estimatedCVD;
+  if (cvd && ((direction === 'long' && cvd.slope > 0) || (direction === 'short' && cvd.slope < 0))) breakdown.volume.score += 6;
+  if (cvd && cvd.divergence?.type === 'NONE') breakdown.volume.score += 2;
+
+  // ── LOCATION (15) ─────────────────────────────────────────────────
+  const vwap = inds.vwap?.vwap;
+  const vah = inds.valueArea?.vah;
+  const val = inds.valueArea?.val;
+  if (vwap && direction) {
+    // Price on correct side of VWAP
+    const aboveVwap = (inds.vwap?.currentPrice ?? 0) > vwap;
+    if ((direction === 'long' && aboveVwap) || (direction === 'short' && !aboveVwap)) breakdown.location.score += 6;
+  }
+  if (vah && val && direction) {
+    const price = inds.vwap?.currentPrice ?? 0;
+    // Long: near VAL (discount) — Short: near VAH (premium)
+    const nearVal = price < val + (vah - val) * 0.2;
+    const nearVah = price > vah - (vah - val) * 0.2;
+    if ((direction === 'long' && nearVal) || (direction === 'short' && nearVah)) breakdown.location.score += 9;
+    else if (price >= val && price <= vah) breakdown.location.score += 4; // inside value area
+  }
+
+  // ── MOMENTUM (15) ─────────────────────────────────────────────────
+  // Use EMA slope steepness as momentum proxy
+  if (inds.emaSlope) {
+    const slopePct = inds.emaSlope.slopePercentile ?? 50;
+    if (slopePct > 70) breakdown.momentum.score += 10;
+    else if (slopePct > 50) breakdown.momentum.score += 6;
+    else if (slopePct > 30) breakdown.momentum.score += 3;
+  }
+  // CVD momentum
+  if (cvd && Math.abs(cvd.momentum ?? 0) > 0.5) breakdown.momentum.score += 5;
+
+  // ── SESSION (10) ──────────────────────────────────────────────────
+  if (session) {
+    if (session.status !== 'closed') breakdown.session.score += 4;
+    // London and NY overlap is highest quality
+    const name = (session.name || '').toLowerCase();
+    if (name.includes('overlap') || name.includes('london') || name.includes('new york')) breakdown.session.score += 4;
+    else if (name.includes('asian') || name.includes('tokyo')) breakdown.session.score += 2;
+    if (session.isKillZone) breakdown.session.score += 2;
+  }
+
+  total = Object.values(breakdown).reduce((s, v) => s + v.score, 0);
   total = Math.min(100, Math.max(0, total));
-  
+
   let grade = 'SKIP';
   if (total >= 90) grade = 'A+';
   else if (total >= 80) grade = 'A';
   else if (total >= 70) grade = 'B';
   else if (total >= 60) grade = 'C';
-  
-  return {
-    total,
-    grade,
-    breakdown
-  };
+
+  return { total, grade, breakdown };
 }
