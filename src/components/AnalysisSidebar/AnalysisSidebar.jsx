@@ -55,12 +55,14 @@ function ConfluenceSection({ score, signalGrade, staggerIndex }) {
 
 function DecisionBadge({ decision, waitCondition, confidence, staggerIndex }) {
   const isTakeNow = decision === 'TAKE_NOW';
-  const isWait = decision === 'WAIT';
+  const isWait = decision === 'WAIT' || decision === 'WAIT_RETEST' || decision === 'WAIT_CONFIRMATION';
 
   const map = {
-    TAKE_NOW: { label: '⚡ TAKE TRADE NOW', color: 'var(--accent-green)' },
-    WAIT:     { label: '⏳ WAIT FOR SETUP', color: 'var(--accent-yellow)' },
-    NO_TRADE: { label: '✗ NO TRADE',        color: 'var(--accent-red)' },
+    TAKE_NOW:          { label: '⚡ TAKE TRADE NOW',    color: 'var(--accent-green)' },
+    WAIT:              { label: '⏳ WAIT FOR SETUP',    color: 'var(--accent-yellow)' },
+    WAIT_RETEST:       { label: '🔄 WAIT FOR RETEST',   color: 'var(--accent-yellow)' },
+    WAIT_CONFIRMATION: { label: '⏳ WAIT CONFIRMATION', color: 'var(--accent-yellow)' },
+    NO_TRADE:          { label: '✗ NO TRADE',           color: 'var(--accent-red)' },
   };
   const cfg = map[decision] || { label: decision, color: 'var(--text-secondary)' };
 

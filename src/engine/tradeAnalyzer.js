@@ -67,6 +67,33 @@ const PROFILES = {
   '1d': { primaryKey: '1d', structureKey: '1w', biasKey: '1w', riskAmount: 10, minRrr: 3.0, isScalping: false, label: 'Trend', modeColor: '#ff3f5e' },
 };
 
+// ─── REJECTION BUILDER ───────────────────────────────────────────────────────
+
+/**
+ * Builds a uniform NO_TRADE rejection result when execution cannot proceed.
+ */
+function buildRejection(decision, rejectionReason, steps, profile) {
+  return {
+    decision,
+    rejectionReason,
+    direction: null,
+    entry: null,
+    stopLoss: null,
+    tpDetails: [],
+    confluenceScore: { total: 0, max: 10, checks: [], aiConfidence: 0, aiGrade: 'LOW', tier: 'REJECT' },
+    analysisSteps: [...steps, rejectionReason],
+    analysisMode: profile?.label || 'Standard',
+    primaryTimeframe: profile?.primaryKey || '15m',
+    regimeContext: null,
+    marketRegime: null,
+    indicators: null,
+    smcPillars: [],
+    smcPillarsMet: 0,
+    confluenceQuality: [],
+    confluenceQualityMet: 0,
+  };
+}
+
 // ─── MAIN EXPORT ─────────────────────────────────────────────────────────────
 
 /**
@@ -419,10 +446,6 @@ export async function runAnalysis(allData, config = {}, regimeContext = null) {
     { label: 'Equal High/Low Liquidity Pool', met: !!(direction && ((direction === 'long' && equalHighsLows.eqh.length > 0) || (direction === 'short' && equalHighsLows.eql.length > 0))), weight: 1.0 }
   ];
 
-  const preTotalWeight = checks.reduce((s, c) => s + c.weight, 0);
-  const preScoredWeight = checks.reduce((s, c) => s + (c.met ? c.weight : 0), 0);
-  const aiConfidence = Math.round(Math.sqrt(preScoredWeight / preTotalWeight) * 100);
-
   // 24. TP Calculation
   let tpData = null;
   let trailingTP = null;
@@ -455,6 +478,10 @@ export async function runAnalysis(allData, config = {}, regimeContext = null) {
   }
 
   checks.push({ label: 'RRR >= 1:3 Structural', met: tp1Rrr >= profile.minRrr, weight: 1.5 });
+
+  const preTotalWeight = checks.reduce((s, c) => s + c.weight, 0);
+  const preScoredWeight = checks.reduce((s, c) => s + (c.met ? c.weight : 0), 0);
+  const aiConfidence = Math.round(Math.sqrt(preScoredWeight / preTotalWeight) * 100);
 
   // 23. PAKA Rules
   const smcPillars = [

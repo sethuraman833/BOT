@@ -91,7 +91,7 @@ export function useAnalyze() {
     } finally {
       dispatch({ type: 'SET_ANALYZING', payload: false });
     }
-  }, [asset, timeframe, backtestMode, backtestTime, loadAllTimeframes, dispatch]);
+  }, [asset, timeframe, backtestMode, backtestTime, engineMode, loadAllTimeframes, dispatch]);
 
   return {
     handleAnalyze,

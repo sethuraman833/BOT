@@ -368,7 +368,7 @@ export function calculateRelativeVolume(candles, period = 20) {
  */
 export function calculateSessionVWAP(candles) {
   if (!candles || candles.length === 0) {
-    return { vwap: 0, isAbove: false, isBelow: false };
+    return { vwap: 0, currentPrice: 0, isAbove: false, isBelow: false };
   }
   
   const gaps = detectTimeGaps(candles);
@@ -386,11 +386,12 @@ export function calculateSessionVWAP(candles) {
     cumV += vol;
   }
   
-  const vwap = cumV === 0 ? candles[candles.length - 1].close : cumVP / cumV;
   const currentPrice = candles[candles.length - 1].close;
+  const vwap = cumV === 0 ? currentPrice : cumVP / cumV;
   
   return {
     vwap,
+    currentPrice,
     isAbove: currentPrice > vwap,
     isBelow: currentPrice < vwap
   };

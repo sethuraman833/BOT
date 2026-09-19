@@ -95,7 +95,9 @@ export default function TradeBox({ analysis }) {
       <div className="trade-box-header animate-fade-in-up" style={{animationDelay: '60ms'}}>
         <div className="tb-header-left">
           <div className="tb-title">Signal · {String(analysisMode || primaryTimeframe || '—')}</div>
-          <div className="tb-subtitle">{String(symbol || '—')} · {String(session?.name || '—')}</div>
+          <div className="tb-subtitle">
+            {String(symbol || '—')} · {String(typeof session === 'object' ? (session?.name || '—') : (session || '—'))}
+          </div>
         </div>
         <div className={`tb-dir-badge ${isLong ? 'long' : 'short'}`}>
           {isLong ? '▲ LONG' : '▼ SHORT'}

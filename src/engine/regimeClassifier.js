@@ -188,18 +188,18 @@ export function computeMomentumScore(inds, regime, direction, session) {
   const vwap = inds.vwap?.vwap;
   const vah = inds.valueArea?.vah;
   const val = inds.valueArea?.val;
+  const currentPrice = inds.vwap?.currentPrice ?? (inds.valueArea?.poc ?? 0);
   if (vwap && direction) {
     // Price on correct side of VWAP
-    const aboveVwap = (inds.vwap?.currentPrice ?? 0) > vwap;
-    if ((direction === 'long' && aboveVwap) || (direction === 'short' && !aboveVwap)) breakdown.location.score += 6;
+    const isAbove = inds.vwap?.isAbove ?? (currentPrice > vwap);
+    if ((direction === 'long' && isAbove) || (direction === 'short' && !isAbove)) breakdown.location.score += 6;
   }
-  if (vah && val && direction) {
-    const price = inds.vwap?.currentPrice ?? 0;
+  if (vah && val && direction && currentPrice > 0) {
     // Long: near VAL (discount) — Short: near VAH (premium)
-    const nearVal = price < val + (vah - val) * 0.2;
-    const nearVah = price > vah - (vah - val) * 0.2;
+    const nearVal = currentPrice < val + (vah - val) * 0.2;
+    const nearVah = currentPrice > vah - (vah - val) * 0.2;
     if ((direction === 'long' && nearVal) || (direction === 'short' && nearVah)) breakdown.location.score += 9;
-    else if (price >= val && price <= vah) breakdown.location.score += 4; // inside value area
+    else if (currentPrice >= val && currentPrice <= vah) breakdown.location.score += 4; // inside value area
   }
 
   // ── MOMENTUM (15) ─────────────────────────────────────────────────
