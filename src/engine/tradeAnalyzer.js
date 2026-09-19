@@ -473,7 +473,16 @@ export async function runAnalysis(allData, config = {}, regimeContext = null) {
       const tp1Dist = Math.abs(tpData.tps[0].level - entry);
       const actPrice = direction === 'long' ? entry + tp1Dist * 0.75 : entry - tp1Dist * 0.75;
       const trailAmt = primaryATR ? primaryATR * 1.5 : tp1Dist * 0.25;
-      trailingTP = { activationPrice: actPrice, trailingAmount: trailAmt, callbackRate: (trailAmt / actPrice) * 100 };
+      const lockedExitPrice = direction === 'long' ? actPrice - trailAmt : actPrice + trailAmt;
+      const minProfitDist = direction === 'long' ? lockedExitPrice - entry : entry - lockedExitPrice;
+      const minProfitIfTrailed = parseFloat(Math.max(0, minProfitDist * (positionSize || 0)).toFixed(2));
+      const callbackRate = parseFloat(((trailAmt / actPrice) * 100).toFixed(2));
+      trailingTP = {
+        activationPrice: actPrice,
+        trailingAmount: trailAmt,
+        callbackRate,
+        minProfitIfTrailed,
+      };
     }
   }
 

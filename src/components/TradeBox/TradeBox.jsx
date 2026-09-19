@@ -178,10 +178,10 @@ export default function TradeBox({ analysis }) {
           <ol className="ttp-steps">
             <li>Activation Price: <strong>{formatPrice(analysis.trailingTP.activationPrice, symbol)}</strong> <CopyBtn value={analysis.trailingTP.activationPrice} /></li>
             <li>Trail Amount: <strong>${analysis.trailingTP.trailingAmount?.toFixed(ASSETS[symbol]?.decimals ?? 2)}</strong> <CopyBtn value={analysis.trailingTP.trailingAmount} /></li>
-            <li>Callback Rate: <strong>{analysis.trailingTP.callbackRate}%</strong> <CopyBtn value={analysis.trailingTP.callbackRate} /></li>
+            <li>Callback Rate: <strong>{Number(analysis.trailingTP.callbackRate || 0).toFixed(2)}%</strong> <CopyBtn value={Number(analysis.trailingTP.callbackRate || 0).toFixed(2)} /></li>
           </ol>
           <div className="ttp-min-profit">
-            Min Locked Profit: <span className="text-green">+${analysis.trailingTP.minProfitIfTrailed}</span>
+            Min Locked Profit: <span className="text-green">+${Number(analysis.trailingTP.minProfitIfTrailed || 0).toFixed(2)}</span>
           </div>
         </div>
       )}
@@ -206,7 +206,11 @@ export default function TradeBox({ analysis }) {
           </div>
           <div className="mgmt-step">
             <div className="mgmt-num text-blue">2</div>
-            <div className="mgmt-text">Take 100% Profit at Target (1:3 RRR).</div>
+            <div className="mgmt-text">
+              {tpDetails && tpDetails.length > 1
+                ? 'Scale out across progressive targets (TP1, TP2, TP3).'
+                : 'Take 100% Profit at Target (1:3 RRR).'}
+            </div>
           </div>
           <div className="mgmt-step">
             <div className="mgmt-num text-purple">3</div>
